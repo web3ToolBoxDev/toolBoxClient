@@ -1,0 +1,95 @@
+
+$more_img: url('~@/assets/imgs/more.png');
+@font-face {
+    font-family: 'Spartan-Bold';
+    src: url("~@/assets/fonts/spartan_mb/SpartanMB-Bold.otf");
+}
+.btn-connect{
+    border-radius: 24px !important;
+    background: rgba(255,255,255,0.12) !important;
+    width: 181px !important;
+    height: 48px !important;
+    color: rgba(255, 255, 255, 0.5) !important;
+    font-size: 16px !important;
+    border: none !important;
+    // 覆盖 Bootstrap 默认的按钮悬停样式
+    &:hover {
+        background: rgba(255, 255, 255, 0.2) !important; // 示例修改为一个稍亮的背景颜色
+        // 添加其他所需的样式
+        color: rgb(255,255,255) !important
+    }
+}
+.navbar-my{
+    background-color: #190F34;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+    height: 100px;
+
+}
+
+.navbar-brand-my{
+    font-family: 'Spartan-Bold', sans-serif;
+    font-size: 50px !important;
+    color: rgba(255, 255, 255, 0.5) !important;
+    &:hover {
+        color: rgba(255, 255, 255, 1) !important;
+    }
+}
+
+.btn-more{
+    position: relative;
+    border-radius: 24px !important;
+    background-image: $more_img;
+    background-repeat: no-repeat;
+    background-position: center;
+    border: none !important;
+    background-color: rgba(255, 255, 255, 0.12) !important;
+    width: 80px;
+    height: 48px;
+    // 覆盖 Bootstrap 默认的按钮悬停样式
+    &:hover {
+        background-image: $more_img;
+        background-repeat: no-repeat;
+        background-position: center;
+        border: none !important;
+        background-color: rgba(255, 255, 255, 0.2) !important;
+    }
+}
+.offcanvas-bg{
+    background-color: #201D32 !important;
+    .offcanvas-header {
+        // Your existing styles for the Offcanvas header
+        color: rgba(255, 255, 255,0.5) !important;
+        font-family: 'Spartan-Bold', sans-serif !important;
+        .offcanvas-title{
+            &:hover{
+                color: rgba(255, 255, 255,1) !important;
+                cursor:default;
+            }
+        }
+      }
+    
+}
+.language-switcher {
+    display: flex;
+    gap: 10px;
+  
+    button {
+      background-color: #007bff;
+      color: #fff;
+      border: none;
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+  
+      &:hover {
+        background-color: #0056b3;
+      }
+    }
+  
+    .language-option {
+      padding-left: 20px;
+    }
+  }
+  
+  
+

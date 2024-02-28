@@ -1,0 +1,89 @@
+{
+  "name": "web3toolbox",
+  "author": "Aming",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron.js",
+  "license": "MIT",
+  "homepage": ".",
+  "build": {
+    "appId": "com.example.myapp",
+    "productName": "My Electron App",
+    "extends": null,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "client/build/**/*",
+      "node_modules/**/*",
+      "client/public/**/*",
+      "electron.js",
+      "server/**/*",
+      "resources/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "./assets",
+        "to": "./assets"
+      }
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    }
+  },
+  "dependencies": {
+    "@testing-library/jest-dom": "^5.14.1",
+    "@testing-library/react": "^13.0.0",
+    "@testing-library/user-event": "^13.2.1",
+    "bootstrap": "^5.3.3",
+    "nedb": "^1.8.0",
+    "react": "^18.2.0",
+    "react-app-rewired": "^2.2.1",
+    "react-bootstrap": "^2.10.1",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.22.1",
+    "react-scripts": "5.0.1",
+    "sass": "^1.71.1",
+    "sass-loader": "^14.1.1",
+    "web-vitals": "^2.1.0"
+  },
+  "scripts": {
+    "electron": "electron .",
+    "dist": "electron-builder",
+    "start": "react-app-rewired start",
+    "build": "react-app-rewired build --port 30001",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "pack": "electron-builder --dir"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "axios": "^1.6.7",
+    "cors": "^2.8.5",
+    "customize-cra": "^1.0.0",
+    "electron": "^29.0.1",
+    "electron-builder": "^24.12.0",
+    "electron-is-dev": "^3.0.1",
+    "react-scripts": "^2.2.1"
+  },
+  "proxy": "http://localhost:30001"
+}

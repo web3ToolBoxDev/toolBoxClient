@@ -1,0 +1,64 @@
+{
+   "author": "https://metamask.io",
+   "background": {
+      "page": "background.html",
+      "persistent": true
+   },
+   "browser_action": {
+      "default_icon": {
+         "128": "images/icon-128.png",
+         "16": "images/icon-16.png",
+         "19": "images/icon-19.png",
+         "32": "images/icon-32.png",
+         "38": "images/icon-38.png",
+         "512": "images/icon-512.png",
+         "64": "images/icon-64.png"
+      },
+      "default_popup": "popup.html",
+      "default_title": "MetaMask"
+   },
+   "commands": {
+      "_execute_browser_action": {
+         "suggested_key": {
+            "chromeos": "Alt+Shift+M",
+            "linux": "Alt+Shift+M",
+            "mac": "Alt+Shift+M",
+            "windows": "Alt+Shift+M"
+         }
+      }
+   },
+   "content_scripts": [ {
+      "all_frames": true,
+      "js": [ "disable-console.js", "globalthis.js", "lockdown-install.js", "lockdown-run.js", "lockdown-more.js", "contentscript.js" ],
+      "matches": [ "file://*/*", "http://*/*", "https://*/*" ],
+      "run_at": "document_start"
+   }, {
+      "js": [ "vendor/trezor/content-script.js" ],
+      "matches": [ "*://connect.trezor.io/*/popup.html" ]
+   } ],
+   "content_security_policy": "frame-ancestors 'none'",
+   "default_locale": "en",
+   "description": "__MSG_appDescription__",
+   "externally_connectable": {
+      "ids": [ "*" ],
+      "matches": [ "https://metamask.io/*" ]
+   },
+   "icons": {
+      "128": "images/icon-128.png",
+      "16": "images/icon-16.png",
+      "19": "images/icon-19.png",
+      "32": "images/icon-32.png",
+      "38": "images/icon-38.png",
+      "48": "images/icon-48.png",
+      "512": "images/icon-512.png",
+      "64": "images/icon-64.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlcgI4VVL4JUvo6hlSgeCZp9mGltZrzFvc2Asqzb1dDGO9baoYOe+QRoh27/YyVXugxni480Q/R147INhBOyQZVMhZOD5pFMVutia9MHMaZhgRXzrK3BHtNSkKLL1c5mhutQNwiLqLtFkMSGvka91LoMEC8WTI0wi4tACnJ5FyFZQYzvtqy5sXo3VS3gzfOBluLKi7BxYcaUJjNrhOIxl1xL2qgK5lDrDOLKcbaurDiwqofVtAFOL5sM3uJ6D8nOO9tG+T7hoobRFN+nxk43PHgCv4poicOv+NMZQEk3da1m/xfuzXV88NcE/YRbRLwAS82m3gsJZKc6mLqm4wZHzBwIDAQAB",
+   "manifest_version": 2,
+   "minimum_chrome_version": "66",
+   "name": "__MSG_appName__",
+   "permissions": [ "storage", "unlimitedStorage", "clipboardWrite", "http://localhost:8545/", "https://*.infura.io/", "https://chainid.network/chains.json", "https://lattice.gridplus.io/*", "activeTab", "webRequest", "*://*.eth/", "notifications" ],
+   "short_name": "__MSG_appName__",
+   "update_url": "https://clients2.google.com/service/update2/crx",
+   "version": "10.22.2"
+}
