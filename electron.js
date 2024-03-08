@@ -1,44 +1,50 @@
-const { app, BrowserWindow,utilityProcess } = require('electron');
+const { app, BrowserWindow, utilityProcess, ipcMain, dialog } = require('electron');
 const path = require('path');
-const fs = require('fs');
-const os = require('os');
+const shell = require('electron').shell;
+const config = require('./config').getInstance();
+const isBuild = config.getIsBuild();
+
+console.log('isBuild:', isBuild);
 
 
-function writeToLog(message) {
-  const logDirectory = path.join(os.homedir(), 'my-electron-app-logs');
-  const logFilePath = path.join(logDirectory, 'app.log');
-  console.log('logFilePath', logFilePath);
-  
-  // 检查日志目录是否存在，如果不存在 则创建它
-  if (!fs.existsSync(logDirectory)) {
-    fs.mkdirSync(logDirectory);
+async function handleFileOpen() {
+  const { canceled, filePaths } = await dialog.showOpenDialog()
+  if (!canceled) {
+    return filePaths[0]
   }
-
-  // 写入日志消息到日志文件
-  fs.appendFileSync(logFilePath, `${new Date().toISOString()} - ${message}\n`);
+}
+async function chooseDirectory() {
+  const { canceled, filePaths } = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+  if (!canceled) {
+    return filePaths[0]
+  }
+}
+async function openLink(url) {
+  await shell.openExternal(url);
 }
 
 
-// 在这里设置 isDev 变量表示是否处于开发模式
-const isDev = false;
-console.log('isDev', isDev);
+
 
 let mainWindow = null;
 let backendProcess = null;
 
 function createWindow() {
+  app.setName('Web3toolbox')
   mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
+    icon: path.join(__dirname, './client/public/favicon.ico'),
     webPreferences: {
       nodeIntegration: true,
-      webSecurity: true // 禁用跨域限制
+      webSecurity: false, // 禁用跨域限制
+      preload: path.join(__dirname, 'preload.js')
     },
   });
   console.log(`file://${path.join(__dirname, './client/build/index.html')}`);
-  const startURL = isDev
-    ? 'http://localhost:3000'
-    : `file://${path.join(__dirname, './client/build/index.html')}`;
+  const startURL = isBuild
+    ? `file://${path.join(__dirname, './client/build/index.html')}`
+    : 'http://localhost:3000';
 
   mainWindow.loadURL(startURL);
 
@@ -54,16 +60,18 @@ function createWindow() {
 
 // 创建后台服务进程
 function createBackendProcess() {
-  backendProcess = utilityProcess.fork(path.join(__dirname, './server/server.js'));
-
-  backendProcess.on('message', (message) => {
-    writeToLog(`收到后台服务消息: ${message}`);
-  });
+  backendProcess = utilityProcess.fork(path.join(__dirname, 
+    './server/server.js'));
+  // backendProcess.stdout.on('data', (data) => {
+  //   console.log(`Received chunk ${data}`)
+  // })
 
 }
 
-app.on('ready', () => {
-  writeToLog('应用程序已启动');
+app.whenReady().then(() => {
+  ipcMain.handle('dialog:openFile', handleFileOpen)
+  ipcMain.handle('dialog:chooseDirectory', chooseDirectory)
+  ipcMain.handle('dialog:openLink', (event, url) => openLink(url))
   if (mainWindow === null) {
     createWindow();
     // createBackendProcess();
@@ -71,34 +79,38 @@ app.on('ready', () => {
   if (backendProcess === null) {
     createBackendProcess();
   }
-});
+  app.on('activate', function () {
+    if (mainWindow === null) {
+      console.log('重新创建窗口');
+      createWindow();
+      // createBackendProcess();
+    } else {
+      mainWindow.show();
+    }
+    if (backendProcess === null) {
+      createBackendProcess();
+    }
+  });
+  // 在应用程序关闭之前终止后台服务子进程
+  app.on('before-quit', () => {
+    if (backendProcess) {
+      backendProcess.kill();
+      backendProcess = null;
+    }
+  });
+  app.on('window-all-closed', () => {
+    console.log('所有窗口已关闭');
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+  });
+})
 
-app.on('window-all-closed', () => {
-  writeToLog('所有窗口已关闭');
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
 
-app.on('activate', () => {
-  if (mainWindow === null) {
-    writeToLog('激活窗口');
-    createWindow();
-    // createBackendProcess();
-  }else{
-    mainWindow.show();
-  }
-  if (backendProcess === null) {
-    createBackendProcess();
-  }
-});
 
-// 在应用程序关闭之前终止后台服务子进程
-app.on('before-quit', () => {
-  writeToLog('应用程序即将退出');
-  if (backendProcess) {
-    backendProcess.kill();
-    backendProcess = null;
-  }
-});
+
+
+
+
+
 module.exports = app;

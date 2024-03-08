@@ -1,0 +1,24 @@
+/* Inside your CSS file or style block */
+.text-wrap {
+    max-width: 100%;
+    word-wrap: break-word;
+  }
+.overflow-text {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    white-space: normal; /* 修改此处 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    &:hover::after {
+      content: attr(data-content);
+      position: fixed;
+      background-color: black;
+      color: white;
+      border: 1px solid #ccc;
+      max-width: 600px !important;
+      white-space: normal;
+      word-wrap: break-word;
+    }
+}
+

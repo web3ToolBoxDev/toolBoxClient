@@ -8,7 +8,7 @@
   "homepage": ".",
   "build": {
     "appId": "com.example.myapp",
-    "productName": "My Electron App",
+    "productName": "web3toolbox",
     "extends": null,
     "directories": {
       "output": "dist"
@@ -18,9 +18,11 @@
       "node_modules/**/*",
       "client/public/**/*",
       "electron.js",
+      "preload.js",
       "server/**/*",
       "resources/**/*",
-      "package.json"
+      "package.json",
+      "config.js"
     ],
     "extraResources": [
       {
@@ -30,7 +32,8 @@
     ],
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "icon": "client/build/logo_512x512.png"
     }
   },
   "dependencies": {
@@ -38,6 +41,12 @@
     "@testing-library/react": "^13.0.0",
     "@testing-library/user-event": "^13.2.1",
     "bootstrap": "^5.3.3",
+    "cors": "^2.8.5",
+    "date-and-time": "^3.1.1",
+    "ethers": "^6.11.1",
+    "events": "^3.3.0",
+    "exceljs": "^4.4.0",
+    "express-ws": "^5.0.2",
     "nedb": "^1.8.0",
     "react": "^18.2.0",
     "react-app-rewired": "^2.2.1",
@@ -47,10 +56,11 @@
     "react-scripts": "5.0.1",
     "sass": "^1.71.1",
     "sass-loader": "^14.1.1",
+    "socket.io-client": "^4.7.4",
     "web-vitals": "^2.1.0"
   },
   "scripts": {
-    "electron": "electron .",
+    "dev": "electron .",
     "dist": "electron-builder",
     "start": "react-app-rewired start",
     "build": "react-app-rewired build --port 30001",
@@ -78,8 +88,9 @@
   },
   "devDependencies": {
     "axios": "^1.6.7",
-    "cors": "^2.8.5",
+    "concurrently": "^8.2.2",
     "customize-cra": "^1.0.0",
+    "dotenv": "^16.4.5",
     "electron": "^29.0.1",
     "electron-builder": "^24.12.0",
     "electron-is-dev": "^3.0.1",

@@ -7,14 +7,14 @@ const path = require('path');
 const findChrome = require('carlo/lib/find_chrome');
 
 
-let userDataJson = fs.readFileSync(path.resolve(__dirname, './initData.json'), 'utf-8');
+let userDataJson = fs.readFileSync(path.resolve(__dirname, '../initData.json'), 'utf-8');
 let user = JSON.parse(userDataJson.toString());
 let userPrint = JSON.parse(user['fingerPrint']);
 
 puppeteer.use(lanPlugin({ languages: userPrint.lan.split(',') }));
 puppeteer.use(userAgentPlugin({ userAgent: userPrint.userAgent }));
 puppeteer.use(webglPlugin({ vendor: userPrint.webglVendor, renderer: userPrint.webglRenderer }));
-let metamaskEx = path.resolve(__dirname, './nkbihfbeogaeaoehlefnkodbefgpgknn/10.22.2_0');
+let metamaskEx = path.resolve(__dirname, '../nkbihfbeogaeaoehlefnkodbefgpgknn/10.22.2_0');
 let argArr = [
     '--disable-blink-features=AutomationControlled',
     '--no-sandbox',
