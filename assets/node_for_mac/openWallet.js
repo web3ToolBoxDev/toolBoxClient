@@ -41,7 +41,7 @@ function sendTaskLog(log) {
     if (ws.readyState === webSocket.OPEN) {
         const taskLogMessage = JSON.stringify({
             type: 'task_log',
-            log: log
+            message: log
         });
         ws.send(taskLogMessage);
     }

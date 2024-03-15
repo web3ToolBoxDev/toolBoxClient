@@ -179,8 +179,8 @@ class TaskService {
                 this.webSocketService.sendToFront(this.taskLogMessage(`任务:${taskName}开始执行`));
                 break;}
             case 'task_log':{
-                console.log('task_log:', data.log);
-                this.webSocketService.sendToFront(this.taskLogMessage(data.log));
+                console.log('task_log:', data.message);
+                this.webSocketService.sendToFront(this.taskLogMessage(data.message));
                 break;}
             case 'terminate_process':{
                 this.webSocketService.sendToFront(this.taskLogMessage(`任务:${taskName}被终止`));
