@@ -34,6 +34,18 @@
       "target": "dmg",
       "category": "public.app-category.developer-tools",
       "icon": "client/build/logo_512x512.png"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "ia32"
+          ]
+        }
+      ],
+      "icon": "client/build/logo_512x512.png"
     }
   },
   "dependencies": {
@@ -46,6 +58,7 @@
     "ethers": "^6.11.1",
     "events": "^3.3.0",
     "exceljs": "^4.4.0",
+    "express": "^4.18.3",
     "express-ws": "^5.0.2",
     "nedb": "^1.8.0",
     "react": "^18.2.0",
@@ -53,7 +66,6 @@
     "react-bootstrap": "^2.10.1",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.1",
-    "react-scripts": "5.0.1",
     "sass": "^1.71.1",
     "sass-loader": "^14.1.1",
     "socket.io-client": "^4.7.4",
@@ -93,8 +105,7 @@
     "dotenv": "^16.4.5",
     "electron": "^29.0.1",
     "electron-builder": "^24.12.0",
-    "electron-is-dev": "^3.0.1",
-    "react-scripts": "^2.2.1"
+    "electron-is-dev": "^3.0.1"
   },
   "proxy": "http://localhost:30001"
 }

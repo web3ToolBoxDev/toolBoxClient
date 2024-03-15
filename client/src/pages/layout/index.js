@@ -5,7 +5,7 @@ import TaskOffcanvas from '../../components/taskOffcanvas';
 
 
 const menuItems = [
-  { name: '工具箱介绍', link: '/' },
+  { name: '工具箱介绍', link: '#/' },
   { name: '钱包管理', link: '#/walletManage' },
   { name: '任务管理', link: '#/taskManage' },
   { name: '待开发', link: '#' },

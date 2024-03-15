@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "carlo": "^0.9.46",
+    "ethers": "^5.7.2",
+    "path": "^0.12.7",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

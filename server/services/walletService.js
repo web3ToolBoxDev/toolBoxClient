@@ -13,7 +13,7 @@ const isBuild = config.getIsBuild();
 
 console.log('wallet isBuild:', isBuild)
 
-const assetsPath = isBuild ? path.resolve(__dirname, '../../../assets') : path.resolve(__dirname, '../../assets');
+const assetsPath = config.getAssetsPath();
 
 
 // 新增一个钱包管理的表

@@ -9,7 +9,7 @@ const isBuild = config.getIsBuild();
 const fs = require('fs');
 console.log('task isBuild:',isBuild);
 
-const assetsPath = isBuild ? path.resolve(__dirname, '../../../assets') : path.resolve(__dirname, '../../assets');
+const assetsPath = config.getAssetsPath();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const taskDb = new Datastore({
     filename: path.join(assetsPath, '/db/task.db'),
@@ -26,9 +26,9 @@ class TaskService {
             this.heartBeatTimeoutId = {};
             this.lastHeartBeatTime = {};
             this.isCompleted = {};
-            this.defaultExecPath = path.join(assetsPath, '/node_for_mac/node-v21.6.2-mac/bin/node');
-            this.initTaskScriptPath = path.join(assetsPath, '/node_for_mac/initWallet.js');
-            this.openWalletScriptPath = path.join(assetsPath, '/node_for_mac/openWallet.js');
+            this.defaultExecPath = config.getDefaultExecPath();
+            this.initTaskScriptPath = config.getInitTaskScriptPath();
+            this.openWalletScriptPath = config.getOpenWalletScriptPath();
         }
         return TaskService.instance;
     }
