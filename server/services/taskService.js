@@ -272,6 +272,7 @@ class TaskService {
     async openWallet(wallet){
         let taskName = `openWallet_${wallet.address}`;
         this.runTask(taskName,wallet,this.defaultExecPath,this.openWalletScriptPath);
+        await this.checkCompleted(taskName);
     }
     async getConfigInfo(taskName){
         const task = await this.getTaskByName(taskName);
