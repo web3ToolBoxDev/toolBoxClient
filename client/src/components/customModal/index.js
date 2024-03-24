@@ -50,7 +50,7 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
                                     />
                                 )}
                                 {item.type === 'button' && (
-                                    <Button style ={item.style} onClick={item.click}>{item.text}</Button>
+                                    <Button className='ms-1' style ={item.style} onClick={item.click}>{item.text}</Button>
                                 )}
                             </Col>
                         ))}

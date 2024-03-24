@@ -1,8 +1,10 @@
+import APIManager from "./api";
 class WebSocketManager {
     static instance;
     constructor() {
       if (!WebSocketManager.instance) {
         WebSocketManager.instance = this;
+        this.apiManager = new APIManager();
       }
       return WebSocketManager.instance;
     }
@@ -14,8 +16,23 @@ class WebSocketManager {
       return WebSocketManager.instance;
     }
     
-    connect(messageCallback,closeCallback){ 
-        this.wss = new WebSocket('ws://localhost:30001/ws');
+    async connect(messageCallback,closeCallback,try_cnt = 0){ 
+        try{
+          this.wss = new WebSocket('ws://localhost:30001/ws');
+        }catch(e){
+          if(try_cnt > 5){
+            console.log('WebSocket连接失败',e);
+            return;
+          }else{
+            await this.apiManager.checkWebSocket();
+            console.log('WebSocket连接失败，尝试重新连接...');
+
+            setTimeout(()=>{
+              this.connect(messageCallback,closeCallback,try_cnt+1);
+            },1000);
+          
+          }
+        }
         this.messageQueue = []; // 存储消息的队列
         this.wss.onopen = () => {
           console.log('connected');

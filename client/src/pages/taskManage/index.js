@@ -127,6 +127,7 @@ const TaskManage = () => {
           if (res) {
             alert('任务启动成功');
             setChooseWalletModalProp({ show: false });
+            window.location.reload();
           }
         })
       }

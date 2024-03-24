@@ -11,14 +11,18 @@ class Config {
                 this.platform = "win32";
                 this.assetsPath = this.isBuild ? path.resolve(__dirname, '../assets') : path.resolve(__dirname, './assets');
                 this.defaultExecPath = path.join(this.assetsPath, '/node_for_win/node-v21.6.2-win/node.exe');
-                this.initTaskScriptPath = path.join(this.assetsPath, '/node_for_win/initWallet.js');
-                this.openWalletScriptPath = path.join(this.assetsPath, '/node_for_win/openWallet.js');
+                this.initWalletScriptPath = path.join(this.assetsPath, '/scripts/initWallet.js');
+                this.initTwitterScriptPath = path.join(this.assetsPath, '/scripts/initTwitter.js');
+                this.initDiscordScriptPath = path.join(this.assetsPath, '/scripts/initDiscord.js');
+                this.openWalletScriptPath = path.join(this.assetsPath, '/scripts/openWallet.js');
             } else if (process.platform === "darwin") {
                 this.platform = "darwin";
                 this.assetsPath = this.isBuild ? path.resolve(__dirname, '../assets') : path.resolve(__dirname, './assets');
                 this.defaultExecPath = path.join(this.assetsPath, '/node_for_mac/node-v21.6.2-mac/bin/node');
-                this.initTaskScriptPath = path.join(this.assetsPath, '/node_for_mac/initWallet.js');
-                this.openWalletScriptPath = path.join(this.assetsPath, '/node_for_mac/openWallet.js');
+                this.initWalletScriptPath = path.join(this.assetsPath, '/scripts/initWallet.js');
+                this.initTwitterScriptPath = path.join(this.assetsPath, '/scripts/initTwitter.js');
+                this.initDiscordScriptPath = path.join(this.assetsPath, '/scripts/initDiscord.js');
+                this.openWalletScriptPath = path.join(this.assetsPath, '/scripts/openWallet.js');
             } else {
                 console.log("当前平台不是 Windows 也不是 macOS");
             }
@@ -45,8 +49,14 @@ class Config {
     getDefaultExecPath() {
         return this.defaultExecPath;
     }
-    getInitTaskScriptPath() {
-        return this.initTaskScriptPath;
+    getInitWalletScriptPath() {
+        return this.initWalletScriptPath;
+    }
+    getInitTwitterScriptPath() {
+        return this.initTwitterScriptPath;
+    }
+    getInitDiscordScriptPath() {
+        return this.initDiscordScriptPath;
     }
     getOpenWalletScriptPath() {
         return this.openWalletScriptPath;

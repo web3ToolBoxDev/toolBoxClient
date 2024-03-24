@@ -83,6 +83,14 @@ class APIManager {
         const res = await axios.get(`${this.baseUrl}/getSavePath`);
         return res.data;
     }
+    async initTwitters(addresses) {
+        const res = await axios.post(`${this.baseUrl}/initTwitter`, { addresses: addresses });
+        return res.data;
+    }
+    async checkWebSocket(){
+        const res = await axios.get(`${this.baseUrl}/checkWebSocket`);
+        return res.data;
+    }
 
 }
 export default APIManager;

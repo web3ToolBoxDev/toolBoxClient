@@ -65,6 +65,7 @@ router.post('/initWallet', async(req, res) => {
 router.post('/openWallet', async(req, res) => {
   const wallet = req.body;
   const message = await taskService.openWallet(wallet);
+  console.log('message:', message);
   res.send(message);
 });
 router.post('/importTask', async(req, res) => {
@@ -108,6 +109,11 @@ router.post('/setSavePath',async(req,res)=>{
 });
 router.get('/getSavePath',async(req,res)=>{
   const message = await walletService.getSavePath();
+  res.send(message);
+});
+
+router.get('/checkWebSocket',async(req,res)=>{
+  const message = await taskService.checkWebSocket();
   res.send(message);
 });
 module.exports = router;

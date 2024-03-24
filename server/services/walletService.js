@@ -5,9 +5,8 @@ const path = require('path');
 const excel = require('exceljs');
 const date = require('date-and-time');
 const ethers = require('ethers');
-const TaskService = require('./taskService')
-const taskServiceManager = new TaskService();
-const config = require('../../config').getInstance()
+const taskServiceManager = require('./taskService').getInstance();
+const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
 
 
@@ -69,7 +68,7 @@ async function createWallet(params) {
   try {
     const {name, address, mnemonic, privateKey } = params;
     const chromeUserDataPath = path.join(userDataPath, address);
-    const walletData = {name, address, mnemonic, privateKey, initialized: false, chromeUserDataPath };
+    const walletData = {name, address, mnemonic, privateKey, walletInitialized: false, chromeUserDataPath };
     createDirectoryIfNotExists(chromeUserDataPath);
     await new Promise((resolve, reject) => {
       walletDb.insert(walletData, (err, newWallet) => {
@@ -157,7 +156,7 @@ async function getWalletCount() {
 async function updateWallet(params) {
   console.log('更新钱包');
   const { address,
-    name, userAgent, ip, language, webglVendor, webglRenderer,initialized,chromeUserDataPath
+    name, userAgent, ip, twitterToken,discordToken ,language, webglVendor, webglRenderer,walletInitialized,chromeUserDataPath
   } = params;
 
   if (!address) {
@@ -166,7 +165,7 @@ async function updateWallet(params) {
 
   try {
     const updatedWallet = await new Promise((resolve, reject) => {
-      walletDb.update({ address }, { $set: { name, userAgent, ip, language, webglVendor, webglRenderer,initialized,chromeUserDataPath } }, { returnUpdatedDocs: true }, (err, numAffected, affectedDocuments) => {
+      walletDb.update({ address }, { $set: { name, userAgent, ip,twitterToken,discordToken, language, webglVendor, webglRenderer,walletInitialized,chromeUserDataPath } }, { returnUpdatedDocs: true }, (err, numAffected, affectedDocuments) => {
         if (err) {
           reject(err);
         } else {
@@ -258,7 +257,7 @@ async function exportWallets(addresses, directory) {
     const ws = wb.addWorksheet('Sheet 1');
     
     // Set headers
-    ws.addRow(['address', 'mnemonic', 'privateKey', 'name', 'userAgent', 'IP', 'language', 'webglVendor', 'webglRenderer']);
+    ws.addRow(['address', 'mnemonic', 'privateKey','IP','twitterToken','discordToken', 'name', 'userAgent', 'language', 'webglVendor', 'webglRenderer']);
     
     // Add data
     wallets.forEach(wallet => {
@@ -267,8 +266,11 @@ async function exportWallets(addresses, directory) {
         wallet.mnemonic || '', // Ensure empty string if value is null
         wallet.privateKey || '', // Ensure empty string if value is null
         wallet.name || '', // Ensure empty string if value is null
-        wallet.userAgent || '', // Ensure empty string if value is null
         wallet.ip || '', // Ensure empty string if value is null
+        wallet.twitterToken || '', //
+        wallet.discordToken || '', //
+        wallet.userAgent || '', // Ensure empty string if value is null
+        
         wallet.language || '', // Ensure empty string if value is null
         wallet.webglVendor || '', // Ensure empty string if value is null
         wallet.webglRenderer || '' // Ensure empty string if value is null
@@ -299,7 +301,7 @@ async function importWallets(filePath) {
     const wallets = [];
 
     // Define column headers
-    const columnHeaders = ['address', 'mnemonic', 'privateKey', 'name', 'userAgent', 'IP', 'language', 'webglVendor', 'webglRenderer'];
+    const columnHeaders = ['address', 'mnemonic', 'privateKey', 'name', , 'IP','twitterToken','discordToken','userAgent', 'language', 'webglVendor', 'webglRenderer'];
 
     // Check if column headers match
     const headerRow = ws.getRow(1);
@@ -322,11 +324,15 @@ async function importWallets(filePath) {
         mnemonic: row.getCell(2).value,
         privateKey: row.getCell(3).value,
         name: row.getCell(4).value || `钱包${walletCount + rowNumber - 1}`,
-        userAgent: row.getCell(5).value,
-        ip: row.getCell(6).value,
-        language: row.getCell(7).value,
-        webglVendor: row.getCell(8).value,
-        webglRenderer: row.getCell(9).value
+        ip: row.getCell(5).value,
+        twitterToken: row.getCell(6).value,
+        discordToken: row.getCell(7).value,
+        userAgent: row.getCell(8).value,
+        
+
+        language: row.getCell(9).value,
+        webglVendor: row.getCell(10).value,
+        webglRenderer: row.getCell(11).value
       };
 
       // Log the first wallet
@@ -352,8 +358,8 @@ async function importWallets(filePath) {
       const walletDbTemp = await getWalletByAddress(wallet.address);
       console.log('walletDbTemp:', walletDbTemp)
       if (!walletDbTemp) {
-        // 设置initialized为false,
-        wallet.initialized = false;
+        // 设置walletInitialized为false,
+        wallet.walletInitialized = false;
         let res = await getSavePath();
         if(!res.success){
           throw new Error('获取保存路径失败');
@@ -391,8 +397,11 @@ async function importWallets(filePath) {
   }
 }
 
-async function initSuccessCallBack(wallet){
-  wallet.initialized = true;
+async function initSuccessCallBack(wallet,taskName){
+  console.log('初始化成功回调:', wallet);
+  if(taskName === 'initWallets'){
+    wallet.walletInitialized = true;
+  }
   await updateWallet(wallet);
 }
 async function initWallets(addresses) {
@@ -409,10 +418,11 @@ async function initWallets(addresses) {
   //初始化钱包任务
   taskServiceManager.initWalletsTask(wallets,(wallet)=>{
     console.log(wallet)
-    initSuccessCallBack(wallet)});
+    initSuccessCallBack(wallet,'initWallets')});
   return '初始化钱包任务已创建';
   
 }
+
 
 
 

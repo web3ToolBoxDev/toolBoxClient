@@ -6,6 +6,7 @@ import APIManager from '../../utils/api';
 import { eventEmitter } from '../../utils/eventEmitter';
 
 
+
 const web3Manager = Web3Manager.getInstance();
 const apiManager = APIManager.getInstance();
 
@@ -52,6 +53,36 @@ const WalletManage = () => {
               type: 'input',
               key: 'ip',
               placeholder: wallet.ip || '请输入IP代理',
+              colWidth: 8,
+              style: { textAlign: 'left' },
+            },
+          ],
+          [
+            {
+              type: 'label',
+              text: 'twitterToken',
+              colWidth: 4,
+              style: { textAlign: 'right' },
+            },
+            {
+              type: 'input',
+              key: 'twitterToken',
+              placeholder: wallet.twitterToken || '请输入twitter登录token',
+              colWidth: 8,
+              style: { textAlign: 'left' },
+            },
+          ],
+          [
+            {
+              type: 'label',
+              text: 'discordToken',
+              colWidth: 4,
+              style: { textAlign: 'right' },
+            },
+            {
+              type: 'input',
+              key: 'discordToken',
+              placeholder: wallet.discordToken || '请输入discord登录token',
               colWidth: 8,
               style: { textAlign: 'left' },
             },
@@ -136,11 +167,13 @@ const WalletManage = () => {
                   address: wallet.address,
                   name: openEditData.name || wallet.name,
                   ip: openEditData.ip || wallet.ip,
+                  twitterToken: openEditData.twitterToken || wallet.twitterToken,
+                  discordToken: openEditData.discordToken || wallet.discordToken,
                   userAgent: openEditData.userAgent || wallet.userAgent,
                   language: openEditData.language || wallet.language,
                   webglVendor: openEditData.webglVendor || wallet.webglVendor,
                   webglRenderer: openEditData.webglRenderer || wallet.webglRenderer,
-                  initialized: wallet.initialized,
+                  walletInitialized: wallet.walletInitialized,
                   chromeUserDataPath: wallet.chromeUserDataPath
                 }).then((res) => {
                   console.log(res);
@@ -279,16 +312,19 @@ const WalletManage = () => {
     navigator.clipboard.writeText(address);
   };
   const openWallet = (wallet) => {
-    console.log(wallet.initialized);
-    if (!wallet.initialized) {
+    console.log(wallet.walletInitialized);
+    if (!wallet.walletInitialized) {
       alert('请先初始化钱包');
       return;
     }
     apiManager.openWallet(wallet).then((res) => {
       console.log(res);
-      if (res) {
-        alert('打开任务日志查看')
+      if (res.success) {
+        alert('打开成功');
+      }else{
+        alert(res.message);
       }
+      window.location.reload();
     });
   }
   const delectedSelectedWallets = () => {
@@ -365,6 +401,7 @@ const WalletManage = () => {
       })
     }
   }
+  
   const initWallets = () => {
     const selectedWalletsAddress = walletList.filter(wallet => wallet.selected)
       .map(wallet => wallet.address);
@@ -372,10 +409,7 @@ const WalletManage = () => {
       alert('请先选择钱包');
       return;
     }
-    if (!chromeSavePath){
-      alert('请先配置chrome数据存储路径');
-      return;
-    }
+    
     apiManager.initWallets(selectedWalletsAddress).then((res) => {
       console.log(res);
       if (res) {
@@ -383,8 +417,9 @@ const WalletManage = () => {
         window.location.reload();
       }
     })
-
   }
+  
+  
   const setSavePath = () => {
     if (!window.electronAPI) {
       alert('请在Electron环境下运行');
@@ -488,7 +523,7 @@ const WalletManage = () => {
                 查看
               </Button>
             </Col>
-            <Col md={1}>{wallet.initialized ? '是' : '否'}</Col>
+            <Col md={1}>{wallet.walletInitialized ? '是' : '否'}</Col>
             <Col md={1}>
               <Button style={{ fontSize: '1.0vw' }} onClick={() => { checkInfo("浏览器文件路径", wallet.chromeUserDataPath) }}>
                 查看

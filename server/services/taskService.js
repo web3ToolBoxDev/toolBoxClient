@@ -1,6 +1,6 @@
 const Datastore = require('nedb');
 const path = require('path');
-const WebSocketService = require('./webSocketService');
+const webSocketService = require('./webSocketService').getInstance();
 const spawn = require('child_process').spawn;
 
 const config = require('../../config').getInstance();
@@ -20,15 +20,18 @@ class TaskService {
     constructor() {
         if (!TaskService.instance) {
             TaskService.instance = this;
-            this.webSocketService = WebSocketService.getInstance();
+            this.webSocketService = webSocketService;
             console.log("WebSocketService instance:", this.webSocketService);
             this.isRunning = {};
             this.heartBeatTimeoutId = {};
             this.lastHeartBeatTime = {};
             this.isCompleted = {};
             this.defaultExecPath = config.getDefaultExecPath();
-            this.initTaskScriptPath = config.getInitTaskScriptPath();
+            this.initWalletScriptPath = config.getInitWalletScriptPath();
+            this.initTwitterScriptPath = config.getInitTwitterScriptPath();
+            this.initDiscordScriptPath = config.getInitDiscordScriptPath();
             this.openWalletScriptPath = config.getOpenWalletScriptPath();
+            this.isSuccess = {};
         }
         return TaskService.instance;
     }
@@ -81,6 +84,14 @@ class TaskService {
             type: 'task_completed',
             time: dateTime,
             message: msg
+        });
+    }
+    taskSuccessMessage(msg) {
+        const dateTime = new Date().toLocaleString();
+        return JSON.stringify({
+            type: 'task_success',
+            message: msg,
+            time: dateTime
         });
     }
     taskErrorMessge(msg) {
@@ -188,14 +199,19 @@ class TaskService {
             case 'task_completed':{
                 this.isCompleted[taskName] = true;
                 break;}
+            case 'task_success':{
+                this.isSuccess[taskName] = true;
+                break;}
             default:
                 break;
         }
     }
-    async runTask(taskName,taskData,execPath,scriptPath,taskCompletedCallBack = undefined,timeout = 60000){
+    async runTask(taskName,taskData,execPath,scriptPath,taskSuccessCallBack = undefined,timeout = 60000){
         this.isRunning[taskName]=true;
         let taskDataJson = JSON.stringify(taskData);
         this.lastHeartBeatTime[taskName]=Date.now();
+        this.isCompleted[taskName] = false;
+        this.isSuccess[taskName] = false;
         
         let url=this.webSocketService.createTaskWebSocket(taskName,(msg)=>{
             // console.log('收到任务进程消息',msg);
@@ -212,12 +228,14 @@ class TaskService {
 
             this.webSocketService.sendToFront(this.taskLogMessage(message));
             this.isCompleted[taskName] = true;
+            this.isRunning[taskName] = false;
         });
         childProcess.on('close', (code) => {
             console.log(`child process exited with code ${code}`);
             this.isRunning[taskName]=false;
             this.webSocketService.closeTaskWebSocket();
             this.isCompleted[taskName] = true;
+            this.isRunning[taskName] = false;
         });
         this.heartBeatTimeoutId[taskName] = setInterval(() => {
             const currentTime = Date.now();
@@ -230,8 +248,11 @@ class TaskService {
             } 
             if(this.isCompleted[taskName]){
                 clearInterval(this.heartBeatTimeoutId[taskName]);
-                if(taskCompletedCallBack){
-                    taskCompletedCallBack(taskData);
+                if(taskSuccessCallBack){
+                    if(this.isSuccess[taskName]){
+                        taskSuccessCallBack(taskData);
+                        this.webSocketService.sendToFront(this.taskSuccessMessage(`任务:${taskName}执行成功`));
+                    }
                 }
                 this.webSocketService.sendToFront(this.taskCompletedMessage(`任务:${taskName}执行完成`));
                 this.isRunning[taskName] = false;
@@ -253,6 +274,7 @@ class TaskService {
     async initWalletsTask(wallets,initSuccessCallBack){
         // console.log(initSuccessCallBack)
         console.log('initWalletsTask:',wallets)
+        console.log('wsFront:',this.webSocketService.wsFrontServer);
         if(wallets.length===0){
             return {success:false,message:'没有钱包'};
         }
@@ -265,14 +287,19 @@ class TaskService {
             if(this.isRunning[taskName]){
                 continue;
             }
-            this.runTask(taskName,wallet,this.defaultExecPath,this.initTaskScriptPath,initSuccessCallBack);
+            this.runTask(taskName,wallet,this.defaultExecPath,this.initWalletScriptPath,initSuccessCallBack);
             await this.checkCompleted(taskName);
         }
     }
     async openWallet(wallet){
         let taskName = `openWallet_${wallet.address}`;
+        console.log('wsFront',this.webSocketService.wsFrontServer)
+        if(this.isRunning[taskName]){
+            return {success:false,message:'任务正在执行'};
+        }
         this.runTask(taskName,wallet,this.defaultExecPath,this.openWalletScriptPath);
-        await this.checkCompleted(taskName);
+        this.checkCompleted(taskName);
+        return {success:true};
     }
     async getConfigInfo(taskName){
         const task = await this.getTaskByName(taskName);
@@ -300,6 +327,9 @@ class TaskService {
         }catch(error){
             return {success:false,message:error.message};
         }
+    }
+    async checkWebSocket(){
+        this.webSocketService.checkWebSocket()
     }
 }
 module.exports = TaskService;

@@ -1,7 +1,7 @@
 {
   "name": "web3toolbox",
   "author": "Aming",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "main": "electron.js",
   "license": "MIT",
@@ -57,8 +57,6 @@
     "ethers": "^6.11.1",
     "events": "^3.3.0",
     "exceljs": "^4.4.0",
-    "express": "^4.18.3",
-    "express-ws": "^5.0.2",
     "nedb": "^1.8.0",
     "react": "^18.2.0",
     "react-app-rewired": "^2.2.1",
@@ -69,7 +67,9 @@
     "sass": "^1.71.1",
     "sass-loader": "^14.1.1",
     "socket.io-client": "^4.7.4",
-    "web-vitals": "^2.1.0"
+    "web-vitals": "^2.1.0",
+    "express": "^4.18.3",
+    "express-ws": "^5.0.2"
   },
   "scripts": {
     "dev": "electron .",
