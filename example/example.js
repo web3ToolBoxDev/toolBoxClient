@@ -123,10 +123,10 @@ async function runTask() {
         if (webSocketReady) {
             // console.log('发送任务日志');
             sendRequestTaskData();
-            sendTaskLog('任务日志内容:测试');
+            
             if (taskData) {
-                console.log('任务数据:', taskData);
-                sendTaskLog('收到任务数据，完成初始化，开始执行任务');
+                sendTaskLog('任务日志内容:测试');
+                sendTaskLog(`收到任务数据:${taskData}`);
                 await runTask();
             }
         }

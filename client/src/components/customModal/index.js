@@ -2,13 +2,16 @@ import React,{useState,useEffect,forwardRef,useImperativeHandle} from 'react';
 import { Modal, Button, Row, Col, Form } from 'react-bootstrap';
 import './index.scss';
 const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData },ref)=> {
-    const [valueObj,setValueObj] = useState({})
+    const [valueObj,setValueObj] = useState({});
     
     const onChange = (e, key) => {
         handleData(key, e.target.value);
+        setValueObj({...valueObj,[key]:e.target.value});
     }
     useEffect(
-        ()=>{},
+        ()=>{
+            
+        },
         [valueObj]
     )
     useImperativeHandle(ref, () => ({
@@ -17,6 +20,9 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
         },
         clearValueObj: () => {
             setValueObj({});
+        },
+        setValueObj: (obj) => {
+            setValueObj(obj);
         }
     }));
 
@@ -47,7 +53,20 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
                                     <Form.Control
                                         placeholder={item.placeholder}
                                         onChange={(e) => onChange(e, item.key)}
+                                        value={valueObj[item.key] || ''}
                                     />
+                                )}
+                                {item.type === 'select' && (
+                                    <Form.Select
+                                        defaultValue={item.defaultValue}
+                                        onChange={(e) => onChange(e, item.key)}
+                                        style={item.style}
+
+                                    >
+                                        {item.options.map((option, index) => (
+                                            <option key={index} value={option.value}>{option.text}</option>
+                                        ))}
+                                    </Form.Select>
                                 )}
                                 {item.type === 'button' && (
                                     <Button className='ms-1' style ={item.style} onClick={item.click}>{item.text}</Button>

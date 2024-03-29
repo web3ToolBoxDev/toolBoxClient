@@ -1,12 +1,14 @@
 import { Container, Button, Row, Col } from 'react-bootstrap';
 import CustomModal from '../../components/customModal';
+import SetWalletConfigModal from '../../components/setWalletConfigModal';
 import ChooseWalletModal from '../../components/chooseWalletModal';
 import { useState, useRef, useEffect } from 'react';
 import APIManager from '../../utils/api';
 const TaskManage = () => {
   const apiManager = APIManager.getInstance();
   const [modalProp, setModalProp] = useState({});
-  const [chooseWalletModalProp, setChooseWalletModalProp] = useState({});//{show:false}
+  const [walletConfigModalProp,setWalletConfigModalProp] = useState({show:false});
+  const [chooseWalletModalProp, setChooseWalletModalProp] = useState({show:false});//{show:false}
   const handleModalClose = () => {
     setModalProp({ show: false });
     childRef.current.clearValueObj();
@@ -65,8 +67,8 @@ const TaskManage = () => {
           }
         ],
         [
-          { type: 'label', colWidth: 4, text: '配置路径', style: { textAlign: 'right', paddingRight: '10px' } },
-          { type: 'text', colWidth: 6, text: '不填默认无配置', key: 'configPath' },
+          { type: 'label', colWidth: 4, text: '脚本配置路径', style: { textAlign: 'right', paddingRight: '10px' } },
+          { type: 'text', colWidth: 6, text: '不填默认无配置', key: 'configSchemaPath' },
           {
             type: 'button', colWidth: 2, text: '选择', style: { fontSize: '1.2vw', border: '1px' },
             click: async () => {
@@ -76,11 +78,18 @@ const TaskManage = () => {
               }
               const filePath = await window.electronAPI.openFile()
               if (filePath) {
-                taskObj['configPath'] = filePath;
-                childRef.current.updadteValueObj('configPath', filePath);
+                taskObj['configSchemaPath'] = filePath;
+                childRef.current.updadteValueObj('configSchemaPath', filePath);
               }
             }
           }
+        ],
+        [
+          { type: 'label', colWidth: 4, text: '任务类型', style: { textAlign: 'right', paddingRight: '10px' } },
+          { type: 'select', colWidth: 6, style: { fontSize: '1.2vw' },
+            options: [{ value: 'execByOrder', text: '顺序执行' }, { value: 'execByAsync', text: '同步执行' },{value:'execAll',text:'全量执行'}],
+            defaultValue: 'execByOrder',
+            key: 'taskType' }
         ],
         [
           {
@@ -93,6 +102,9 @@ const TaskManage = () => {
               if (!taskObj['scriptPath']) {
                 alert('请填写脚本路径');
                 return;
+              }
+              if (!taskObj['taskType']) {
+                taskObj['taskType'] = "execByOrder";
               }
               apiManager.importTask(taskObj).then((res) => {
                 if (res) {
@@ -149,57 +161,28 @@ const TaskManage = () => {
     });
     setTaskList(updatedTaskList);
   }
-  const setConfig = async (taskName) => {
-    const res = await apiManager.getConfigInfo(taskName);
-    if (res.success) {
-      
-      const config = res.configInfo
-      
-      let configRowList = [];
-      for (let key in config) {
-        configRowList.push([
-          { type: 'label', colWidth: 4, text: key, style: { textAlign: 'right', paddingRight: '10px' } },
-          { type: 'input', colWidth: 6, placeholder: config[key]||`请输入${key}`, key: key }
-        ])
+  const setConfig = (taskName,configSchema) => {
+    setWalletConfigModalProp({
+      taskName,
+      configSchema,
+      show: true,
+      onHide: () => {
+        setWalletConfigModalProp({ show: false });
+      },
+      confirm: async (config) => {
+        if (config) {
+          apiManager.setConfigInfo(taskName, config).then((res) => {
+            if (res) {
+              alert('配置成功');
+              setWalletConfigModalProp({ show: false });
+            }
+          })
+        }
       }
-      //将configRowList排序
-      configRowList.sort((a, b) => {
-        return a[0].text.localeCompare(b[0].text);
-      })
-      let setConfig = {}
-      setModalProp({
-        show: true,
-        title: `配置任务${taskName}`,
-        handleClose: handleModalClose,
-        handleData: (key, value) => {
-          setConfig[key] = value;
-        },
-        rowList: [
-          ...configRowList,
-          [
-            {
-              type: 'button', colWidth: 4, text: '提交', style: {
-                marginLeft: 'auto',
-                fontSize: '1.5vw'
-              },
-              click: async () => {
-                for (let key in config) {
-                  if (!setConfig[key]) {
-                    setConfig[key] = config[key];
-                  }
-                }
-                apiManager.setConfigInfo(taskName, setConfig).then((res) => {
-                  if (res) {
-                    alert('配置成功');
-                    handleModalClose();
-                  }
-                })
-              }
-            }]
-        ]
-      });
-    }
+    })
   }
+
+  
   const deleteTask = () => {
     const selectedTaskList = taskList.filter(task => task.selected);
     if (selectedTaskList.length === 0) {
@@ -252,12 +235,12 @@ const TaskManage = () => {
             <Col md={5}>{task.taskName}</Col>
 
             <Col md={3}>
-              {task.configPath ? (<Button style={{ fontSize: '1.0vw' }} onClick={() => { setConfig(task.taskName) }}>
+              {task.configSchema ? (<Button style={{ fontSize: '1.0vw',margin:'1px' }} onClick={() => { setConfig(task.taskName,task.configSchema) }}>
                 配置
               </Button>) : "无配置"}
             </Col>
             <Col md={3}>
-              <Button style={{ fontSize: '1.0vw' }} onClick={() => { execTask(task.taskName) }}>
+              <Button style={{ fontSize: '1.0vw',margin:'1px' }} onClick={() => { execTask(task.taskName) }}>
                 启动
               </Button>
             </Col>
@@ -265,6 +248,7 @@ const TaskManage = () => {
           </Row>)
       })}
       <CustomModal ref={childRef} {...modalProp} />
+      <SetWalletConfigModal {...walletConfigModalProp} />
       <ChooseWalletModal {...chooseWalletModalProp} />
     </Container>
   );

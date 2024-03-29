@@ -215,8 +215,9 @@ async function deleteWallets(addresses) {
   //删除chromeUserDataPath
   for (let i = 0; i < addresses.length; i++) {
     const wallet = await getWalletByAddress(addresses[i]);
-    if (wallet) {
-      fs.rmdirSync(wallet.chromeUserDataPath, { recursive: true });
+    if (wallet && fs.existsSync(wallet.chromeUserDataPath)) {
+        fs.rmdirSync(wallet.chromeUserDataPath, { recursive: true });
+      
     }
   }
 
@@ -257,7 +258,7 @@ async function exportWallets(addresses, directory) {
     const ws = wb.addWorksheet('Sheet 1');
     
     // Set headers
-    ws.addRow(['address', 'mnemonic', 'privateKey','IP','twitterToken','discordToken', 'name', 'userAgent', 'language', 'webglVendor', 'webglRenderer']);
+    ws.addRow(['address', 'mnemonic', 'privateKey','name','IP','twitterToken','discordToken', 'userAgent', 'language', 'webglVendor', 'webglRenderer']);
     
     // Add data
     wallets.forEach(wallet => {
@@ -301,12 +302,15 @@ async function importWallets(filePath) {
     const wallets = [];
 
     // Define column headers
-    const columnHeaders = ['address', 'mnemonic', 'privateKey', 'name', , 'IP','twitterToken','discordToken','userAgent', 'language', 'webglVendor', 'webglRenderer'];
+    const columnHeaders = ['address', 'mnemonic', 'privateKey', 'name', 'IP','twitterToken','discordToken','userAgent', 'language', 'webglVendor', 'webglRenderer'];
 
     // Check if column headers match
     const headerRow = ws.getRow(1);
     columnHeaders.forEach((header, index) => {
+      console.log('header:', headerRow.getCell(index + 1).value, header);
       if (headerRow.getCell(index + 1).value !== header) {
+        
+
         throw new Error('导入文件格式错误');
       }
     });

@@ -7,6 +7,7 @@ const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
 
 const fs = require('fs');
+const e = require('express');
 console.log('task isBuild:',isBuild);
 
 const assetsPath = config.getAssetsPath();
@@ -102,13 +103,24 @@ class TaskService {
             time: dateTime
         });
     }
-    
+    /**
+     * 配置json格式示例
+     * {
+     *    "rpc":{"type":"input"}
+     *    "network":{"type":"select","options":["mainnet","testnet"]}
+     * }
+     * 
+     */
     async importTask(taskObj) {
         // 检查taskName是否重复
         const task = await this.getTaskByName(taskObj.taskName);
         if (task) {
             return {success:false,message:'任务名称重复'};
         }
+
+        if(taskObj.configSchemaPath)
+            taskObj.configSchema = JSON.parse(fs.readFileSync(taskObj.configSchemaPath, 'utf-8'));
+        console.log('taskObj:',taskObj);
         return new Promise((resolve, reject) => {
             taskDb.insert(taskObj, (err, doc) => {
                 if (err) {
@@ -148,16 +160,63 @@ class TaskService {
         if (!task) {
             return {success:false,message:'任务不存在'};
         }
-        for(let i=0;i<wallets.length;i++){
-            let wallet=wallets[i];
-            let taskName = `${wallet.address}_${task.taskName}`;
+        switch(task.taskType){
+            case 'execByOrder':
+                console.log('顺序执行任务',task)
+                for(let i=0;i<wallets.length;i++){
+                    let wallet=wallets[i];
+                    let taskName = `${wallet.address}_${task.taskName}`;
+                    
+                    if(this.isRunning[taskName]){
+                        continue;
+                    }
+                    let config = {}
+                    if(task.config){
+                        if(task.config[wallet.address]){
+                            config[wallet.address] = task.config[wallet.address];
+                        }
+                        config['default'] = task.config['default'];
+                    }
+                    const taskData = {...wallet,config};
+                    this.runTask(taskName,taskData,task.execPath||this.defaultExecPath,task.scriptPath);
+                    await this.checkCompleted(taskName);
+                }
+                break;
+            case 'execByAsync':
+                for(let i=0;i<wallets.length;i++){
+                    let wallet=wallets[i];
+                    let taskName = `${wallet.address}_${task.taskName}`;
+                    if(this.isRunning[taskName]){
+                        continue;
+                    }
+                    let config = {}
+                    if(task.config){
+                        if(task.config[wallet.address]){
+                            config[wallet.address] = task.config[wallet.address];
+                        }
+                        config['default'] = task.config['default'];
+                        
+                    }
+                    const taskData = {...wallet,config};
+                    this.runTask(taskName,taskData,task.execPath||this.defaultExecPath,task.scriptPath);
+                    this.checkCompleted(taskName);
+                }
+                break;
+            case 'execAll':
+                let taskName = `${task.taskName}全量执行`;
+                if(this.isRunning[taskName]){
+                    return {success:false,message:'任务正在执行'};
+                }
+                let config = {}
+                if(task.config){
+                    config = task.config;
+                }
+                const taskData = {wallets,config};
+                this.runTask(taskName,taskData,task.execPath||this.defaultExecPath,task.scriptPath);
+                this.checkCompleted(taskName);
+                break;
             
-            if(this.isRunning[taskName]){
-                continue;
-            }
-            const taskData = {...wallet,configPath:task.configPath};
-            this.runTask(taskName,taskData,task.execPath||this.defaultExecPath,task.scriptPath);
-            await this.checkCompleted(taskName);
+
         }
     }
 
@@ -187,7 +246,6 @@ class TaskService {
                 let taskMsg = this.requestTaskData(taskData);
                 console.log('request_task_data:', taskMsg);
                 this.webSocketService.sendToTask(taskName,taskMsg);
-                this.webSocketService.sendToFront(this.taskLogMessage(`任务:${taskName}开始执行`));
                 break;}
             case 'task_log':{
                 console.log('task_log:', data.message);
@@ -217,6 +275,7 @@ class TaskService {
             // console.log('收到任务进程消息',msg);
             this.processMsg(taskName,msg,taskDataJson)});
         const childProcess = spawn(execPath,[scriptPath,url]);
+        this.webSocketService.sendToFront(this.taskLogMessage(`任务:${taskName}开始执行`));
         childProcess.stdout.on('data', (data) => {
             console.log(`stdout: ${data}`);
         });
@@ -301,16 +360,14 @@ class TaskService {
         this.checkCompleted(taskName);
         return {success:true};
     }
+    
     async getConfigInfo(taskName){
         const task = await this.getTaskByName(taskName);
         if (!task) {
             return {success:false,message:'任务不存在'};
         }
-        const configPath = task.configPath;
-        let configInfo = {};
         try{
-            configInfo = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-            return {success:true,configInfo};
+            return {success:true,config:task.config};
         }catch(error){
             return {success:false,message:error.message};
         }
@@ -320,9 +377,11 @@ class TaskService {
         if (!task) {
             return {success:false,message:'任务不存在'};
         }
-        const configPath = task.configPath;
+       
         try{
-            fs.writeFileSync(configPath, JSON.stringify(config));
+            //更新task配置信息
+            task.config = config;
+            taskDb.update({taskName:taskName},task,{returnUpdatedDocs:true});
             return {success:true};
         }catch(error){
             return {success:false,message:error.message};

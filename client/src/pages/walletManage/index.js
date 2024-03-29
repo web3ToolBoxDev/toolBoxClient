@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect,useRef } from 'react';
 import { Container, Row, Col, Button, InputGroup, FormControl } from 'react-bootstrap';
 import CustomModal from '../../components/customModal';
 import Web3Manager from '../../utils/web3';
@@ -14,9 +14,10 @@ const WalletManage = () => {
   const [modalProp, setModalProp] = useState({ show: false });
   const [selectAll, setSelectAll] = useState(false); // State for Select All checkbox
 
-
+  const childRef = useRef();
   const openEdit = (wallet) => {
-    let openEditData = {};
+    let openEditData = wallet;
+    childRef.current.setValueObj(openEditData);
     setModalProp(
       {
         show: true,
@@ -24,7 +25,7 @@ const WalletManage = () => {
         title: '查看编辑',
         handleData: (key, value) => {
           openEditData[key] = value;
-          // console.log(openEditData);
+          childRef.current.updadteValueObj(key, value);
         },
         rowList: [
           [
@@ -37,7 +38,8 @@ const WalletManage = () => {
             {
               type: 'input',
               key: 'name',
-              placeholder: wallet.name || '请输入钱包名称',
+              placeholder: '请输入钱包名称',
+              value: wallet.name,
               colWidth: 8,
               style: { textAlign: 'left' },
             },
@@ -52,7 +54,8 @@ const WalletManage = () => {
             {
               type: 'input',
               key: 'ip',
-              placeholder: wallet.ip || '请输入IP代理',
+              placeholder:'请输入IP代理',
+              value: wallet.ip,
               colWidth: 8,
               style: { textAlign: 'left' },
             },
@@ -67,7 +70,8 @@ const WalletManage = () => {
             {
               type: 'input',
               key: 'twitterToken',
-              placeholder: wallet.twitterToken || '请输入twitter登录token',
+              placeholder: '请输入twitter登录token',
+              value: wallet.twitterToken,
               colWidth: 8,
               style: { textAlign: 'left' },
             },
@@ -82,7 +86,8 @@ const WalletManage = () => {
             {
               type: 'input',
               key: 'discordToken',
-              placeholder: wallet.discordToken || '请输入discord登录token',
+              placeholder: '请输入discord登录token',
+              value: wallet.discordToken,
               colWidth: 8,
               style: { textAlign: 'left' },
             },
@@ -105,7 +110,8 @@ const WalletManage = () => {
             {
               type: 'input',
               key: 'userAgent',
-              placeholder: wallet.userAgent || '请输入userAgent',
+              placeholder: '请输入userAgent',
+              value: wallet.userAgent,
               colWidth: 8,
               style: { textAlign: 'left' },
             },
@@ -120,7 +126,8 @@ const WalletManage = () => {
             {
               type: 'input',
               key: 'language',
-              placeholder: wallet.language || '请输入语言',
+              placeholder: '请输入语言',
+              value: wallet.language,
               colWidth: 8,
               style: { textAlign: 'left' },
             },
@@ -135,7 +142,8 @@ const WalletManage = () => {
             {
               type: 'input',
               key: 'webglVendor',
-              placeholder: wallet.webglVendor || '请输入webglVendor',
+              placeholder: '请输入webglVendor',
+              value: wallet.webglVendor,
               colWidth: 8,
               style: { textAlign: 'left' },
             },
@@ -514,12 +522,12 @@ const WalletManage = () => {
               </InputGroup>
             </Col>
             <Col md={1}>
-              <Button style={{ fontSize: '1.0vw' }} onClick={() => { checkInfo("助记词", wallet.mnemonic) }}>
+              <Button style={{ fontSize: '1.0vw',margin:'1px' }} onClick={() => { checkInfo("助记词", wallet.mnemonic) }}>
                 查看
               </Button>
             </Col>
             <Col md={1}>
-              <Button style={{ fontSize: '1.0vw' }} onClick={() => { checkInfo("私钥", wallet.privateKey) }}>
+              <Button style={{ fontSize: '1.0vw',margin:'1px' }} onClick={() => { checkInfo("私钥", wallet.privateKey) }}>
                 查看
               </Button>
             </Col>
@@ -540,7 +548,7 @@ const WalletManage = () => {
           </Row>
         );
       })}
-      <CustomModal {...modalProp} />
+      <CustomModal ref={childRef} {...modalProp} />
     </Container>
   );
 };

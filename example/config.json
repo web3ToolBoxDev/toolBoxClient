@@ -1,9 +1,0 @@
-{
-    "amount": "0.01",
-    "proxy_host": "127.0.0.1",
-    "proxy_port": "7890",
-    "apiKey": "yourApiKey",
-    "apiSecret": "yourApiSecret",
-    "symbol": "BNB",
-    "network": "BSC"
-}

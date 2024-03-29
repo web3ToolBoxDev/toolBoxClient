@@ -1,0 +1,9 @@
+{
+    "apiKey": {"type":"input","text":"请输入APIKey"},
+    "apiSecret": {"type":"input","text":"请输入APISecret"},
+    "testSelect": {"type":"select", "options": [
+        {"value":"test1", "text":"测试1"},
+        {"value":"test2", "text":"测试2"},
+        {"value":"test3", "text":"测试3"}
+    ], "defaultValue":"test2"}
+}
