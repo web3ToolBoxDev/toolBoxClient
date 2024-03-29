@@ -1,7 +1,7 @@
 {
   "name": "web3toolbox",
   "author": "Aming",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "main": "electron.js",
   "license": "MIT",

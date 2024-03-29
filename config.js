@@ -1,5 +1,5 @@
 const path = require('path');
-IS_BUILD = false;
+IS_BUILD = true;
 
 class Config {
     static instance = null;

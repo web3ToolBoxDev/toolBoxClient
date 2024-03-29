@@ -1,4 +1,5 @@
-import {Container,Button} from 'react-bootstrap';
+import {Container,Button,Row,Col} from 'react-bootstrap';
+
 const Introduction = () => {
   const openTwitter = () => {
     if(window.electronAPI){
@@ -15,6 +16,12 @@ const Introduction = () => {
       window.electronAPI.openLink('https://github.com/web3ToolBoxDev/toolBoxClient')
     }
   }
+  const openUrl = (url) => {
+    if(window.electronAPI){
+      window.electronAPI.openLink(url)
+    }
+  }
+
   return (
     <Container>
       <h1>Web3ToolBox</h1>
@@ -29,7 +36,21 @@ const Introduction = () => {
       <Button onClick={openTwitter} className='ms-2'>
         twitter
       </Button>
+      <Row style={{ border: '1px solid black',margin:'5px' }}>
+        <Col md={2} style={{ fontSize: '1.5vw', borderRight: '1px solid black' }}>
+          V0.1.1新增
+        </Col>
+        <Col md={8} style={{ fontSize: '1.5vw', borderRight: '1px solid black' }}>
+          推特，discord Token配置教程
+        </Col>
+        <Col md={2}>
+          <Button style={{ fontSize: '1.5vw',margin:'1px'}} onClick={() => openUrl('https://www.youtube.com/watch?v=Ew_cG8jhzwY')}>
+            查看教程
+          </Button>
+        </Col>
+      </Row>
     </Container>
   );
 }
+
 export default Introduction;

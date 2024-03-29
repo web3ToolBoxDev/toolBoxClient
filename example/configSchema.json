@@ -1,9 +1,8 @@
 {
-    "apiKey": {"type":"input","text":"请输入APIKey"},
-    "apiSecret": {"type":"input","text":"请输入APISecret"},
+    "testInput": {"type":"input", "text":"测试输入框"},
     "testSelect": {"type":"select", "options": [
-        {"value":"test1", "text":"测试1"},
-        {"value":"test2", "text":"测试2"},
-        {"value":"test3", "text":"测试3"}
+        {"value":"test1", "text":"选择框1"},
+        {"value":"test2", "text":"选择框2"},
+        {"value":"test3", "text":"选择框3"}
     ], "defaultValue":"test2"}
 }
