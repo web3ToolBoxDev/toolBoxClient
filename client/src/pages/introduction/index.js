@@ -49,6 +49,19 @@ const Introduction = () => {
           </Button>
         </Col>
       </Row>
+      <Row style={{ border: '1px solid black',margin:'5px' }}>
+        <Col md={2} style={{ fontSize: '1.5vw', borderRight: '1px solid black' }}>
+          V0.1.2新增
+        </Col>
+        <Col md={8} style={{ fontSize: '1.5vw', borderRight: '1px solid black' }}>
+          优化任务管理，任务配置教程
+        </Col>
+        <Col md={2}>
+          <Button style={{ fontSize: '1.5vw',margin:'1px'}} onClick={() => openUrl('https://youtu.be/bEUHAOesI0c')}>
+            查看教程
+          </Button>
+        </Col>
+      </Row>
     </Container>
   );
 }
