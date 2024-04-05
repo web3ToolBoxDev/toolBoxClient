@@ -5,8 +5,13 @@ const lanPlugin = require('puppeteer-extra-plugin-stealth/evasions/navigator.lan
 const userAgentPlugin = require('puppeteer-extra-plugin-stealth/evasions/user-agent-override');
 const webglPlugin = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor');
 const path = require('path');
-const findChrome = require('carlo/lib/find_chrome');
+// const findChrome = require('carlo/lib/find_chrome');
 
+const proxyManager = require('./proxy/index');
+let ChromeLauncher;
+import('chrome-launcher').then((module) => {
+    ChromeLauncher = module;
+});
 
 console.log('收到的URL参数:', url);
 
@@ -111,6 +116,7 @@ async function checkBrowserClosed(browser) {
     while (!closeSignal) {
         await sleep(5000);
     }
+    await proxyManager.stop();
     await browser.close();
     exit();
 }
@@ -200,9 +206,7 @@ async function openDiscord(browser,discordToken) {
 // 进行任务逻辑
 async function runTask() {
     console.log('任务开始执行');
-    const chromePath = await findChrome({});
-    console.log('chromePath:', chromePath);
-
+    const chromePath = ChromeLauncher.Launcher.getInstallations();
     let wallet = taskData;
     if (wallet.language)
         puppeteer.use(lanPlugin({ language: wallet.language.split(',') }));
@@ -216,10 +220,23 @@ async function runTask() {
         '--no-sandbox',
         '--disabled-setupid-sandbox',
         '--disable-infobars',
-        '--disable-extensions-except=' + metamaskEx
+        '--disable-extensions-except=' + metamaskEx,
+        '--webrtc-ip-handling-policy=disable_non_proxied_udp',
+        '--force-webrtc-ip-handling-policy',
     ];
-    if (wallet.ip)
-        argArr.push('--proxy-server=' + wallet.ip);
+    if (wallet.ipType && wallet.ipHost && wallet.ipPort){
+
+        if(wallet.ipType === 'socks5'){
+            const url = await proxyManager.createSocksServer(wallet.ipHost, wallet.ipPort,wallet.ipUsername,wallet.ipPassword);
+            console.log(url);
+            argArr.push('--proxy-server=' + url);
+        }
+        if(wallet.ipType === 'http'){
+            const url = await proxyManager.createHttpServer(wallet.ipHost, wallet.ipPort,wallet.ipUsername,wallet.ipPassword);
+            console.log(url);
+            argArr.push('--proxy-server=' + url);
+        }
+    }        
     const browser = await puppeteer.launch({
         headless: false,
         executablePath: chromePath.executablePath,

@@ -17,6 +17,7 @@ const WalletManage = () => {
   const childRef = useRef();
   const openEdit = (wallet) => {
     let openEditData = wallet;
+    openEditData['ipType'] = wallet['ipType'] || 'http';
     childRef.current.setValueObj(openEditData);
     setModalProp(
       {
@@ -32,47 +33,130 @@ const WalletManage = () => {
             {
               type: 'label',
               text: '钱包名称',
-              colWidth: 4,
-              style: { textAlign: 'right' },
+              colWidth: 3,
+              style: { textAlign: 'right', fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right'},
             },
             {
               type: 'input',
               key: 'name',
               placeholder: '请输入钱包名称',
               value: wallet.name,
-              colWidth: 8,
+              colWidth: 7,
               style: { textAlign: 'left' },
             },
           ],
           [
             {
               type: 'label',
-              text: 'IP代理',
-              colWidth: 4,
-              style: { textAlign: 'right' },
+              text: 'ip代理',
+              colWidth: 12,
+              style: { textAlign: 'right', fontSize: '1.0vw' },
+            }
+          ],
+          [
+            {
+              type: 'label',
+              text: 'IP代理类型',
+              colWidth: 3,
+              style: { fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right'},
+            },
+            {
+              type: 'select',
+              key: 'ipType',
+              defaultValue: wallet.ipType || 'http',
+              colWidth: 7,
+              options: [
+                { value: 'http', text: 'http' },
+                { value: 'socks5', text: 'socks5' },
+              ],
+              style: { textAlign: 'left' }
+            },
+          ],
+          [
+            {
+              type: 'label',
+              text: 'IpHost',
+              colWidth: 3,
+              style: { fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right' },
             },
             {
               type: 'input',
-              key: 'ip',
-              placeholder:'请输入IP代理',
-              value: wallet.ip,
-              colWidth: 8,
+              key: 'ipHost',
+              placeholder: '请输入域名',
+              value: wallet.ipHost,
+              colWidth: 7,
               style: { textAlign: 'left' },
             },
+          ],
+          [
+            {
+              type: 'label',
+              text: '端口',
+              colWidth: 3,
+              style: { fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right' },
+            },
+            {
+              type: 'input',
+              key: 'ipPort',
+              placeholder: '请输入端口',
+              value: wallet.ipPort,
+              colWidth: 7,
+              style: { textAlign: 'left' },
+            },
+          ],
+          [
+            {
+              type: 'label',
+              text: '用户名',
+              colWidth: 3,
+              style: { fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right'},
+            },
+            {
+              type: 'input',
+              key: 'ipUsername',
+              placeholder: '请输入用户名',
+              value: wallet.ipUsername,
+              colWidth: 7,
+              style: { textAlign: 'left' },
+            }
+          ],
+          [
+            {
+              type: 'label',
+              text: '密码',
+              colWidth: 3,
+              style: { fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right' },
+            },
+            {
+              type: 'input',
+              key: 'ipPassword',
+              placeholder: '请输入密码',
+              value: wallet.ipPassword,
+              colWidth: 7,
+              style: { textAlign: 'left' },
+            },
+          ],
+          [
+            {
+              type: 'label',
+              text: 'token信息',
+              colWidth: 12,
+              style: { textAlign: 'right', fontSize: '1.0vw' },
+            }
           ],
           [
             {
               type: 'label',
               text: 'twitterToken',
-              colWidth: 4,
-              style: { textAlign: 'right' },
+              colWidth: 3,
+              style: { fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right' },
             },
             {
               type: 'input',
               key: 'twitterToken',
               placeholder: '请输入twitter登录token',
               value: wallet.twitterToken,
-              colWidth: 8,
+              colWidth: 7,
               style: { textAlign: 'left' },
             },
           ],
@@ -80,15 +164,15 @@ const WalletManage = () => {
             {
               type: 'label',
               text: 'discordToken',
-              colWidth: 4,
-              style: { textAlign: 'right' },
+              colWidth: 3,
+              style: { fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right' },
             },
             {
               type: 'input',
               key: 'discordToken',
               placeholder: '请输入discord登录token',
               value: wallet.discordToken,
-              colWidth: 8,
+              colWidth: 7,
               style: { textAlign: 'left' },
             },
           ],
@@ -104,15 +188,15 @@ const WalletManage = () => {
             {
               type: 'label',
               text: 'userAgent',
-              colWidth: 4,
-              style: { textAlign: 'right' },
+              colWidth: 3,
+              style: { fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right' },
             },
             {
               type: 'input',
               key: 'userAgent',
               placeholder: '请输入userAgent',
               value: wallet.userAgent,
-              colWidth: 8,
+              colWidth: 7,
               style: { textAlign: 'left' },
             },
           ],
@@ -120,15 +204,15 @@ const WalletManage = () => {
             {
               type: 'label',
               text: '语言',
-              colWidth: 4,
-              style: { textAlign: 'right' },
+              colWidth: 3,
+              style: { fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right' },
             },
             {
               type: 'input',
               key: 'language',
               placeholder: '请输入语言',
               value: wallet.language,
-              colWidth: 8,
+              colWidth: 7,
               style: { textAlign: 'left' },
             },
           ],
@@ -136,15 +220,15 @@ const WalletManage = () => {
             {
               type: 'label',
               text: 'webglVendor',
-              colWidth: 4,
-              style: { textAlign: 'right' },
+              colWidth: 3,
+              style: { fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right' },
             },
             {
               type: 'input',
               key: 'webglVendor',
               placeholder: '请输入webglVendor',
               value: wallet.webglVendor,
-              colWidth: 8,
+              colWidth: 7,
               style: { textAlign: 'left' },
             },
           ],
@@ -152,14 +236,14 @@ const WalletManage = () => {
             {
               type: 'label',
               text: 'webglRenderer',
-              colWidth: 4,
-              style: { textAlign: 'right' },
+              colWidth: 3,
+              style: { fontSize: '1.5vw',display: 'flex', alignItems: 'center' ,justifyContent: 'right' },
             },
             {
               type: 'input',
               key: 'webglRenderer',
               placeholder: wallet.webglRenderer || '请输入webglRenderer',
-              colWidth: 8,
+              colWidth: 7,
               style: { textAlign: 'left' },
             },
           ],
@@ -167,14 +251,18 @@ const WalletManage = () => {
             {
               type: 'button',
               text: '提交',
-              colWidth: 4,
+              colWidth: 3,
               style: { marginLeft: 'auto' },
               click: () => {
                 console.log(openEditData);
                 apiManager.updateWallet({
                   address: wallet.address,
                   name: openEditData.name || wallet.name,
-                  ip: openEditData.ip || wallet.ip,
+                  ipType: openEditData.ipType || wallet.ipType,
+                  ipHost: openEditData.ipHost || wallet.ipHost,
+                  ipPort: openEditData.ipPort || wallet.ipPort,
+                  ipUsername: openEditData.ipUsername || wallet.ipUsername,
+                  ipPassword: openEditData.ipPassword || wallet.ipPassword,
                   twitterToken: openEditData.twitterToken || wallet.twitterToken,
                   discordToken: openEditData.discordToken || wallet.discordToken,
                   userAgent: openEditData.userAgent || wallet.userAgent,
@@ -214,7 +302,7 @@ const WalletManage = () => {
       title: '新建钱包',
       handleData: (key, value) => {
         createWalletData[key] = value;
-        console.log(createWalletData);
+        childRef.current.updadteValueObj(key, value);
       },
       rowList: [
         [
@@ -222,7 +310,7 @@ const WalletManage = () => {
             type: 'label',
             text: '新建数量',
             colWidth: 4,
-            style: { textAlign: 'right' },
+            style: { textAlign: 'center' },
           },
           {
             type: 'input',
@@ -245,9 +333,15 @@ const WalletManage = () => {
                 for (let i = 0; i < number; i++) {
                   let info = web3Manager.createWallet();
                   console.log(info.mnemonic, info.privateKey, info.address);
+                  let num = Math.floor((curWalletNum+i+1)/10);
+                  
+                  let zeroStr = ''
+                  for (let j = 0; j < 5-num; j++) {
+                    zeroStr += '0';
+                  }
                   apiManager
                     .createWallet({
-                      name: `钱包${curWalletNum + i + 1}`,
+                      name: `钱包${zeroStr}${curWalletNum + i + 1}`,
                       address: info.address,
                       mnemonic: info.mnemonic,
                       privateKey: info.privateKey,

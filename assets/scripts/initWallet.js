@@ -4,10 +4,11 @@ const puppeteer = require('puppeteer-extra');
 const lanPlugin = require('puppeteer-extra-plugin-stealth/evasions/navigator.languages');
 const userAgentPlugin = require('puppeteer-extra-plugin-stealth/evasions/user-agent-override');
 const webglPlugin = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor');
-const fs = require('fs');
 const path = require('path');
-const findChrome = require('carlo/lib/find_chrome');
-const { send } = require('process');
+let ChromeLauncher;
+import('chrome-launcher').then((module) => {
+    ChromeLauncher = module;
+});
 
 console.log('收到的URL参数:', url);
 
@@ -119,7 +120,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // 进行任务逻辑
 async function runTask() {
     console.log('任务开始执行');
-    const chromePath = await findChrome({});
+    const chromePath = ChromeLauncher.Launcher.getInstallations();
     console.log('chromePath:', chromePath);
 
     let wallet = taskData;

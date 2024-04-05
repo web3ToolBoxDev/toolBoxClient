@@ -156,7 +156,7 @@ async function getWalletCount() {
 async function updateWallet(params) {
   console.log('更新钱包');
   const { address,
-    name, userAgent, ip, twitterToken,discordToken ,language, webglVendor, webglRenderer,walletInitialized,chromeUserDataPath
+    name, userAgent, ipType,ipHost,ipPort,ipUsername,ipPassword,twitterToken,discordToken ,language, webglVendor, webglRenderer,walletInitialized,chromeUserDataPath
   } = params;
 
   if (!address) {
@@ -165,7 +165,7 @@ async function updateWallet(params) {
 
   try {
     const updatedWallet = await new Promise((resolve, reject) => {
-      walletDb.update({ address }, { $set: { name, userAgent, ip,twitterToken,discordToken, language, webglVendor, webglRenderer,walletInitialized,chromeUserDataPath } }, { returnUpdatedDocs: true }, (err, numAffected, affectedDocuments) => {
+      walletDb.update({ address }, { $set: { name, userAgent, ipType,ipHost,ipPort,ipUsername,ipPassword,twitterToken,discordToken, language, webglVendor, webglRenderer,walletInitialized,chromeUserDataPath } }, { returnUpdatedDocs: true }, (err, numAffected, affectedDocuments) => {
         if (err) {
           reject(err);
         } else {
@@ -258,7 +258,7 @@ async function exportWallets(addresses, directory) {
     const ws = wb.addWorksheet('Sheet 1');
     
     // Set headers
-    ws.addRow(['address', 'mnemonic', 'privateKey','name','IP','twitterToken','discordToken', 'userAgent', 'language', 'webglVendor', 'webglRenderer']);
+    ws.addRow(['address', 'mnemonic', 'privateKey','name','ipType','ipHost','ipPort','ipUsername','ipPassword','twitterToken','discordToken', 'userAgent', 'language', 'webglVendor', 'webglRenderer']);
     
     // Add data
     wallets.forEach(wallet => {
@@ -267,11 +267,14 @@ async function exportWallets(addresses, directory) {
         wallet.mnemonic || '', // Ensure empty string if value is null
         wallet.privateKey || '', // Ensure empty string if value is null
         wallet.name || '', // Ensure empty string if value is null
-        wallet.ip || '', // Ensure empty string if value is null
+        wallet.ipType || '', // Ensure empty string if value is null
+        wallet.ipHost || '', // Ensure empty string if value is null
+        wallet.ipPort || '', // Ensure empty string if value is null
+        wallet.ipUsername || '', // Ensure empty string if value is null
+        wallet.ipPassword || '', // Ensure empty string if value is null
         wallet.twitterToken || '', //
         wallet.discordToken || '', //
         wallet.userAgent || '', // Ensure empty string if value is null
-        
         wallet.language || '', // Ensure empty string if value is null
         wallet.webglVendor || '', // Ensure empty string if value is null
         wallet.webglRenderer || '' // Ensure empty string if value is null
@@ -302,7 +305,7 @@ async function importWallets(filePath) {
     const wallets = [];
 
     // Define column headers
-    const columnHeaders = ['address', 'mnemonic', 'privateKey', 'name', 'IP','twitterToken','discordToken','userAgent', 'language', 'webglVendor', 'webglRenderer'];
+    const columnHeaders = ['address', 'mnemonic', 'privateKey', 'name', 'ipType','ipHost','ipPort','ipUsername','ipPassword','twitterToken','discordToken','userAgent', 'language', 'webglVendor', 'webglRenderer'];
 
     // Check if column headers match
     const headerRow = ws.getRow(1);
@@ -323,20 +326,27 @@ async function importWallets(filePath) {
     // Iterate over rows
     for (let rowNumber = 2; rowNumber <= ws.rowCount; rowNumber++) {
       const row = ws.getRow(rowNumber);
+      let num = Math.floor((walletCount+rowNumber-1)/10);
+      let zeroStr = ''
+      for (let j = 0; j < 5-num; j++) {
+        zeroStr += '0';
+      }
       const wallet = {
         address: row.getCell(1).value,
         mnemonic: row.getCell(2).value,
         privateKey: row.getCell(3).value,
-        name: row.getCell(4).value || `钱包${walletCount + rowNumber - 1}`,
-        ip: row.getCell(5).value,
-        twitterToken: row.getCell(6).value,
-        discordToken: row.getCell(7).value,
-        userAgent: row.getCell(8).value,
-        
-
-        language: row.getCell(9).value,
-        webglVendor: row.getCell(10).value,
-        webglRenderer: row.getCell(11).value
+        name: row.getCell(4).value || `钱包${zeroStr}${walletCount + rowNumber - 1}`,
+        ipType: row.getCell(5).value,
+        ipHost: row.getCell(6).value,
+        ipPort: row.getCell(7).value,
+        ipUsername: row.getCell(8).value,
+        ipPassword: row.getCell(9).value,
+        twitterToken: row.getCell(10).value,
+        discordToken: row.getCell(11).value,
+        userAgent: row.getCell(12).value,
+        language: row.getCell(13).value,
+        webglVendor: row.getCell(14).value,
+        webglRenderer: row.getCell(15).value
       };
 
       // Log the first wallet

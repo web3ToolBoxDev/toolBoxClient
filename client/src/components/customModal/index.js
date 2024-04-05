@@ -31,11 +31,11 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
             <Modal.Header closeButton>
                 <Modal.Title>{title}</Modal.Title>
             </Modal.Header>
-            <Modal.Body>
+            <Modal.Body style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
                 {rowList && rowList.map((row, rowIndex) => (
-                    <Row key={rowIndex}>
+                    <Row key={rowIndex} style={{margin:'1px'}}>
                         {row.map((item, colIndex) => (
-                            <Col key={colIndex} md={item.colWidth} style={item.style}>
+                            <Col key={colIndex} md={item.colWidth} style={{...item.style}}>
                                 {item.type === 'label' && (
                                     <Form.Label className="text-wrap">{item.text}</Form.Label>
                                 )}
