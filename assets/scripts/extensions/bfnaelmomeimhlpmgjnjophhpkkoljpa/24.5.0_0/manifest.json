@@ -1,0 +1,41 @@
+{
+   "background": {
+      "persistent": true,
+      "scripts": [ "background/background.js" ]
+   },
+   "browser_action": {
+      "default_popup": "popup.html",
+      "default_title": "Phantom"
+   },
+   "commands": {
+      "_execute_browser_action": {
+         "suggested_key": {
+            "chromeos": "Alt+Shift+P",
+            "linux": "Alt+Shift+P",
+            "mac": "Alt+Shift+P",
+            "windows": "Alt+Shift+P"
+         }
+      }
+   },
+   "content_scripts": [ {
+      "all_frames": true,
+      "js": [ "content-script/contentScript.js" ],
+      "matches": [ "file://*/*", "http://*/*", "https://*/*" ],
+      "run_at": "document_start"
+   } ],
+   "content_security_policy": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self' blob:",
+   "description": "A crypto wallet reimagined for DeFi & NFTs",
+   "icons": {
+      "128": "icon128.png",
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "512": "icon512.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjcmb0xbGzvg9N2018hVht6y7J6bJjiYtYuw2Mtxrr2vcKXKImxmrryTY9ksBV/00PdqWCHr0DOF6H9gofmTCyOIFGJ37+XejfmWjbkB6qWJHCH1zxiKGCG7TAoGN/Ony4jgsseIZlOmLDOR1+iiNz8dqdth7twRZ4dp+HqjG7e6M7Nj0tRnUscYSdxJCa0pz8V9F442QbzEh/41O3zAo/gP0dqVk3LYqX7xalXPNsTUm9MG1wZcL1jQHi96Oc5nUPQY32gAMDv+CrBr5ylAsDB36cgQSEKdQzFXgVRDq0DJ+Z93CAQ4tHcWNm8jd2YQtp0KuNmwgUec0cAM0UATW6QIDAQAB",
+   "manifest_version": 2,
+   "name": "Phantom",
+   "permissions": [ "storage", "unlimitedStorage", "activeTab", "alarms", "tabs", "http://*/*", "https://*/*" ],
+   "update_url": "https://clients2.google.com/service/update2/crx",
+   "version": "24.5.0",
+   "web_accessible_resources": [ "fonts/*", "ethAlwaysAsk.js", "ethUseMetaMask.js", "ethUsePhantom.js" ]
+}
