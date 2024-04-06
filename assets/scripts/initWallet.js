@@ -117,6 +117,79 @@ setInterval(() => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function initPhantomWallet(words){
+    await sleep(5000)
+    // 初始化phantom钱包
+    const phantom_page = await browser.newPage();
+    await phantom_page.goto('chrome-extension://bfnaelmomeimhlpmgjnjophhpkkoljpa/onboarding.html')
+    // const element = await phantom_page.waitForSelector('[data-testid="import-recovery-phrase-button"]', { timeout: 3000 })
+    await sleep(3000)
+    const element = await phantom_page.$('button[data-testid="import-recovery-phrase-button"]')
+    console.log(element)
+    await element.click()
+    await sleep(3000)
+    for (let i = 0; i < words.length; i++) {
+        await phantom_page.type(`input[data-testid="secret-recovery-phrase-word-input-${i}"]`, words[i], { delay: 50 })
+    }
+    
+    await sleep(1000)
+    const inport_element = await phantom_page.waitForSelector('[data-testid="onboarding-form-submit-button"]', { timeout: 3000 })
+    await inport_element.click()
+    
+    await sleep(3000)
+    const multichain_element = await phantom_page.waitForSelector('[data-testid="onboarding-form-submit-button"]', { timeout: 30000 })
+    await multichain_element.click()
+    
+    await sleep(3000)
+    await phantom_page.type('input[data-testid="onboarding-form-password-input"]', 'web3ToolBox', { delay: 50 })
+    await sleep(100)
+    await phantom_page.type('input[data-testid="onboarding-form-confirm-password-input"]', 'web3ToolBox', { delay: 50 })
+    await sleep(100)
+    await phantom_page.click('input[data-testid="onboarding-form-terms-of-service-checkbox"]');
+    await sleep(1000)
+    await phantom_page.click('button[data-testid="onboarding-form-submit-button"]');
+    await sleep(1000)
+    await phantom_page.click('button[data-testid="onboarding-form-submit-button"]');
+    await sleep(1000)
+}
+
+async function initMetamaskWallet(words) {
+    const page = await browser.newPage();
+    await page.goto('chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/home.html#initialize/welcome')
+    try {
+        await page.bringToFront()
+        const element = await page.waitForSelector('[data-testid="first-time-flow__button"]', { timeout: 3000 })
+        await element.click()
+    } catch (error) {
+        try {
+            let unLockBtn = await page.waitForSelector('[data-testid="unlock-submit"]', { timeout: 3000 })
+            console.log('metamask already initialized')
+        } catch (error) {
+            browser.close()
+        }
+    }
+    await sleep(3000);
+    const element2 = await page.waitForSelector('[data-testid="page-container-footer-next"]')
+    await element2.click()
+    await sleep(3000)
+    const element3 = await page.waitForSelector('[data-testid="import-wallet-button"]')
+    await element3.click()
+    await sleep(3000)
+    for (let i = 0; i < words.length; i++) {
+        await page.type('#import-srp__srp-word-' + i, words[i], { delay: 10 })
+    }
+    await page.type('#password', 'web3ToolBox', { delay: 50 })
+    await page.type('#confirm-password', 'web3ToolBox', { delay: 50 })
+    await page.click("#create-new-vault__terms-checkbox");
+    await sleep(2000)
+    const element4 = await page.waitForSelector('[type="submit"]')
+    await element4.click()
+    await sleep(2000)
+    const element5 = await page.waitForSelector('[data-testid="EOF-complete-button"]')
+    await element5.click()
+    await sleep(2000)
+}
+
 // 进行任务逻辑
 async function runTask() {
     console.log('任务开始执行');
@@ -150,50 +223,14 @@ async function runTask() {
         defaultViewport: null,
         args: argArr
     }); // Change headless to false for debugging
-    const page = await browser.newPage();
-    await page.goto('chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/home.html#initialize/welcome')
-
-    try {
-        await page.bringToFront()
-        const element = await page.waitForSelector('[data-testid="first-time-flow__button"]', { timeout: 3000 })
-        await element.click()
-    } catch (error) {
-        try {
-            let unLockBtn = await page.waitForSelector('[data-testid="unlock-submit"]', { timeout: 3000 })
-            
-            console.log('already initialized')
-            browser.close()
-            sendTaskSuccess();
-            sendTaskCompleted();
-            exit();
-        } catch (error) {
-            browser.close()
-        }
-    }
-    await sleep(3000);
-    const element2 = await page.waitForSelector('[data-testid="page-container-footer-next"]')
-    await element2.click()
-    await sleep(3000)
-    const element3 = await page.waitForSelector('[data-testid="import-wallet-button"]')
-    await element3.click()
-    await sleep(3000)
     let words = wallet.mnemonic.split(' ')
-    for (let i = 0; i < words.length; i++) {
-        await page.type('#import-srp__srp-word-' + i, words[i], { delay: 10 })
-    }
-    await page.type('#password', 'web3ToolBox', { delay: 50 })
-    await page.type('#confirm-password', 'web3ToolBox', { delay: 50 })
-    await page.click("#create-new-vault__terms-checkbox");
-    await sleep(2000)
-    const element4 = await page.waitForSelector('[type="submit"]')
-    await element4.click()
-    await sleep(2000)
-    const element5 = await page.waitForSelector('[data-testid="EOF-complete-button"]')
-    await element5.click()
-    await sleep(2000)
+    // 初始化metamask钱包
+    initMetamaskWallet(words)
+    // 初始化phantom钱包
+    initPhantomWallet(words)
+
     sendTaskSuccess();
     browser.close()
-
     sendTaskCompleted();
     exit();
 }

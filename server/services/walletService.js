@@ -8,11 +8,12 @@ const ethers = require('ethers');
 const taskServiceManager = require('./taskService').getInstance();
 const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
-const {mnemonicToSeed} = require('bip39');
-const { Keypair } = require('@solana/web3.js');
-const {BIP32Factory } = require('bip32');
-const ecc = require('tiny-secp256k1');
-const bip32 = BIP32Factory(ecc);
+
+const nacl = require('tweetnacl');
+const ed25519 = require('ed25519-hd-key');
+const { mnemonicToSeedSync } = require('bip39');
+const { PublicKey  } = require('@solana/web3.js');
+
 
 
 console.log('wallet isBuild:', isBuild)
@@ -76,13 +77,18 @@ async function createWallet(params) {
     const chromeUserDataPath = path.join(userDataPath, address);
 
     // 将助记词转换为种子
-    const seed = await mnemonicToSeed(mnemonic);
-    const derivedSeed = bip32.fromSeed(seed).derivePath("m/44'/501'/0'/0'");
-    const keypair = Keypair.fromSeed(derivedSeed.privateKey.slice(0, 32));
-
+    const seed = mnemonicToSeedSync(mnemonic);
+    const derivedSeed = ed25519.derivePath("m/44'/501'/0'/0'", seed.toString('hex')).key;
+    
+    // 从种子创建密钥对
+    const keyPair = nacl.sign.keyPair.fromSeed(derivedSeed.slice(0, 32));
+    
+    // 将公钥转换为Solana的公钥格式
+    const sol_address = new PublicKey(keyPair.publicKey).toString();
+    
+    const sol_secretKey = `[${[...keyPair.secretKey].toString()}]`
+    console.log('sol钱包信息', sol_address, sol_secretKey)
     // 获取sol钱包地址
-    const sol_address = keypair.publicKey.toBase58();
-    const sol_secretKey = `[${[...keypair.secretKey].toString()}]`
     const walletData = {name, address, mnemonic, privateKey, sol_address, sol_secretKey, walletInitialized: false, chromeUserDataPath };
     
     createDirectoryIfNotExists(chromeUserDataPath);
