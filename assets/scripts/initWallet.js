@@ -117,8 +117,8 @@ setInterval(() => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function initPhantomWallet(words){
-    await sleep(5000)
+async function initPhantomWallet(browser, words){
+    console.log('开始初始化Phantom')
     // 初始化phantom钱包
     const phantom_page = await browser.newPage();
     await phantom_page.goto('chrome-extension://bfnaelmomeimhlpmgjnjophhpkkoljpa/onboarding.html')
@@ -153,9 +153,11 @@ async function initPhantomWallet(words){
     await sleep(1000)
 }
 
-async function initMetamaskWallet(words) {
+async function initMetamaskWallet(browser, words) {
+    console.log('开始初始化metamaskaaaaaaaaaaaaaaaaaaa')
     const page = await browser.newPage();
     await page.goto('chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/home.html#initialize/welcome')
+    await sleep(5000)
     try {
         await page.bringToFront()
         const element = await page.waitForSelector('[data-testid="first-time-flow__button"]', { timeout: 3000 })
@@ -192,47 +194,53 @@ async function initMetamaskWallet(words) {
 
 // 进行任务逻辑
 async function runTask() {
-    console.log('任务开始执行');
-    const chromePath = ChromeLauncher.Launcher.getInstallations();
-    console.log('chromePath:', chromePath);
+    try {
+        console.log('任务开始执行');
+        const chromePath = ChromeLauncher.Launcher.getInstallations();
+        console.log('chromePath:', chromePath);
 
-    let wallet = taskData;
-    if (wallet.language)
-        puppeteer.use(lanPlugin({ language: wallet.language.split(',') }));
-    if (wallet.userAgent)
-        puppeteer.use(userAgentPlugin({ userAgent: wallet.userAgent }));
-    if (wallet.webglVendor && wallet.webglRenderer)
-        puppeteer.use(webglPlugin({ vendor: wallet.webglVendor, renderer: wallet.webglRenderer }));
-    let metamaskEx = path.resolve(__dirname, './extensions/nkbihfbeogaeaoehlefnkodbefgpgknn/10.22.2_0');
-    let phantomEx = path.resolve(__dirname, './extensions/bfnaelmomeimhlpmgjnjophhpkkoljpa/24.5.0_0');
-    let argArr = [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
-        '--disable-infobars',
-        // 添加更多的扩展，使用','隔开，并填入路径
-        `--disable-extensions-except=${metamaskEx},${phantomEx}`,
-    ];
-    if (wallet.ip)
-        argArr.push('--proxy-server=' + wallet.ip);
-    const browser = await puppeteer.launch({
-        headless: false,
-        executablePath: chromePath.executablePath,
-        ignoreDefaultArgs: ['--enable-automation'],
-        userDataDir: wallet.chromeUserDataPath,
-        defaultViewport: null,
-        args: argArr
-    }); // Change headless to false for debugging
-    let words = wallet.mnemonic.split(' ')
-    // 初始化metamask钱包
-    initMetamaskWallet(words)
-    // 初始化phantom钱包
-    initPhantomWallet(words)
+        let wallet = taskData;
+        if (wallet.language)
+            puppeteer.use(lanPlugin({ language: wallet.language.split(',') }));
+        if (wallet.userAgent)
+            puppeteer.use(userAgentPlugin({ userAgent: wallet.userAgent }));
+        if (wallet.webglVendor && wallet.webglRenderer)
+            puppeteer.use(webglPlugin({ vendor: wallet.webglVendor, renderer: wallet.webglRenderer }));
+        let metamaskEx = path.resolve(__dirname, './extensions/nkbihfbeogaeaoehlefnkodbefgpgknn/10.22.2_0');
+        let phantomEx = path.resolve(__dirname, './extensions/bfnaelmomeimhlpmgjnjophhpkkoljpa/24.5.0_0');
+        let argArr = [
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disabled-setupid-sandbox',
+            '--disable-infobars',
+            // 添加更多的扩展，使用','隔开，并填入路径
+            `--disable-extensions-except=${metamaskEx},${phantomEx}`,
+        ];
+        if (wallet.ip)
+            argArr.push('--proxy-server=' + wallet.ip);
+        const browser = await puppeteer.launch({
+            headless: false,
+            executablePath: chromePath.executablePath,
+            ignoreDefaultArgs: ['--enable-automation'],
+            userDataDir: wallet.chromeUserDataPath,
+            defaultViewport: null,
+            args: argArr
+        }); // Change headless to false for debugging
+        await sleep(5000)
+        let words = wallet.mnemonic.split(' ')
 
-    sendTaskSuccess();
-    browser.close()
-    sendTaskCompleted();
-    exit();
+        // 初始化metamask钱包
+        await initMetamaskWallet(browser, words)
+        
+        // 初始化phantom钱包
+        await initPhantomWallet(browser, words)
+        sendTaskSuccess();
+        browser.close()
+        sendTaskCompleted();
+        exit();
+    } catch (error) {
+        console.log(error)
+    }
 }
 
 (async () => {
