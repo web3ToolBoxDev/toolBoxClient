@@ -8,6 +8,11 @@ const ethers = require('ethers');
 const taskServiceManager = require('./taskService').getInstance();
 const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
+const {mnemonicToSeed} = require('bip39');
+const { Keypair } = require('@solana/web3.js');
+const {BIP32Factory } = require('bip32');
+const ecc = require('tiny-secp256k1');
+const bip32 = BIP32Factory(ecc);
 
 
 console.log('wallet isBuild:', isBuild)
@@ -65,10 +70,21 @@ async function createWallet(params) {
     throw new Error('获取保存路径失败');
   }
   const userDataPath = res.path;
+
   try {
     const {name, address, mnemonic, privateKey } = params;
     const chromeUserDataPath = path.join(userDataPath, address);
-    const walletData = {name, address, mnemonic, privateKey, walletInitialized: false, chromeUserDataPath };
+
+    // 将助记词转换为种子
+    const seed = await mnemonicToSeed(mnemonic);
+    const derivedSeed = bip32.fromSeed(seed).derivePath("m/44'/501'/0'/0'");
+    const keypair = Keypair.fromSeed(derivedSeed.privateKey.slice(0, 32));
+
+    // 获取sol钱包地址
+    const sol_address = keypair.publicKey.toBase58();
+    const sol_secretKey = `[${[...keypair.secretKey].toString()}]`
+    const walletData = {name, address, mnemonic, privateKey, sol_address, sol_secretKey, walletInitialized: false, chromeUserDataPath };
+    
     createDirectoryIfNotExists(chromeUserDataPath);
     await new Promise((resolve, reject) => {
       walletDb.insert(walletData, (err, newWallet) => {
