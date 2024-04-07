@@ -585,6 +585,12 @@ const WalletManage = () => {
           私钥
         </Col>
         <Col md={1} style={{ fontSize: '1.0vw' }}>
+          sol地址
+        </Col>
+        <Col md={1} style={{ fontSize: '1.0vw' }}>
+          sol私钥
+        </Col>
+        <Col md={1} style={{ fontSize: '1.0vw' }}>
           初始化
         </Col>
         <Col md={1} style={{ fontSize: '1.0vw' }}>
@@ -622,6 +628,16 @@ const WalletManage = () => {
             </Col>
             <Col md={1}>
               <Button style={{ fontSize: '1.0vw',margin:'1px' }} onClick={() => { checkInfo("私钥", wallet.privateKey) }}>
+                查看
+              </Button>
+            </Col>
+            <Col md={1}>
+              <Button style={{ fontSize: '1.0vw',margin:'1px' }} onClick={() => { checkInfo("sol地址", wallet.sol_address) }}>
+                查看
+              </Button>
+            </Col>
+            <Col md={1}>
+              <Button style={{ fontSize: '1.0vw',margin:'1px' }} onClick={() => { checkInfo("sol私钥", wallet.sol_secretKey) }}>
                 查看
               </Button>
             </Col>

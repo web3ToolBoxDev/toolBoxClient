@@ -117,40 +117,47 @@ setInterval(() => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// 进行任务逻辑
-async function runTask() {
-    console.log('任务开始执行');
-    const chromePath = ChromeLauncher.Launcher.getInstallations();
-    console.log('chromePath:', chromePath);
+async function initPhantomWallet(browser, words){
+    console.log('开始初始化Phantom')
+    // 初始化phantom钱包
+    const phantom_page = await browser.newPage();
+    await phantom_page.goto('chrome-extension://bfnaelmomeimhlpmgjnjophhpkkoljpa/onboarding.html')
+    // const element = await phantom_page.waitForSelector('[data-testid="import-recovery-phrase-button"]', { timeout: 3000 })
+    await sleep(3000)
+    const element = await phantom_page.$('button[data-testid="import-recovery-phrase-button"]')
+    console.log(element)
+    await element.click()
+    await sleep(3000)
+    for (let i = 0; i < words.length; i++) {
+        await phantom_page.type(`input[data-testid="secret-recovery-phrase-word-input-${i}"]`, words[i], { delay: 50 })
+    }
+    
+    await sleep(1000)
+    const inport_element = await phantom_page.waitForSelector('[data-testid="onboarding-form-submit-button"]', { timeout: 3000 })
+    await inport_element.click()
+    
+    await sleep(3000)
+    const multichain_element = await phantom_page.waitForSelector('[data-testid="onboarding-form-submit-button"]', { timeout: 30000 })
+    await multichain_element.click()
+    
+    await sleep(3000)
+    await phantom_page.type('input[data-testid="onboarding-form-password-input"]', 'web3ToolBox', { delay: 50 })
+    await sleep(100)
+    await phantom_page.type('input[data-testid="onboarding-form-confirm-password-input"]', 'web3ToolBox', { delay: 50 })
+    await sleep(100)
+    await phantom_page.click('input[data-testid="onboarding-form-terms-of-service-checkbox"]');
+    await sleep(1000)
+    await phantom_page.click('button[data-testid="onboarding-form-submit-button"]');
+    await sleep(1000)
+    await phantom_page.click('button[data-testid="onboarding-form-submit-button"]');
+    await sleep(1000)
+}
 
-    let wallet = taskData;
-    if (wallet.language)
-        puppeteer.use(lanPlugin({ language: wallet.language.split(',') }));
-    if (wallet.userAgent)
-        puppeteer.use(userAgentPlugin({ userAgent: wallet.userAgent }));
-    if (wallet.webglVendor && wallet.webglRenderer)
-        puppeteer.use(webglPlugin({ vendor: wallet.webglVendor, renderer: wallet.webglRenderer }));
-    let metamaskEx = path.resolve(__dirname, './nkbihfbeogaeaoehlefnkodbefgpgknn/10.22.2_0');
-    let argArr = [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
-        '--disable-infobars',
-        '--disable-extensions-except=' + metamaskEx
-    ];
-    if (wallet.ip)
-        argArr.push('--proxy-server=' + wallet.ip);
-    const browser = await puppeteer.launch({
-        headless: false,
-        executablePath: chromePath.executablePath,
-        ignoreDefaultArgs: ['--enable-automation'],
-        userDataDir: wallet.chromeUserDataPath,
-        defaultViewport: null,
-        args: argArr
-    }); // Change headless to false for debugging
+async function initMetamaskWallet(browser, words) {
+    console.log('开始初始化metamaskaaaaaaaaaaaaaaaaaaa')
     const page = await browser.newPage();
     await page.goto('chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/home.html#initialize/welcome')
-
+    await sleep(5000)
     try {
         await page.bringToFront()
         const element = await page.waitForSelector('[data-testid="first-time-flow__button"]', { timeout: 3000 })
@@ -158,12 +165,7 @@ async function runTask() {
     } catch (error) {
         try {
             let unLockBtn = await page.waitForSelector('[data-testid="unlock-submit"]', { timeout: 3000 })
-            
-            console.log('already initialized')
-            browser.close()
-            sendTaskSuccess();
-            sendTaskCompleted();
-            exit();
+            console.log('metamask already initialized')
         } catch (error) {
             browser.close()
         }
@@ -175,7 +177,6 @@ async function runTask() {
     const element3 = await page.waitForSelector('[data-testid="import-wallet-button"]')
     await element3.click()
     await sleep(3000)
-    let words = wallet.mnemonic.split(' ')
     for (let i = 0; i < words.length; i++) {
         await page.type('#import-srp__srp-word-' + i, words[i], { delay: 10 })
     }
@@ -189,11 +190,57 @@ async function runTask() {
     const element5 = await page.waitForSelector('[data-testid="EOF-complete-button"]')
     await element5.click()
     await sleep(2000)
-    sendTaskSuccess();
-    browser.close()
+}
 
-    sendTaskCompleted();
-    exit();
+// 进行任务逻辑
+async function runTask() {
+    try {
+        console.log('任务开始执行');
+        const chromePath = ChromeLauncher.Launcher.getInstallations();
+        console.log('chromePath:', chromePath);
+
+        let wallet = taskData;
+        if (wallet.language)
+            puppeteer.use(lanPlugin({ language: wallet.language.split(',') }));
+        if (wallet.userAgent)
+            puppeteer.use(userAgentPlugin({ userAgent: wallet.userAgent }));
+        if (wallet.webglVendor && wallet.webglRenderer)
+            puppeteer.use(webglPlugin({ vendor: wallet.webglVendor, renderer: wallet.webglRenderer }));
+        let metamaskEx = path.resolve(__dirname, './extensions/nkbihfbeogaeaoehlefnkodbefgpgknn/10.22.2_0');
+        let phantomEx = path.resolve(__dirname, './extensions/bfnaelmomeimhlpmgjnjophhpkkoljpa/24.5.0_0');
+        let argArr = [
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disabled-setupid-sandbox',
+            '--disable-infobars',
+            // 添加更多的扩展，使用','隔开，并填入路径
+            `--disable-extensions-except=${metamaskEx},${phantomEx}`,
+        ];
+        if (wallet.ip)
+            argArr.push('--proxy-server=' + wallet.ip);
+        const browser = await puppeteer.launch({
+            headless: false,
+            executablePath: chromePath.executablePath,
+            ignoreDefaultArgs: ['--enable-automation'],
+            userDataDir: wallet.chromeUserDataPath,
+            defaultViewport: null,
+            args: argArr
+        }); // Change headless to false for debugging
+        await sleep(5000)
+        let words = wallet.mnemonic.split(' ')
+
+        // 初始化metamask钱包
+        await initMetamaskWallet(browser, words)
+        
+        // 初始化phantom钱包
+        await initPhantomWallet(browser, words)
+        sendTaskSuccess();
+        browser.close()
+        sendTaskCompleted();
+        exit();
+    } catch (error) {
+        console.log(error)
+    }
 }
 
 (async () => {

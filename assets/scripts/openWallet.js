@@ -136,6 +136,20 @@ async function openWallet(browser) {
     }
 }
 
+async function openPhantomWallet(browser) {
+    const page = await browser.newPage();
+    await page.goto('chrome-extension://bfnaelmomeimhlpmgjnjophhpkkoljpa/popup.html')
+    await sleep(5000);
+    try {
+        
+        await page.type('input[data-testid="unlock-form-password-input"]', 'web3ToolBox', { delay: 50 })
+        await sleep(2000);
+        await page.click('button[data-testid="unlock-form-submit-button"]');
+    }catch(error){
+        console.log('error:',error);
+    }
+}
+
 async function opentTwitter(browser,token) {
     const twitterPage = await browser.newPage();
     await twitterPage.goto('https://twitter.com');
@@ -214,13 +228,16 @@ async function runTask() {
         puppeteer.use(userAgentPlugin({ userAgent: wallet.userAgent }));
     if (wallet.webglVendor && wallet.webglRenderer)
         puppeteer.use(webglPlugin({ vendor: wallet.webglVendor, renderer: wallet.webglRenderer }));
-    let metamaskEx = path.resolve(__dirname, './nkbihfbeogaeaoehlefnkodbefgpgknn/10.22.2_0');
+    let metamaskEx = path.resolve(__dirname, './extensions/nkbihfbeogaeaoehlefnkodbefgpgknn/10.22.2_0');
+    let phantomEx = path.resolve(__dirname, './extensions/bfnaelmomeimhlpmgjnjophhpkkoljpa/24.5.0_0');
     let argArr = [
         '--disable-blink-features=AutomationControlled',
         '--no-sandbox',
         '--disabled-setupid-sandbox',
         '--disable-infobars',
-        '--disable-extensions-except=' + metamaskEx,
+        // 添加更多的扩展，使用','隔开，并填入路径
+        `--disable-extensions-except=${metamaskEx},${phantomEx}`,
+        `--load-extensions=${metamaskEx},${phantomEx}`,
         '--webrtc-ip-handling-policy=disable_non_proxied_udp',
         '--force-webrtc-ip-handling-policy',
     ];
@@ -250,8 +267,8 @@ async function runTask() {
         console.log('Browser disconnected.');
         // 在这里执行您希望在浏览器关闭时进行的操作
         closeSignal = true;
-
     });
+
     await sleep(5000)
     const pages = await browser.pages();
     if(pages.length>1){
@@ -260,7 +277,8 @@ async function runTask() {
         }
     }
     const page = pages[0];
-    openWallet(browser);
+    await openWallet(browser);
+    await openPhantomWallet(browser)
     if(wallet.twitterToken)
         opentTwitter(browser,wallet.twitterToken);
     if(wallet.discordToken)

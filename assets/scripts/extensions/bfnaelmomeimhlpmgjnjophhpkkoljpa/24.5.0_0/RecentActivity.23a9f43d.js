@@ -1,0 +1,4 @@
+(function(define){var __define;"function"==typeof define&&define.amd&&(__define=define,define=null);
+!function(){function e(e){return e&&e.__esModule?e.default:e}var n=("undefined"!=typeof globalThis?globalThis:"undefined"!=typeof self?self:"undefined"!=typeof window?window:"undefined"!=typeof global?global:{}).parcelRequire1d24;n.register("hxNzQ",(function(o,t){var r,i,l,f,u;r=o.exports,Object.defineProperty(r,"__esModule",{value:!0,configurable:!0}),i=o.exports,l="default",f=function(){return s},Object.defineProperty(i,l,{get:f,set:u,enumerable:!0,configurable:!0});var a=n("29o0l"),d=n("gCi36");var s=()=>e(a).createElement(d.History,{isSpam:!1})}))}();
+//# sourceMappingURL=RecentActivity.23a9f43d.js.map
+define=__define;})(window.define);

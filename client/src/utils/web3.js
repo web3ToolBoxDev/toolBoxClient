@@ -43,6 +43,7 @@ class Web3Manager {
     // 生成钱包
     createWallet() {
         const wallet = ethers.Wallet.createRandom();
+        
         return {
             mnemonic: wallet.mnemonic.phrase,
             privateKey: wallet.privateKey,

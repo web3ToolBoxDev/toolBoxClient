@@ -9,6 +9,12 @@ const taskServiceManager = require('./taskService').getInstance();
 const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
 
+const nacl = require('tweetnacl');
+const ed25519 = require('ed25519-hd-key');
+const { mnemonicToSeedSync } = require('bip39');
+const { PublicKey  } = require('@solana/web3.js');
+
+
 
 console.log('wallet isBuild:', isBuild)
 
@@ -65,10 +71,26 @@ async function createWallet(params) {
     throw new Error('获取保存路径失败');
   }
   const userDataPath = res.path;
+
   try {
     const {name, address, mnemonic, privateKey } = params;
     const chromeUserDataPath = path.join(userDataPath, address);
-    const walletData = {name, address, mnemonic, privateKey, walletInitialized: false, chromeUserDataPath };
+
+    // 将助记词转换为种子
+    const seed = mnemonicToSeedSync(mnemonic);
+    const derivedSeed = ed25519.derivePath("m/44'/501'/0'/0'", seed.toString('hex')).key;
+    
+    // 从种子创建密钥对
+    const keyPair = nacl.sign.keyPair.fromSeed(derivedSeed.slice(0, 32));
+    
+    // 将公钥转换为Solana的公钥格式
+    const sol_address = new PublicKey(keyPair.publicKey).toString();
+    
+    const sol_secretKey = `[${[...keyPair.secretKey].toString()}]`
+    console.log('sol钱包信息', sol_address, sol_secretKey)
+    // 获取sol钱包地址
+    const walletData = {name, address, mnemonic, privateKey, sol_address, sol_secretKey, walletInitialized: false, chromeUserDataPath };
+    
     createDirectoryIfNotExists(chromeUserDataPath);
     await new Promise((resolve, reject) => {
       walletDb.insert(walletData, (err, newWallet) => {
