@@ -135,6 +135,30 @@ const WalletManage = () => {
               colWidth: 7,
               style: { textAlign: 'left' },
             },
+            {
+              type: 'button',
+              text: '检查代理',
+              colWidth: 2,
+              style: { marginLeft: 'auto', fontSize: '1.0vw'},
+              click: () => {
+                console.log(openEditData)
+                apiManager.checkProxy({
+                  ipType: openEditData.ipType,
+                  ipHost: openEditData.ipHost,
+                  ipPort: openEditData.ipPort,
+                  ipUsername: openEditData.ipUsername,
+                  ipPassword: openEditData.ipPassword,
+                }).then((res) => {
+                  console.log(res);
+                  if (res.success) {
+                    const ipInfo = res.ipInfo;
+                    alert(`代理连接成功，IP地址为${ipInfo.ip},国家为${ipInfo.country}`);
+                  } else {
+                    alert('代理无法连接');
+                  }
+                });
+              },
+            }
           ],
           [
             {
@@ -414,20 +438,52 @@ const WalletManage = () => {
     navigator.clipboard.writeText(address);
   };
   const openWallet = (wallet) => {
-    console.log(wallet.walletInitialized);
-    if (!wallet.walletInitialized) {
-      alert('请先初始化钱包');
-      return;
-    }
-    apiManager.openWallet(wallet).then((res) => {
-      console.log(res);
-      if (res.success) {
-        alert('打开成功');
-      }else{
-        alert(res.message);
-      }
-      window.location.reload();
+    setModalProp({
+      show: true,
+      title: '打开钱包',
+      rowList: [
+        [
+          {
+            type: 'button',
+            text: '普通打开',
+            colWidth: 6,
+            style: { display: 'flex', alignItems: 'center', justifyContent: 'center'},
+            click: () => {
+              apiManager.openWallet({...wallet,useProxy:false}).then((res) => {
+                console.log(res);
+                if (res.success) {
+                  alert(res.message);
+                  handleModalClose();
+                  window.location.reload();
+                } else {
+                  alert(res.message);
+                }
+              });
+            },
+          },
+          {
+            type: 'button',
+            text: '代理打开',
+            colWidth: 6,
+            style: { display: 'flex', alignItems: 'center', justifyContent: 'center' },
+            click: () => {
+              apiManager.openWallet({...wallet,useProxy:true}).then((res) => {
+                console.log(res);
+                if (res.success) {
+                  alert(res.message);
+                  handleModalClose();
+                  window.location.reload();
+                } else {
+                  alert(res.message);
+                }
+              });
+            },
+          }
+        ],
+      ],
+      handleClose: handleModalClose,
     });
+    
   }
   const delectedSelectedWallets = () => {
     const selectedWalletsAddress = walletList
@@ -635,9 +691,10 @@ const WalletManage = () => {
               <Button onClick={() => { openEdit(wallet) }} style={{ fontSize: '1.0vw' }}>查看编辑</Button>
               {/* Add View/Edit button */}
 
-              <Button onClick={() => { openWallet(wallet) }} style={{ fontSize: '1.0vw' }} className='ms-2'>
+              <Button onClick={() => { openWallet({...wallet,useProxy:false}) }} style={{ fontSize: '1.0vw' }} className='ms-2'>
                 打开
               </Button>
+
             </Col>
           </Row>
         );

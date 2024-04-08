@@ -7,7 +7,7 @@ const webglPlugin = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendo
 const path = require('path');
 // const findChrome = require('carlo/lib/find_chrome');
 
-const proxyManager = require('./proxy/index');
+
 let ChromeLauncher;
 import('chrome-launcher').then((module) => {
     ChromeLauncher = module;
@@ -116,7 +116,6 @@ async function checkBrowserClosed(browser) {
     while (!closeSignal) {
         await sleep(5000);
     }
-    await proxyManager.stop();
     await browser.close();
     exit();
 }
@@ -224,19 +223,12 @@ async function runTask() {
         '--webrtc-ip-handling-policy=disable_non_proxied_udp',
         '--force-webrtc-ip-handling-policy',
     ];
-    if (wallet.ipType && wallet.ipHost && wallet.ipPort){
-
-        if(wallet.ipType === 'socks5'){
-            const url = await proxyManager.createSocksServer(wallet.ipHost, wallet.ipPort,wallet.ipUsername,wallet.ipPassword);
-            console.log(url);
-            argArr.push('--proxy-server=' + url);
-        }
-        if(wallet.ipType === 'http'){
-            const url = await proxyManager.createHttpServer(wallet.ipHost, wallet.ipPort,wallet.ipUsername,wallet.ipPassword);
-            console.log(url);
-            argArr.push('--proxy-server=' + url);
-        }
-    }        
+    if (wallet.ipInfo && wallet.ipInfo.proxyUrl){
+        argArr.push('--proxy-server=' + wallet.ipInfo.proxyUrl);
+        argArr.push('--timezone=' + wallet.ipInfo.timeZone);
+        argArr.push('--tz=' + wallet.ipInfo.timeZone);
+        argArr.push('--geolocation=' + wallet.ipInfo.ll.join(','));
+    }     
     const browser = await puppeteer.launch({
         headless: false,
         executablePath: chromePath.executablePath,

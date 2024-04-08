@@ -67,9 +67,13 @@ const ChooseWalletModal = ({ show, onHide, confirm }) => {
             </Modal.Body>
             <Modal.Footer>
                 <Button onClick={() => { 
-                    const selectedWallets = wallets.filter((wallet) => wallet.selected);
+                    const selectedWallets = wallets.filter((wallet) => wallet.selected).map((wallet) => ({ ...wallet, useProxy: false }));
                     confirm(selectedWallets);
-                }}>确认</Button>
+                }}>普通执行</Button>
+                <Button onClick={() => {
+                    const selectedWallets = wallets.filter((wallet) => wallet.selected).map((wallet) => ({ ...wallet, useProxy: true }));
+                    confirm(selectedWallets, true);
+                }}>代理执行</Button>
             </Modal.Footer>
         </Modal>
     );

@@ -26,7 +26,7 @@ class Config {
             } else {
                 console.log("当前平台不是 Windows 也不是 macOS");
             }
-            
+            this.ip2LocationDbPath = path.join(this.assetsPath, '/ip2location/IP2LOCATION-LITE-DB11.BIN');
         }
         return Config.instance;
     }
@@ -36,6 +36,9 @@ class Config {
             Config.instance = new Config();
         }
         return Config.instance;
+    }
+    getIp2LocationDbPath() {
+        return this.ip2LocationDbPath;
     }
     getIsBuild() {
         return this.isBuild;

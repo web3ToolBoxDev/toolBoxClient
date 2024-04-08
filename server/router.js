@@ -2,6 +2,7 @@
 const express = require('express');
 const walletService = require('./services/walletService');
 const taskService = require('./services/taskService').getInstance();
+const proxyService = require('./services/proxyService');
 const router = express.Router();
 
 // 定义路由
@@ -116,4 +117,9 @@ router.get('/checkWebSocket',async(req,res)=>{
   const message = await taskService.checkWebSocket();
   res.send(message);
 });
+router.post('/checkProxy',async(req,res)=>{
+  const {ipType,ipHost,ipPort,ipUsername,ipPassword} = req.body;
+  const message = await proxyService.checkProxy(ipType,ipHost,ipPort,ipUsername,ipPassword);
+  res.send(message);
+})
 module.exports = router;

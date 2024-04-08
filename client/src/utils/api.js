@@ -91,6 +91,12 @@ class APIManager {
         const res = await axios.get(`${this.baseUrl}/checkWebSocket`);
         return res.data;
     }
+    async checkProxy(params){
+        
+        const res = await axios.post(`${this.baseUrl}/checkProxy`, params);
+        return res.data;
+        
+    }
 
 }
 export default APIManager;

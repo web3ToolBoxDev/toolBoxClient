@@ -2,12 +2,13 @@ const Datastore = require('nedb');
 const path = require('path');
 const webSocketService = require('./webSocketService').getInstance();
 const spawn = require('child_process').spawn;
+const {startProxy,stopProxy,checkProxy} = require('./proxyService');
+
 
 const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
 
 const fs = require('fs');
-const e = require('express');
 console.log('task isBuild:',isBuild);
 
 const assetsPath = config.getAssetsPath();
@@ -24,6 +25,7 @@ class TaskService {
             this.webSocketService = webSocketService;
             console.log("WebSocketService instance:", this.webSocketService);
             this.isRunning = {};
+            this.isUseProxy = {};
             this.heartBeatTimeoutId = {};
             this.lastHeartBeatTime = {};
             this.isCompleted = {};
@@ -265,11 +267,24 @@ class TaskService {
         }
     }
     async runTask(taskName,taskData,execPath,scriptPath,taskSuccessCallBack = undefined,timeout = 60000){
+        if(taskData.useProxy && taskData.ipType && taskData.ipHost && taskData.ipPort){
+            const info = await checkProxy(taskData.ipType,taskData.ipHost,taskData.ipPort,taskData.ipUsername,taskData.ipPassword);
+            
+            if(!info.success){
+                this.webSocketService.sendToFront(this.taskLogMessage(`任务:${taskName}代理检测失败`));
+                return;
+            }
+            this.isUseProxy[taskName] = true;
+            const url =  await startProxy(taskName,taskData.ipType,taskData.ipHost,taskData.ipPort,taskData.ipUsername,taskData.ipPassword);
+            
+            taskData.ipInfo = {...info.ipInfo,proxyUrl:url};
+        }
         this.isRunning[taskName]=true;
-        let taskDataJson = JSON.stringify(taskData);
+        
         this.lastHeartBeatTime[taskName]=Date.now();
         this.isCompleted[taskName] = false;
         this.isSuccess[taskName] = false;
+        let taskDataJson = JSON.stringify(taskData);
         
         let url=this.webSocketService.createTaskWebSocket(taskName,(msg)=>{
             // console.log('收到任务进程消息',msg);
@@ -325,6 +340,10 @@ class TaskService {
             await sleep(1000);
             if(!this.isRunning[taskName] && this.isCompleted[taskName]){
                 this.isCompleted[taskName] = false;
+                if(this.isUseProxy[taskName]){
+                    stopProxy(taskName);
+                    delete this.isUseProxy[taskName];
+                }
                 break;
             }
         }
@@ -358,7 +377,7 @@ class TaskService {
         }
         this.runTask(taskName,wallet,this.defaultExecPath,this.openWalletScriptPath);
         this.checkCompleted(taskName);
-        return {success:true};
+        return {success:true,message:'任务已执行，请在任务信息查看任务信息'};
     }
     
     async getConfigInfo(taskName){
