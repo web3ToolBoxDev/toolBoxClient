@@ -110,9 +110,15 @@ setInterval(() => {
     "address":"钱包地址",
     "mnemonic":"钱包助记词",
     "privateKey":"钱包私钥",
-    "initialized":false, //是否完成初始化，初始化以后可以获取浏览器文件路径
+    "walletInitialized":false, //是否完成初始化，初始化以后可以获取浏览器文件路径
     "chromeUserDataPath":"浏览器用户文件储存路径",
-    "ip":"用户配置的代理ip",
+    "ipType":"http or socks5",
+    "ipHost": "ipUrl",
+    "ipPort": "ip端口",
+    "ipUsername": "ip用户名",
+    "ipPassword": "ip密码",
+    "twitterToken": "推特登录token",
+    "discordToken": "discord登录token",
     "userAgent":"用户配置的浏览器userAgent信息",
     "language":"用户配置的浏览器language信息",
     "webglVendor":"用户配置的浏览器webglVendor信息",
@@ -120,6 +126,13 @@ setInterval(() => {
     "config":{
       "default":{"默认配置"},
       "0x1234..5678":{"当0x1234..5678===data.address时，使用该配置替换default中的配置"}    
+    },
+    "ipInfo":{    //工具箱会启动一个ip代理服务，代理IP服务信息，全量执行的任务不支持
+      "proxyUrl":"工具箱启动的代理IP服务地址，使用puppeteer配置--proxy-server参数",
+      "ip":"代理ip地址",
+      "country":"国家缩写",
+      "ll":["latitude","longitude"],
+      "timezone":"代理IP时区"
     }
   },
   "time": "2024/3/15 17:56:11"
@@ -137,7 +150,13 @@ setInterval(() => {
       "privateKey":"钱包私钥",
       "walletInitialized":false, //是否完成初始化，初始化以后可以获取浏览器文件路径
       "chromeUserDataPath":"浏览器用户文件储存路径",
-      "ip":"用户配置的代理ip",
+      "ipType":"http or socks5",
+      "ipHost": "ipUrl",
+      "ipPort": "ip端口",
+      "ipUsername": "ip用户名",
+      "ipPassword": "ip密码",
+      "twitterToken": "推特登录token",
+      "discordToken": "discord登录token",
       "userAgent":"用户配置的浏览器userAgent信息",
       "language":"用户配置的浏览器language信息",
       "webglVendor":"用户配置的浏览器webglVendor信息",
@@ -149,13 +168,6 @@ setInterval(() => {
       "0x1234..5678":{"当0x1234..5678===wallets.address时，使用该配置替换default中的配置"},
       ...    
     },
-  "ipInfo":{
-    "proxyUrl":"工具箱启动的代理IP服务地址，使用puppeteer配置--proxy-server参数",
-    "ip":"代理ip地址",
-    "country":"国家缩写",
-    "ll":["latitude","longitude"],
-    "timezone":"代理IP时区"
-  }
   "time": "2024/3/15 17:56:11"
 }
 ```
