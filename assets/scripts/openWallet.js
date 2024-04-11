@@ -207,6 +207,7 @@ async function runTask() {
     console.log('任务开始执行');
     const chromePath = ChromeLauncher.Launcher.getInstallations();
     let wallet = taskData;
+    console.log("wallet",wallet)
     if (wallet.language)
         puppeteer.use(lanPlugin({ language: wallet.language.split(',') }));
     if (wallet.userAgent)
@@ -231,7 +232,7 @@ async function runTask() {
     }     
     const browser = await puppeteer.launch({
         headless: false,
-        executablePath: chromePath.executablePath,
+        executablePath: chromePath[0],
         ignoreDefaultArgs: ['--enable-automation'],
         userDataDir: wallet.chromeUserDataPath,
         defaultViewport: null,

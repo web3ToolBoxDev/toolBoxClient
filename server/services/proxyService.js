@@ -27,34 +27,38 @@ async function stopProxy(taskId){
 async function checkProxy(ipType,ipHost,ipPort,ipUsername,ipPassword){
     const url = await startProxy('check',ipType,ipHost,ipPort,ipUsername,ipPassword);
     const agent = new HttpProxyAgent(url);
-    
-    try{
-        const res = await Promise.race([
-            axios.get('http://ip-api.com/json/?fields=61439',{httpAgent:agent,timeout:5000}),
-            axios.get('https://api64.ipify.org?format=json',{httpsAgent:agent,timeout:5000})
-        ]);
-        let ip = '';
-        if(res.data.ip){
-            ip = res.data.ip;}
-        else if(res.data.query){
-            ip = res.data.query;
-        }else{
+    let cnt = 0
+    while(cnt < 3){
+        try{
+            const res = await Promise.race([
+                axios.get('http://ip-api.com/json/?fields=61439',{httpAgent:agent,timeout:5000}),
+                axios.get('https://api64.ipify.org?format=json',{httpsAgent:agent,timeout:5000})
+            ]);
+            let ip = '';
+            if(res.data.ip){
+                ip = res.data.ip;}
+            else if(res.data.query){
+                ip = res.data.query;
+            }else{
+                stopProxy('check');
+                return {success:false};
+            }
+            const ipInfo = ip2location.getAll(ip);
+            const {latitude, longitude, countryShort} = ipInfo;
+            const timeZone = find(Number(latitude), Number(longitude));
             stopProxy('check');
-            return {success:false};
+            return {success:true,ipInfo:{ip,
+                                        ll: [latitude, longitude],
+                                        country:countryShort,
+                                        timeZone:timeZone[0]}};
+        }catch(e){
+            cnt++;
+            console.error(e);
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
-        const ipInfo = ip2location.getAll(ip);
-        const {latitude, longitude, countryShort} = ipInfo;
-        const timeZone = find(Number(latitude), Number(longitude));
-        stopProxy('check');
-        return {success:true,ipInfo:{ip,
-                                    ll: [latitude, longitude],
-                                    country:countryShort,
-                                    timeZone:timeZone[0]}};
-    }catch(e){
-        console.error(e);
-        stopProxy('check');
-        return {success:false,message:'代理不可用'};
     }
+    stopProxy('check');
+    return {success:false};
 }
 
 module.exports = {

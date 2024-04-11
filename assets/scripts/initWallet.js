@@ -142,7 +142,7 @@ async function runTask() {
         argArr.push('--proxy-server=' + wallet.ip);
     const browser = await puppeteer.launch({
         headless: false,
-        executablePath: chromePath.executablePath,
+        executablePath: chromePath[0],
         ignoreDefaultArgs: ['--enable-automation'],
         userDataDir: wallet.chromeUserDataPath,
         defaultViewport: null,

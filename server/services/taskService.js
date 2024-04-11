@@ -157,6 +157,11 @@ class TaskService {
         }
         );
     }
+    shortTaskName(taskName){
+        const [address,splitTaskName] = taskName.split('_');
+        const shortAddress = address.slice(0,5)+'...'+address.slice(-5);
+        return `${shortAddress}_${splitTaskName}`;
+    }
     async execTask(taskName,wallets) {
         const task = await this.getTaskByName(taskName);
         if (!task) {
@@ -205,7 +210,7 @@ class TaskService {
                 }
                 break;
             case 'execAll':
-                let taskName = `${task.taskName}全量执行`;
+                let taskName = `${task.taskName}_全量执行`;
                 if(this.isRunning[taskName]){
                     return {success:false,message:'任务正在执行'};
                 }
@@ -251,10 +256,10 @@ class TaskService {
                 break;}
             case 'task_log':{
                 console.log('task_log:', data.message);
-                this.webSocketService.sendToFront(this.taskLogMessage(data.message));
+                this.webSocketService.sendToFront(this.taskLogMessage(`任务:${this.shortTaskName(taskName)} ${data.message}`));
                 break;}
             case 'terminate_process':{
-                this.webSocketService.sendToFront(this.taskLogMessage(`任务:${taskName}被终止`));
+                this.webSocketService.sendToFront(this.taskLogMessage(`任务:${this.shortTaskName(taskName)}被终止`));
                 break;}
             case 'task_completed':{
                 this.isCompleted[taskName] = true;
@@ -271,7 +276,7 @@ class TaskService {
             const info = await checkProxy(taskData.ipType,taskData.ipHost,taskData.ipPort,taskData.ipUsername,taskData.ipPassword);
             
             if(!info.success){
-                this.webSocketService.sendToFront(this.taskLogMessage(`任务:${taskName}代理检测失败`));
+                this.webSocketService.sendToFront(this.taskLogMessage(`任务:${this.shortTaskName(taskName)}代理检测失败`));
                 return;
             }
             this.isUseProxy[taskName] = true;
@@ -290,13 +295,13 @@ class TaskService {
             // console.log('收到任务进程消息',msg);
             this.processMsg(taskName,msg,taskDataJson)});
         const childProcess = spawn(execPath,[scriptPath,url]);
-        this.webSocketService.sendToFront(this.taskLogMessage(`任务:${taskName}开始执行`));
+        this.webSocketService.sendToFront(this.taskLogMessage(`任务:${this.shortTaskName(taskName)}开始执行`));
         childProcess.stdout.on('data', (data) => {
             console.log(`stdout: ${data}`);
         });
         childProcess.stderr.on('data', (data) => {
             console.error(`stderr: ${data}`);
-            const message = `任务:${taskName}发生错误:${data}`;
+            const message = `任务:${this.shortTaskName(taskName)}发生错误:${data}`;
             this.isRunning[taskName]=false;
             this.webSocketService.closeTaskWebSocket();
 
@@ -315,20 +320,24 @@ class TaskService {
             const currentTime = Date.now();
             const heartBeatThreshold = currentTime - timeout;
             if (this.lastHeartBeatTime[taskName] < heartBeatThreshold) {
+                clearInterval(this.heartBeatTimeoutId[taskName]);
                 this.isRunning[taskName] = false;
                 this.webSocketService.closeTaskWebSocket(taskName);
-                this.webSocketService.sendToFront(this.taskLogMessage(`任务:${taskName}执行超时`));
-                clearInterval(this.heartBeatTimeoutId[taskName]);
+                this.webSocketService.sendToFront(this.taskLogMessage(`任务:${this.shortTaskName(taskName)}执行超时`));
+                this.isCompleted[taskName] = true;
+                this.isRunning[taskName] = false;
+                
+                return;
             } 
             if(this.isCompleted[taskName]){
                 clearInterval(this.heartBeatTimeoutId[taskName]);
                 if(taskSuccessCallBack){
                     if(this.isSuccess[taskName]){
                         taskSuccessCallBack(taskData);
-                        this.webSocketService.sendToFront(this.taskSuccessMessage(`任务:${taskName}执行成功`));
+                        this.webSocketService.sendToFront(this.taskSuccessMessage(`任务:${this.shortTaskName(taskName)}执行成功`));
                     }
                 }
-                this.webSocketService.sendToFront(this.taskCompletedMessage(`任务:${taskName}执行完成`));
+                this.webSocketService.sendToFront(this.taskCompletedMessage(`任务:${this.shortTaskName(taskName)}执行完成`));
                 this.isRunning[taskName] = false;
                 this.webSocketService.closeTaskWebSocket(taskName);
 
@@ -361,7 +370,7 @@ class TaskService {
         }
         for(let i=0;i<wallets.length;i++){
             let wallet=wallets[i];
-            let taskName = `initWallet_${wallet.address}`;
+            let taskName = `${wallet.address}_初始化`;
             if(this.isRunning[taskName]){
                 continue;
             }
@@ -370,7 +379,7 @@ class TaskService {
         }
     }
     async openWallet(wallet){
-        let taskName = `openWallet_${wallet.address}`;
+        let taskName = `${wallet.address}_打开`;
         console.log('wsFront',this.webSocketService.wsFrontServer)
         if(this.isRunning[taskName]){
             return {success:false,message:'任务正在执行'};
