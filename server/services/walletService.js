@@ -16,48 +16,10 @@ console.log('wallet isBuild:', isBuild)
 
 const assetsPath = config.getAssetsPath();
 
-
-// 新增一个钱包管理的表
-const walletDb = new Datastore({ filename: path.join(assetsPath, 'db/walletData.db'), autoload: true });
-
-// // 创建钱包数据模型
-// const WalletSchema = new Schema({
-//   address: String,
-//   mnemonic: String,
-//   privateKey: String,
-//   // 其他需要存储的钱包信息字段
-// });
-
-
-
-async function setSavePath(savePath) {
-  //使用将path写入assets文件夹内
-  console.log('设置保存路径:', savePath);
-  const pathJson = JSON.stringify({ path: savePath });
-  try{
-    fs.writeFileSync(path.join(assetsPath, 'savePath.json'), pathJson);
-    return {success:true};
-  }catch(error){
-    console.error('设置保存路径时出错:', error);
-    return {success:false,error:error};
-  }
-}
-async function getSavePath() {
-  //使用将path写入assets文件夹内
-  try{
-    const pathJson = fs.readFileSync(path.join(assetsPath, 'savePath.json'));
-    const pathObj = JSON.parse(pathJson);
-    return {success:true,path:pathObj.path};
-  }catch(error){
-    console.error('获取保存路径时出错:', error);
-    return {success:false,error:error};
-  }
-
-}
 async function createWallet(params) {
   console.log('创建钱包');
   console.log('参数:', params);
-  let res = await getSavePath();
+  let res = await config.getSavePath();
   if(!res.success){
     throw new Error('获取保存路径失败');
   }
@@ -68,7 +30,7 @@ async function createWallet(params) {
     const walletData = {name, address, mnemonic, privateKey, walletInitialized: false, chromeUserDataPath };
     createDirectoryIfNotExists(chromeUserDataPath);
     await new Promise((resolve, reject) => {
-      walletDb.insert(walletData, (err, newWallet) => {
+      config.getWalletDb().insert(walletData, (err, newWallet) => {
         if (err) {
           reject(err);
         } else {
@@ -90,7 +52,7 @@ async function getWalletByAddress(address) {
 
   try {
     const wallet = await new Promise((resolve, reject) => {
-      walletDb.findOne({ address }, (err, doc) => {
+      config.getWalletDb().findOne({ address }, (err, doc) => {
         if (err) {
           reject(err);
         } else {
@@ -112,7 +74,7 @@ async function getAllWallets() {
 
   try {
     const wallets = await new Promise((resolve, reject) => {
-      walletDb.find({}, (err, docs) => {
+      config.getWalletDb()?.find({}, (err, docs) => {
         if (err) {
           reject(err);
         } else {
@@ -134,7 +96,7 @@ async function getWalletCount() {
 
   try {
     const count = await new Promise((resolve, reject) => {
-      walletDb.count({}, (err, count) => {
+      config.getWalletDb().count({}, (err, count) => {
         if (err) {
           reject(err);
         } else {
@@ -162,7 +124,7 @@ async function updateWallet(params) {
 
   try {
     const updatedWallet = await new Promise((resolve, reject) => {
-      walletDb.update({ address }, { $set: { name, userAgent, ipType,ipHost,ipPort,ipUsername,ipPassword,twitterToken,discordToken, language, webglVendor, webglRenderer,walletInitialized,chromeUserDataPath } }, { returnUpdatedDocs: true }, (err, numAffected, affectedDocuments) => {
+      config.getWalletDb().update({ address }, { $set: { name, userAgent, ipType,ipHost,ipPort,ipUsername,ipPassword,twitterToken,discordToken, language, webglVendor, webglRenderer,walletInitialized,chromeUserDataPath } }, { returnUpdatedDocs: true }, (err, numAffected, affectedDocuments) => {
         if (err) {
           reject(err);
         } else {
@@ -191,7 +153,7 @@ async function deleteWallet(address) {
   }
   try {
     const numRemoved = await new Promise((resolve, reject) => {
-      walletDb.remove({ address }, {}, (err, numRemoved) => {
+      config.getWalletDb().remove({ address }, {}, (err, numRemoved) => {
         if (err) {
           reject(err);
         } else {
@@ -220,7 +182,7 @@ async function deleteWallets(addresses) {
 
   try {
     const numRemoved = await new Promise((resolve, reject) => {
-      walletDb.remove({ address: { $in: addresses } }, { multi: true }, (err, numRemoved) => {
+      config.getWalletDb().remove({ address: { $in: addresses } }, { multi: true }, (err, numRemoved) => {
         if (err) {
           reject(err);
         } else {
@@ -240,7 +202,7 @@ async function exportWallets(addresses, directory) {
   console.log('导出钱包:', addresses);
   try {
     const wallets = await new Promise((resolve, reject) => {
-      walletDb.find({ address: { $in: addresses } }, (err, docs) => {
+      config.getWalletDb().find({ address: { $in: addresses } }, (err, docs) => {
         if (err) {
           reject(err);
         } else {
@@ -372,7 +334,7 @@ async function importWallets(filePath) {
       if (!walletDbTemp) {
         // 设置walletInitialized为false,
         wallet.walletInitialized = false;
-        let res = await getSavePath();
+        let res = await config.getSavePath();
         if(!res.success){
           throw new Error('获取保存路径失败');
         }
@@ -392,7 +354,7 @@ async function importWallets(filePath) {
 
     // Insert wallets into the database
     await new Promise((resolve, reject) => {
-      walletDb.insert(wallets, (err, newDocs) => {
+      config.getWalletDb().insert(wallets, (err, newDocs) => {
         if (err) {
           reject(err);
         } else {
@@ -484,8 +446,6 @@ module.exports = {
   exportWallets,
   importWallets,
   initWallets,
-  setSavePath,
-  getSavePath,
   generateFingerPrints,
   getFingerPrintProgress
 };

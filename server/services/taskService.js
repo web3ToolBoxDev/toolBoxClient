@@ -13,10 +13,7 @@ console.log('task isBuild:',isBuild);
 
 const assetsPath = config.getAssetsPath();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const taskDb = new Datastore({
-    filename: path.join(assetsPath, '/db/task.db'),
-    autoload: true
-});
+
 class TaskService {
     static instance;
     constructor() {
@@ -124,7 +121,7 @@ class TaskService {
             taskObj.configSchema = JSON.parse(fs.readFileSync(taskObj.configSchemaPath, 'utf-8'));
         console.log('taskObj:',taskObj);
         return new Promise((resolve, reject) => {
-            taskDb.insert(taskObj, (err, doc) => {
+            config.getTaskDb().insert(taskObj, (err, doc) => {
                 if (err) {
                     reject(err);
                 } else {
@@ -136,7 +133,7 @@ class TaskService {
     }
     async getTaskByName(taskName) {
         return new Promise((resolve, reject) => {
-            taskDb.findOne({ taskName}, (err, doc) => {
+            config.getTaskDb().findOne({ taskName}, (err, doc) => {
                 if (err) {
                     reject(err);
                 } else {
@@ -147,7 +144,7 @@ class TaskService {
     }
     async getAllTasks() {
         return new Promise((resolve, reject) => {
-            taskDb.find({}, (err, docs) => {
+            config.getTaskDb().find({}, (err, docs) => {
                 if (err) {
                     reject(err);
                 } else {
@@ -232,7 +229,7 @@ class TaskService {
 
     async deleteTask(taskNames) {
         return new Promise((resolve, reject) => {
-            taskDb.remove({ taskName: { $in: taskNames } }, { multi: true }, (err, numRemoved) => {
+            config.getTaskDb().remove({ taskName: { $in: taskNames } }, { multi: true }, (err, numRemoved) => {
                 if (err) {
                     reject(err);
                 } else {
@@ -412,7 +409,7 @@ class TaskService {
         try{
             //更新task配置信息
             task.config = config;
-            taskDb.update({taskName:taskName},task,{returnUpdatedDocs:true});
+            config.getTaskDb().update({taskName:taskName},task,{returnUpdatedDocs:true});
             return {success:true};
         }catch(error){
             return {success:false,message:error.message};
