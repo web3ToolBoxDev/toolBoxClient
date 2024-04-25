@@ -222,6 +222,9 @@ class TaskService {
                 this.runTask(taskName,taskData,task.execPath||this.defaultExecPath,task.scriptPath);
                 this.checkCompleted(taskName);
                 break;
+            default:
+                break;
+            
             
 
         }

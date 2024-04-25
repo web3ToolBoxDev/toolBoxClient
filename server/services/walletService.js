@@ -8,6 +8,8 @@ const ethers = require('ethers');
 const taskServiceManager = require('./taskService').getInstance();
 const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
+const { createDirectoryIfNotExists } = require('../utils.js');
+const {generateRandomFingerPrint} = require('./fingerPrintService.js')
 
 
 console.log('wallet isBuild:', isBuild)
@@ -26,12 +28,7 @@ const walletDb = new Datastore({ filename: path.join(assetsPath, 'db/walletData.
 //   // 其他需要存储的钱包信息字段
 // });
 
-// Function to create directory if it does not exist
-function createDirectoryIfNotExists(directory) {
-  if (!fs.existsSync(directory)) {
-    fs.mkdirSync(directory, { recursive: true });
-  }
-}
+
 
 async function setSavePath(savePath) {
   //使用将path写入assets文件夹内
@@ -326,7 +323,8 @@ async function importWallets(filePath) {
     // Iterate over rows
     for (let rowNumber = 2; rowNumber <= ws.rowCount; rowNumber++) {
       const row = ws.getRow(rowNumber);
-      let num = Math.floor((walletCount+rowNumber-1)/10);
+      //10的对数向上取整
+      let num = Math.ceil(Math.log10(walletCount + rowNumber - 1));
       let zeroStr = ''
       for (let j = 0; j < 5-num; j++) {
         zeroStr += '0';
@@ -403,7 +401,7 @@ async function importWallets(filePath) {
       });
     });
 
-    message = `成功导入${wallets.length}个钱包,有${repeatNum}个钱包重复`;
+    let message = `成功导入${wallets.length}个钱包,有${repeatNum}个钱包重复`;
     return message;
   } catch (error) {
     console.error('导入钱包时出错:', error);
@@ -437,6 +435,35 @@ async function initWallets(addresses) {
   
 }
 
+let progressNum = 0;
+let totalGenerateNum = 0;
+async function updateWalletOfFingerPrints(addresses){
+  progressNum = 0;
+  totalGenerateNum = addresses.length;
+  for (let i = 0; i < addresses.length; i++) {
+    let wallet = await getWalletByAddress(addresses[i]);
+    if (!wallet) {
+      throw new Error('未找到匹配的钱包');
+    }
+    let fingerPrint = await generateRandomFingerPrint();
+    wallet.userAgent = fingerPrint.userAgent;
+    wallet.language = fingerPrint.language;
+    wallet.webglVendor = fingerPrint.webglVendor;
+    wallet.webglRenderer = fingerPrint.webglRenderer;
+    await updateWallet(wallet);
+    progressNum++;
+  }
+}
+//获取生成进度
+async function getFingerPrintProgress(){
+  console.log('获取生成进度:', progressNum,totalGenerateNum);
+  return {progressNum,totalGenerateNum};
+}
+async function generateFingerPrints(addresses){
+  updateWalletOfFingerPrints(addresses);
+  return {success:true,message:'生成指纹任务已创建'};
+}
+
 
 
 
@@ -458,7 +485,9 @@ module.exports = {
   importWallets,
   initWallets,
   setSavePath,
-  getSavePath
+  getSavePath,
+  generateFingerPrints,
+  getFingerPrintProgress
 };
 
 

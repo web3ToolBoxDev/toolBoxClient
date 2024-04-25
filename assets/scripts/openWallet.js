@@ -208,8 +208,10 @@ async function runTask() {
     const chromePath = ChromeLauncher.Launcher.getInstallations();
     let wallet = taskData;
     console.log("wallet",wallet)
-    if (wallet.language)
-        puppeteer.use(lanPlugin({ language: wallet.language.split(',') }));
+    if (wallet.language){
+        const languages = wallet.language.split(',');
+        puppeteer.use(lanPlugin({languages}));
+    }
     if (wallet.userAgent)
         puppeteer.use(userAgentPlugin({ userAgent: wallet.userAgent }));
     if (wallet.webglVendor && wallet.webglRenderer)

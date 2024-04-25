@@ -3,6 +3,7 @@ const express = require('express');
 const walletService = require('./services/walletService');
 const taskService = require('./services/taskService').getInstance();
 const proxyService = require('./services/proxyService');
+const fingerPrintService = require('./services/fingerPrintService');
 const router = express.Router();
 
 // 定义路由
@@ -120,6 +121,34 @@ router.get('/checkWebSocket',async(req,res)=>{
 router.post('/checkProxy',async(req,res)=>{
   const {ipType,ipHost,ipPort,ipUsername,ipPassword} = req.body;
   const message = await proxyService.checkProxy(ipType,ipHost,ipPort,ipUsername,ipPassword);
+  res.send(message);
+})
+//获取指纹信息数量
+router.get('/getFingerPrintCount',async(req,res)=>{
+  const count = await fingerPrintService.getFingerPrintCount();
+  res.send(count);
+})
+//导入指纹信息
+router.post('/loadFingerPrints',async(req,res)=>{
+  const filePath = req.body.filePath;
+  const message = await fingerPrintService.loadFingerPrints(filePath);
+  res.send(message);
+})
+//生成指纹
+router.post('/generateFingerPrints',async(req,res)=>{
+  const addresses = req.body.addresses;
+  const message = await walletService.generateFingerPrints(addresses);
+  res.send(message);
+})
+//获取指纹生成进度
+router.get('/getFingerPrintProgress',async(req,res)=>{
+  const message = await walletService.getFingerPrintProgress();
+  console.log('finger message:', message);
+  res.send(message);
+})
+//清空指纹数据
+router.get('/clearFingerPrints',async(req,res)=>{
+  const message = await fingerPrintService.clearFingerPrints();
   res.send(message);
 })
 module.exports = router;

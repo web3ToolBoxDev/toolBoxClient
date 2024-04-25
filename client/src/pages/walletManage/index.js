@@ -1,5 +1,5 @@
 import React, { useState, useEffect,useRef } from 'react';
-import { Container, Row, Col, Button, InputGroup, FormControl } from 'react-bootstrap';
+import { Container, Row, Col, Button, InputGroup, FormControl,ProgressBar } from 'react-bootstrap';
 import CustomModal from '../../components/customModal';
 import Web3Manager from '../../utils/web3';
 import APIManager from '../../utils/api';
@@ -357,10 +357,10 @@ const WalletManage = () => {
                 for (let i = 0; i < number; i++) {
                   let info = web3Manager.createWallet();
                   console.log(info.mnemonic, info.privateKey, info.address);
-                  let num = Math.floor((curWalletNum+i+1)/10);
-                  
+                  //求出当前钱包的10的对数向上取整
+                  let logNum = Math.ceil(Math.log10(curWalletNum + i + 1));
                   let zeroStr = ''
-                  for (let j = 0; j < 5-num; j++) {
+                  for (let j = 0; j < 5-logNum; j++) {
                     zeroStr += '0';
                   }
                   apiManager
@@ -596,6 +596,207 @@ const WalletManage = () => {
     });
   }
 
+  const generateFingerPrint = async() => {
+    if (!chromeSavePath){
+      alert('请先配置chrome数据存储路径');
+      return;
+    }
+    const selectedWalletsAddress = walletList.filter(wallet => wallet.selected).map(wallet => wallet.address);
+    //获取已导入指纹信息数量
+    let count = await apiManager.getFingerPrintCount();
+    childRef.current.setValueObj({progress:0});
+    setModalProp({
+      show: true,
+      title: '生成指纹',
+      rowList: [
+        [
+          {
+            type: 'label',
+            text: '已导入UserAgent数量',
+            colWidth: 4,
+            style: { textAlign: 'center',fontSize: '1.5vw'},
+          },
+          {
+            type: 'label',
+            text: count.windowsUserAgent + count.macUserAgent || 0,
+            colWidth: 6,
+            style: { textAlign: 'left',fontSize: '1.5vw'},
+          },
+        ],
+        [
+          {
+            type: 'label',
+            text: '已导入Language数量',
+            colWidth: 4,
+            style: { textAlign: 'center',fontSize: '1.5vw'},
+          },
+          {
+            type: 'label',
+            text: count.language || 0,
+            colWidth: 6,
+            style: { textAlign: 'left',fontSize: '1.5vw'},
+          },
+        ],
+        [
+          {
+            type: 'label',
+            text: '已导入Webgl数量',
+            colWidth: 4,
+            style: { textAlign: 'center',fontSize: '1.5vw'},
+          },
+          {
+            type: 'label',
+            text: count.windowsWebgl + count.macWebgl || 0,
+            colWidth: 6,
+            style: { textAlign: 'left',fontSize: '1.5vw'},
+          },
+          {
+            type: 'button',
+            text: '清空',
+            colWidth: 2,
+            style: { marginLeft: 'auto',fontSize: '1.0vw'},
+            click: () => {
+              apiManager.clearFingerPrints().then(async(res) => {
+                if (res) {
+                  alert(res);
+                  generateFingerPrint();
+
+                }
+              })
+            },
+          }
+        ],
+        [
+          {
+            type: 'label',
+            text: '已选择钱包数量',
+            colWidth: 4,
+            style: { textAlign: 'center',fontSize: '1.5vw'},
+          },
+          {
+            type: 'label',
+            text: selectedWalletsAddress.length,
+            colWidth: 6,
+            style: { textAlign: 'left',fontSize: '1.5vw'},
+          },
+        ],
+        [
+          {
+            type: 'label',
+            text: '生成进度',
+            colWidth: 4,
+            style: { textAlign: 'center',fontSize: '1.5vw'},
+          },
+          {
+            type: 'progress',
+            key: 'progress',
+            colWidth: 6,
+          },
+          {
+            type: 'button',
+            text: '生成',
+            colWidth: 2,
+            style: { marginLeft: 'auto',fontSize: '1.0vw'},
+            click: () => {
+              if (selectedWalletsAddress.length === 0) {
+                alert('请先选择钱包');
+                handleModalClose();
+                return;
+              }
+              apiManager.generateFingerPrints(selectedWalletsAddress).then((res) => {
+                if (res.success) {
+                  let id = setInterval(() => {
+                    apiManager.getFingerPrintProgress().then((res) => {
+                      console.log('progress',res.progressNum/res.totalGenerateNum*100);
+                      if(res.totalGenerateNum===selectedWalletsAddress.length){
+                        childRef.current.updadteValueObj('progress',res.progressNum/res.totalGenerateNum*100);
+                        if(res.progressNum === res.totalGenerateNum){
+                          clearInterval(id);
+                          alert('生成完成');
+                          window.location.reload();
+                        }
+                      }
+                    }).catch((error)=>{
+                      console.log(error)
+                      clearInterval(id);
+                    })
+                  }, 1000);
+                }
+              })
+            },
+          },
+        ],
+        [
+          {
+            type: 'label',
+            text: '导入指纹数据集',
+            colWidth: 4,
+            style: { textAlign: 'center',fontSize: '1.5vw'},
+          },
+          {
+            type: 'text',
+            key: 'fingerPrintPath',
+            colWidth: 6,
+            style: { textAlign: 'left',fontSize: '1.5vw'},
+            text:'请选择文件'
+          },
+          {
+            type: 'button',
+            text: '导入',
+            colWidth: 2,
+            style: { marginLeft: 'auto',fontSize: '1.0vw'},
+            click: () => {
+              if (!window.electronAPI) {
+                alert('请在Electron环境下运行');
+                return;
+              }
+              window.electronAPI.openFile().then((res) => {
+                console.log(res);
+                if (res) {
+                  apiManager.loadFingerPrints(res).then(async(res) => {
+                    if (res) {
+                      console.log(res);
+                      alert(res);
+                      generateFingerPrint();
+                    }
+                  })
+                }
+              });
+            },
+          }],
+          [
+            {
+              type: 'label',
+              text: '获取指纹数据集',
+              colWidth: 4,
+              style: { textAlign: 'center',fontSize: '1.5vw'},
+            },
+            {
+              type: 'text',
+              key: 'fingerPrintUrl',
+              colWidth: 6,
+              style: { textAlign: 'left',fontSize: '1.5vw'},
+              text:'https://web3toolbox.app/fingerPrint'
+            },
+            {
+              type: 'button',
+              text: '获取',
+              colWidth: 2,
+              style: { marginLeft: 'auto',fontSize: '1.0vw'},
+              click: () => {
+                if (!window.electronAPI) {
+                  alert('请在Electron环境下运行');
+                  return;
+                }
+                window.electronAPI.openLink('https://web3toolbox.app/fingerPrint')
+              },
+            },
+          ]
+      ],
+      handleClose: handleModalClose,
+    });
+  }
+
   return (
     <Container>
       <h1>钱包管理</h1>
@@ -622,6 +823,9 @@ const WalletManage = () => {
 
       <Button onClick={initWallets} className='ms-1' style={{ fontSize: '1.2vw' }}>
         初始化钱包
+      </Button>
+      <Button onClick={generateFingerPrint} className='ms-1' style={{ fontSize: '1.2vw' }}>
+        随机生成指纹
       </Button>
 
       <Row>
@@ -700,6 +904,8 @@ const WalletManage = () => {
         );
       })}
       <CustomModal ref={childRef} {...modalProp} />
+      {/* 显示指纹生成进度参数为 {progressNum,totalGenerateNum}*/}
+      
     </Container>
   );
 };

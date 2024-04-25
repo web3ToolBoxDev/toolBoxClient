@@ -97,6 +97,31 @@ class APIManager {
         return res.data;
         
     }
-
+    //获取指纹信息数量
+    async getFingerPrintCount(){
+        const res = await axios.get(`${this.baseUrl}/getFingerPrintCount`);
+        return res.data
+    }
+    //导入指纹excel
+    async loadFingerPrints(filePath){
+        const res = await axios.post(`${this.baseUrl}/loadFingerPrints`, { filePath: filePath });
+        return res.data;
+    }
+    //生成指纹数据
+    async generateFingerPrints(addresses){
+        const res = await axios.post(`${this.baseUrl}/generateFingerPrints`, { addresses: addresses });
+        return res.data;
+    }
+    //获取执行进度
+    async getFingerPrintProgress(){
+        const res = await axios.get(`${this.baseUrl}/getFingerPrintProgress`);
+        console.log('res:', res);
+        return res.data;
+    }
+    //清空指纹数据
+    async clearFingerPrints(){
+        const res = await axios.get(`${this.baseUrl}/clearFingerPrints`);
+        return res.data;
+    }
 }
 export default APIManager;

@@ -102,7 +102,7 @@ setInterval(() => {
 // 进行任务逻辑
 async function runTask() {
     console.log('任务开始执行');
-    startTime = Date.now();
+    const startTime = Date.now();
     // 模拟任务执行
     while (true) {
         await new Promise((resolve) => {

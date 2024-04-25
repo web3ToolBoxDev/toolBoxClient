@@ -1,5 +1,5 @@
 import React,{useState,useEffect,forwardRef,useImperativeHandle} from 'react';
-import { Modal, Button, Row, Col, Form } from 'react-bootstrap';
+import { Modal, Button, Row, Col, Form,ProgressBar } from 'react-bootstrap';
 import './index.scss';
 const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData },ref)=> {
     const [valueObj,setValueObj] = useState({});
@@ -70,6 +70,9 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
                                 )}
                                 {item.type === 'button' && (
                                     <Button className='ms-1' style ={item.style} onClick={item.click}>{item.text}</Button>
+                                )}
+                                {item.type === 'progress' && (
+                                    <ProgressBar now={valueObj[item.key]} />
                                 )}
                             </Col>
                         ))}
