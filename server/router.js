@@ -5,6 +5,7 @@ const taskService = require('./services/taskService').getInstance();
 const proxyService = require('./services/proxyService');
 const fingerPrintService = require('./services/fingerPrintService');
 const router = express.Router();
+const config = require('../config').getInstance();
 
 // 定义路由
 // router.get('/openScript', async(req, res) => {
@@ -106,11 +107,11 @@ router.delete('/deleteTask', async(req, res) => {
 });
 router.post('/setSavePath',async(req,res)=>{
   const path = req.body.path;
-  const message = await walletService.setSavePath(path);
+  const message = config.setSavePath(path);
   res.send(message);
 });
 router.get('/getSavePath',async(req,res)=>{
-  const message = await walletService.getSavePath();
+  const message = config.getSavePath();
   res.send(message);
 });
 
