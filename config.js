@@ -1,6 +1,7 @@
 const path = require('path');
-
-IS_BUILD = true;
+const Datastore = require('nedb');
+const fs = require('fs'); // 加入文件系统模块
+let IS_BUILD = true;
 // 方便调试: IS_BUILD=false yarn dev
 if (process.env["IS_BUILD"]?.toLowerCase() === "false") {
 	IS_BUILD = false;
