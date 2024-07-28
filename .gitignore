@@ -3,3 +3,4 @@ dist/
 client/build/
 assets/db/
 assets/savePath.json
+assets/scrpits/extensionInfo.json
