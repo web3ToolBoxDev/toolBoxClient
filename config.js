@@ -86,7 +86,7 @@ class Config {
 		return this.#taskDb;
 	}
 	loadDefaultTask() {
-		const defaultTaskConfig = require('./defaultTaskConfig.json');
+		const defaultTaskConfig = require(path.join(this.assetsPath, "/defaultTaskConfig.json"));
 		//根据taskName加载默认任务，如果不存在则插入
 		const taskNames = defaultTaskConfig.map((el) => el.taskName);
 		taskNames.forEach((taskName) => {
