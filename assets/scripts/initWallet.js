@@ -6,7 +6,7 @@ const userAgentPlugin = require('puppeteer-extra-plugin-stealth/evasions/user-ag
 const webglPlugin = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor');
 const path = require('path');
 const ChromeLauncher = require('chrome-launcher');
-const { send } = require('process');
+metamaskUrl = process.platform === 'win32' ? 'mjdpjdhjlfmaggncnpnmkgclolejmpap' : 'kkkcafaonfieeaemfckipjojojhbbnej';
 
 
 console.log('收到的URL参数:', url);
@@ -145,7 +145,7 @@ async function runTask() {
     const page = await browser.newPage();
     // await sleep(30000);
 
-    await page.goto('chrome-extension://kkkcafaonfieeaemfckipjojojhbbnej/home.html#onboarding/welcome',{waitUntil:'networkidle2'});
+    await page.goto(`chrome-extension://${metamaskUrl}/home.html#onboarding/welcome`,{waitUntil:'networkidle2'});
     await page.bringToFront();
     await sleep(2000);
     try{

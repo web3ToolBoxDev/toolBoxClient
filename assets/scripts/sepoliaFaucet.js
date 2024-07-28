@@ -6,7 +6,7 @@ const userAgentPlugin = require('puppeteer-extra-plugin-stealth/evasions/user-ag
 const webglPlugin = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor');
 const path = require('path');
 const ChromeLauncher = require('chrome-launcher');
-
+metamaskUrl = process.platform === 'win32' ? 'mjdpjdhjlfmaggncnpnmkgclolejmpap' : 'kkkcafaonfieeaemfckipjojojhbbnej';
 
 console.log('收到的URL参数:', url);
 
@@ -111,7 +111,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function openWallet(browser) {
     const page = await browser.newPage();
-    await page.goto('chrome-extension://kkkcafaonfieeaemfckipjojojhbbnej/home.html#unlock')
+    await page.goto(`chrome-extension://${metamaskUrl}/home.html#unlock`)
     await sleep(5000);
     try {
         await page.waitForSelector('#password');
@@ -136,11 +136,12 @@ async function autoFaucet(browser){
     //click connect wallet
     const ele = await page.waitForSelector('.my-8.text-center');
     await ele.click();
+
     
     //lisen for metamask
     browser.on('targetcreated', async (target) => {
         const page = await target.page();
-        if (page && page.url().includes('chrome-extension://kkkcafaonfieeaemfckipjojojhbbnej'))
+        if (page && page.url().includes(metamaskUrl))
         {
             await new Promise((resolve) => setTimeout(resolve, 3000));
             const next = await page.waitForSelector('[data-testid="page-container-footer-next"]',{timeout:5000});
@@ -153,7 +154,7 @@ async function autoFaucet(browser){
         }
     });
 
-    await sleep(5000);
+    await sleep(10000);
     //click metamask
     const ele2 = await page.waitForSelector('.btn.orange.w-full.my-2');
     await ele2.click();

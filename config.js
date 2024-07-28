@@ -7,6 +7,7 @@ if (process.env["IS_BUILD"]?.toLowerCase() === "false") {
 	IS_BUILD = false;
 }
 
+
 class Config {
     static instance = null;
     #walletDb;

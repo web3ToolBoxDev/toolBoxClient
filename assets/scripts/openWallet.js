@@ -8,7 +8,7 @@ const path = require('path');
 const ChromeLauncher = require('chrome-launcher');
 // const findChrome = require('carlo/lib/find_chrome');
 
-
+metamaskUrl = process.platform === 'win32' ? 'mjdpjdhjlfmaggncnpnmkgclolejmpap' : 'kkkcafaonfieeaemfckipjojojhbbnej';
 
 console.log('收到的URL参数:', url);
 
@@ -118,7 +118,8 @@ async function checkBrowserClosed(browser) {
 }
 async function openWallet(browser) {
     const page = await browser.newPage();
-    await page.goto('chrome-extension://kkkcafaonfieeaemfckipjojojhbbnej/home.html#unlock')
+    await sleep(5000);
+    await page.goto(`chrome-extension://${metamaskUrl}/home.html#unlock)`); // Change this to the URL of your MetaMask extension
     await sleep(5000);
     try {
         await page.waitForSelector('#password');
@@ -135,7 +136,7 @@ async function openWallet(browser) {
     }
 }
 
-async function opentTwitter(browser,token) {
+async function openTwitter(browser,token) {
     const twitterPage = await browser.newPage();
     await twitterPage.goto('https://twitter.com');
     await sleep(5000);
@@ -256,10 +257,10 @@ async function runTask() {
     }
     const page = pages[0];
     openWallet(browser);
-    // if(wallet.twitterToken)
-    //     opentTwitter(browser,wallet.twitterToken);
-    // if(wallet.discordToken)
-    //     openDiscord(browser,wallet.discordToken);
+    if(wallet.twitterToken)
+        openTwitter(browser,wallet.twitterToken);
+    if(wallet.discordToken)
+        openDiscord(browser,wallet.discordToken);
     
     await checkBrowserClosed(browser);
 }

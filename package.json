@@ -86,7 +86,7 @@
     "web-vitals": "^2.1.0"
   },
   "scripts": {
-    "dev": "IS_BUILD=false electron .",
+    "dev": "cross-env IS_BUILD=false electron .",
     "dist": "electron-builder",
     "start": "react-app-rewired start",
     "build": "react-app-rewired build --port 30001",
@@ -116,6 +116,7 @@
     "assert": "^2.1.0",
     "browserify-zlib": "^0.2.0",
     "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
     "crypto-browserify": "^3.12.0",
     "customize-cra": "^1.0.0",
     "dotenv": "^16.4.5",
