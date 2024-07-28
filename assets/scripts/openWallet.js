@@ -136,7 +136,7 @@ async function loadMetaMaskId(browser) {
         let extensionInfo = require(path.resolve(__dirname, './extensionInfo.json'));
         return extensionInfo.extensionId;
     }catch(e){
-        getMetaMaskId(browser);
+        return getMetaMaskId(browser);
     }
 }
     

@@ -10,8 +10,10 @@ let extensionId = '';
 async function getMetaMaskId(browser) {
     const page = await browser.newPage();
     await page.goto('chrome://extensions/');
+
     await sleep(5000);
     const extensionId = await page.evaluate(() => {
+
         const extensions = document.querySelectorAll('extensions-manager');
         const extension = extensions[0].shadowRoot.querySelector('extensions-item-list').shadowRoot.querySelector('extensions-item').getAttribute('id');
         return extension;
@@ -26,7 +28,7 @@ async function loadMetaMaskId(browser) {
         let extensionInfo = require(path.resolve(__dirname, './extensionInfo.json'));
         return extensionInfo.extensionId;
     }catch(e){
-        getMetaMaskId(browser);
+        return getMetaMaskId(browser);
     }
 }
 console.log('收到的URL参数:', url);
