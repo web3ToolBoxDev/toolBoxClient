@@ -44,7 +44,7 @@
           ]
         }
       ],
-      "icon": "client/build/logo_512x512.png"
+      "icon": "client/build/logo_266x256.png"
     }
   },
   "dependencies": {

@@ -1,7 +1,6 @@
 import { Container, Button, Row, Col, Spinner, Modal, Form } from 'react-bootstrap';
 import { useState, useEffect } from 'react';
 import Web3Manager from '../../../utils/web3';
-import APIManager from '../../../utils/api';
 import { eventEmitter } from '../../../utils/eventEmitter';
 import AddWalletModal from '../components/addWalletModal';
 import ChooseWalletModal from '../components/chooseWalletModal';

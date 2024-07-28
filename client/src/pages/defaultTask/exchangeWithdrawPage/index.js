@@ -9,56 +9,67 @@ import { shortAddress,formatNumber } from '../../../utils';
 
 
 
-const WithdrawConfigModal = ({show,onHide,data,config, confirm, confirmInfo})=>{
+const WithdrawConfigModal = ({ show, onHide, data, config, confirm, confirmInfo }) => {
     const [exchangeValue, setExchange] = useState('');
     const [currencyValue, setCurrency] = useState('');
     const [balanceInfo, setBalanceInfo] = useState({});
     const [networkList, setNetworkList] = useState({});
     const [networkValue, setNetwork] = useState('');
     const [totalBalance, setTotalBalance] = useState(null);
-    const [amount, setAmount] = useState(undefined);
+    const [amount, setAmount] = useState('');
+
+    const amountInputRef = useRef(null);
 
     useEffect(() => {
-        if(data){
-            setBalanceInfo(data.balanceInfo)
+        if (data) {
+            setBalanceInfo(data.balanceInfo);
         }
-        if(config){
+        if (config) {
             setExchange(config.exchange);
             setCurrency(config.currency);
             setNetwork(config.network);
             setAmount(config.amount);
-        }else{
+        } else {
             setExchange('');
             setCurrency('');
             setNetwork('');
         }
-    },[data]);
+    }, [data, config]);
+
+    useEffect(() => {
+        if (show && amountInputRef.current) {
+            amountInputRef.current.focus();
+        }
+    }, [show, networkValue]); // Include `networkValue` to trigger focus when network is selected
+
     const clickSetExchange = (e) => {
         setExchange(e.target.value);
         setCurrency('');
         setNetwork('');
         setTotalBalance(null);
-    }
+    };
+
     const clickSetCurrency = (e) => {
         setCurrency(e.target.value);
         let networks = balanceInfo[exchangeValue].filter((info) => info.currency === e.target.value)[0].networks;
         setNetworkList(networks);
         setTotalBalance(balanceInfo[exchangeValue].filter((info) => info.currency === e.target.value)[0].balance);
+    };
 
-    }
-    const clickConfirm = ()=>{
-        if(!exchangeValue || !currencyValue || !networkValue || !amount){
+    const clickConfirm = () => {
+        if (!exchangeValue || !currencyValue || !networkValue || !amount) {
             alert('请填写完整信息');
             return;
         }
         let config = {
-            exchange:exchangeValue,
-            currency:currencyValue,
-            network:networkValue,
-            amount:amount
-        }
-        confirm(config,confirmInfo);
-    }
+            exchange: exchangeValue,
+            currency: currencyValue,
+            network: networkValue,
+            amount: amount
+        };
+        confirm(config, confirmInfo);
+    };
+
     return (
         <Modal show={show} onHide={onHide} centered>
             <Modal.Header closeButton>
@@ -75,7 +86,7 @@ const WithdrawConfigModal = ({show,onHide,data,config, confirm, confirmInfo})=>{
                         </Form.Select>
                     </Col>
                 </Row>
-                {exchangeValue&&<Row>
+                {exchangeValue && <Row>
                     <Col>请选择币种</Col>
                     <Col>
                         <Form.Select value={currencyValue} onChange={(e) => clickSetCurrency(e)}>
@@ -88,7 +99,7 @@ const WithdrawConfigModal = ({show,onHide,data,config, confirm, confirmInfo})=>{
                         </Form.Select>
                     </Col>
                 </Row>}
-                {currencyValue&&<Row>
+                {currencyValue && <Row>
                     <Col>提币网络</Col>
                     <Col>
                         <Form.Select value={networkValue} onChange={(e) => setNetwork(e.target.value)}>
@@ -101,10 +112,16 @@ const WithdrawConfigModal = ({show,onHide,data,config, confirm, confirmInfo})=>{
                         </Form.Select>
                     </Col>
                 </Row>}
-                {networkValue&&<Row>
+                {networkValue && <Row>
                     <Col>提币数量</Col>
                     <Col>
-                        <Form.Control value={amount} onChange={(e)=>setAmount(e.target.value)}  type='text' placeholder={`余额${totalBalance}`} />
+                        <Form.Control
+                            ref={amountInputRef}
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            type='text'
+                            placeholder={`余额${totalBalance}`}
+                        />
                     </Col>
                 </Row>}
             </Modal.Body>
@@ -112,8 +129,8 @@ const WithdrawConfigModal = ({show,onHide,data,config, confirm, confirmInfo})=>{
                 <Button onClick={clickConfirm}>确认</Button>
             </Modal.Footer>
         </Modal>
-    )
-}
+    );
+};
 
 
 export default function ExchangeWithdrawPage({ task, returnMainPage }) {

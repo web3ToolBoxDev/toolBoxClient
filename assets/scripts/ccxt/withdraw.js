@@ -145,8 +145,9 @@ async function runTask() {
             sendTaskLog(`${address}提币缺少参数`);
             continue;
         }
+        exchangeInstance.timeout = 60000;
         try {
-            let withdrawResult = await exchangeInstance.withdraw(currency, amount, address, {network});
+            let withdrawResult = await exchangeInstance.withdraw(currency, amount, address, {network,timeout:60000});
             sendTaskLog(`${address}提币发起成功:${JSON.stringify(withdrawResult)}`);
             successInfo.success.push(address);
         } catch (error) {

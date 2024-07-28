@@ -6,8 +6,30 @@ const userAgentPlugin = require('puppeteer-extra-plugin-stealth/evasions/user-ag
 const webglPlugin = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor');
 const path = require('path');
 const ChromeLauncher = require('chrome-launcher');
-metamaskUrl = process.platform === 'win32' ? 'mjdpjdhjlfmaggncnpnmkgclolejmpap' : 'kkkcafaonfieeaemfckipjojojhbbnej';
 
+let extensionId = '';
+async function getMetaMaskId(browser) {
+    const page = await browser.newPage();
+    await page.goto('chrome://extensions/');
+    await sleep(5000);
+    const extensionId = await page.evaluate(() => {
+        const extensions = document.querySelectorAll('extensions-manager');
+        const extension = extensions[0].shadowRoot.querySelector('extensions-item-list').shadowRoot.querySelector('extensions-item').getAttribute('id');
+        return extension;
+    });
+    await page.close();
+    const fs = require('fs');
+    fs.writeFileSync(path.resolve(__dirname, './extensionInfo.json'), JSON.stringify({ extensionId }));
+    return extensionId;
+}
+async function loadMetaMaskId(browser) {
+    try{
+        let extensionInfo = require(path.resolve(__dirname, './extensionInfo.json'));
+        return extensionInfo.extensionId;
+    }catch(e){
+        getMetaMaskId(browser);
+    }
+}
 
 console.log('收到的URL参数:', url);
 
@@ -144,16 +166,23 @@ async function runTask() {
     }); // Change headless to false for debugging
     const page = await browser.newPage();
     // await sleep(30000);
+    extensionId = await loadMetaMaskId(browser);
+    try{
+        await page.goto(`chrome-extension://${extensionId}/home.html#onboarding/welcome`,{waitUntil:'networkidle2'});
+    }catch(e){
+        console.log('打开metamask失败');
+        extensionId = await getMetaMaskId(browser);
+        await page.goto(`chrome-extension://${extensionId}/home.html#onboarding/welcome`,{waitUntil:'networkidle2'});
+    }
 
-    await page.goto(`chrome-extension://${metamaskUrl}/home.html#onboarding/welcome`,{waitUntil:'networkidle2'});
     await page.bringToFront();
     await sleep(2000);
     try{
-        const checkbox = await page.waitForSelector('input.check-box');
+        const checkbox = await page.waitForSelector('input.check-box',{timeout:100000});
         await checkbox.click();
     }catch(e){
         //有可能已经初始化，检查是否输入密码
-        const passwordInput = await page.waitForSelector('#password');
+        const passwordInput = await page.waitForSelector('#password',{timeout:100000});
         if(passwordInput){
             console.log('已经初始化');
             browser.close();
@@ -167,40 +196,40 @@ async function runTask() {
         
     }
     
-    const importButton = await page.waitForSelector('button.btn-secondary');
+    const importButton = await page.waitForSelector('button.btn-secondary',{timeout:100000});
     await importButton.click();
-    const agreeButton = await page.waitForSelector('[data-testid="metametrics-i-agree"]');
+    const agreeButton = await page.waitForSelector('[data-testid="metametrics-i-agree"]',{timeout:100000});
     await agreeButton.click();
     let mnemonic = wallet.mnemonic;
     let words = mnemonic.split(' ')
     for (let i = 0; i < words.length; i++) {
         await page.type('#import-srp__srp-word-' + i, words[i], { delay: 10 })
     }
-    const confirmButton = await page.waitForSelector('[data-testid="import-srp-confirm"]');
+    const confirmButton = await page.waitForSelector('[data-testid="import-srp-confirm"]',{timeout:100000});
     await confirmButton.click();
 
     const password = 'web3ToolBox'
-    const passwordInput = await page.waitForSelector('[data-testid="create-password-new"]');
+    const passwordInput = await page.waitForSelector('[data-testid="create-password-new"]',{timeout:100000});
     await passwordInput.type(password, { delay: 10 });
-    const confirmPasswordInput = await page.waitForSelector('[data-testid="create-password-confirm"]');
+    const confirmPasswordInput = await page.waitForSelector('[data-testid="create-password-confirm"]',{timeout:100000});
     await confirmPasswordInput.type(password, { delay: 10 });
-    await sleep(1000);
-    const checkBox = await page.waitForSelector('[data-testid="create-password-terms"]');
+    await sleep(2000);
+    const checkBox = await page.waitForSelector('[data-testid="create-password-terms"]',{timeout:100000});
     await checkBox.click();
-    await sleep(1000);
-    const createButton = await page.waitForSelector('[data-testid="create-password-import"]');
+    await sleep(2000);
+    const createButton = await page.waitForSelector('[data-testid="create-password-import"]',{timeout:100000});
     await createButton.click();
-    await sleep(1000);
-    const completeButton = await page.waitForSelector('[data-testid="onboarding-complete-done"]');
+    await sleep(5000);
+    const completeButton = await page.waitForSelector('[data-testid="onboarding-complete-done"]',{timeout:100000});
     await completeButton.click();
-    await sleep(1000);
-    const nextButton = await page.waitForSelector('[data-testid="pin-extension-next"]');
+    await sleep(2000);
+    const nextButton = await page.waitForSelector('[data-testid="pin-extension-next"]',{timeout:100000});
     await nextButton.click();
-    await sleep(1000);
-    const doneButton = await page.waitForSelector('[data-testid="pin-extension-done"]');
+    await sleep(2000);
+    const doneButton = await page.waitForSelector('[data-testid="pin-extension-done"]',{timeout:100000});
     await doneButton.click();
-    await sleep(1000);
-    const enableButton = await page.waitForSelector('button.mm-box--color-primary-inverse.mm-box--background-color-primary-default.mm-box--rounded-pill');
+    await sleep(2000);
+    const enableButton = await page.waitForSelector('button.mm-box--color-primary-inverse.mm-box--background-color-primary-default.mm-box--rounded-pill',{timeout:100000});
     await enableButton.click();
     await sleep(2000);
 

@@ -11,6 +11,16 @@ module.exports = {
 
         return paths;
     },
+    devServer: function(configFunction) {
+        return function(proxy, allowedHost) {
+            const config = configFunction(proxy, allowedHost);
+
+            // 确保 allowedHosts 包含非空字符串
+            config.allowedHosts = ['localhost'];
+
+            return config;
+        };
+    },
     webpack: function (config, env) {
         config.resolve = {
             extensions: ['.js', '.jsx'],

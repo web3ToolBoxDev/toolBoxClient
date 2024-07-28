@@ -6,9 +6,10 @@ const userAgentPlugin = require('puppeteer-extra-plugin-stealth/evasions/user-ag
 const webglPlugin = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor');
 const path = require('path');
 const ChromeLauncher = require('chrome-launcher');
-// const findChrome = require('carlo/lib/find_chrome');
 
-metamaskUrl = process.platform === 'win32' ? 'mjdpjdhjlfmaggncnpnmkgclolejmpap' : 'kkkcafaonfieeaemfckipjojojhbbnej';
+
+
+let extensionId = '';
 
 console.log('收到的URL参数:', url);
 
@@ -116,10 +117,45 @@ async function checkBrowserClosed(browser) {
     await browser.close();
     exit();
 }
+async function getMetaMaskId(browser) {
+    const page = await browser.newPage();
+    await page.goto('chrome://extensions/');
+    await sleep(5000);
+    const extensionId = await page.evaluate(() => {
+        const extensions = document.querySelectorAll('extensions-manager');
+        const extension = extensions[0].shadowRoot.querySelector('extensions-item-list').shadowRoot.querySelector('extensions-item').getAttribute('id');
+        return extension;
+    });
+    await page.close();
+    const fs = require('fs');
+    fs.writeFileSync(path.resolve(__dirname, './extensionInfo.json'), JSON.stringify({ extensionId }));
+    return extensionId;
+}
+async function loadMetaMaskId(browser) {
+    try{
+        let extensionInfo = require(path.resolve(__dirname, './extensionInfo.json'));
+        return extensionInfo.extensionId;
+    }catch(e){
+        getMetaMaskId(browser);
+    }
+}
+    
+
+
+    
 async function openWallet(browser) {
     const page = await browser.newPage();
     await sleep(5000);
-    await page.goto(`chrome-extension://${metamaskUrl}/home.html#unlock)`); // Change this to the URL of your MetaMask extension
+    extensionId = await loadMetaMaskId(browser);
+
+    console.log('Extension ID:', extensionId);
+    try {
+        await page.goto(`chrome-extension://${extensionId}/home.html#unlock)`); // Change this to the URL of your MetaMask extension
+    } catch (error) {
+        extensionId = await getMetaMaskId(browser);
+        console.log('Extension ID:', extensionId);
+        await page.goto(`chrome-extension://${extensionId}/home.html#unlock)`); // Change this to the URL of your MetaMask extension
+    }
     await sleep(5000);
     try {
         await page.waitForSelector('#password');

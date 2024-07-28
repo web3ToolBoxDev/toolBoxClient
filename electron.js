@@ -56,6 +56,30 @@ function createWindow() {
       backendProcess = null;
     }
   });
+  const isWindows = process.platform === 'win32';
+  let needsFocusFix = false;
+  let triggeringProgrammaticBlur = false;
+
+  mainWindow.on('blur', (event) => {
+    if(!triggeringProgrammaticBlur) {
+      needsFocusFix = true;
+    }
+  })
+
+  mainWindow.on('focus', (event) => {
+    if(isWindows && needsFocusFix) {
+      needsFocusFix = false;
+      triggeringProgrammaticBlur = true;
+      setTimeout(function () {
+        mainWindow.blur();
+        mainWindow.focus();
+        setTimeout(function () {
+          triggeringProgrammaticBlur = false;
+        }, 100);
+      }, 100);
+    }
+  })
+
 }
 
 // 创建后台服务进程

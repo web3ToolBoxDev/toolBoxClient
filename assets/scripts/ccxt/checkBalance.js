@@ -149,15 +149,16 @@ async function runTask() {
             secret
         });
         try{
+            exchange.timeout = 50000;
             let balance = await exchange.fetchBalance();
             let free = balance.free;
             // 导出所有余额大于0的币种
             let result = binanceProcessBalance(free);
-            let networks = await exchange.fetchCurrencies();
+            let networks = await exchange.fetchCurrencies({timeout: 50000});
             // 获取余额大于0币种的提币网络
             for(let i = 0;i < result.length;i++){
                 let currency = result[i].currency;
-                console.log('currency:',networks[currency]);
+                // console.log('currency:',networks[currency]);
                 result[i].networks = networks[currency]['fees']
             }
             console.log('result:',result);
@@ -177,9 +178,10 @@ async function runTask() {
             secret,
             password
         });
+        exchange.timeout = 50000;
         try{
             let balance = await exchange.fetchBalance({type:'funding'});
-            let networks = await exchange.fetchCurrencies();
+            let networks = await exchange.fetchCurrencies({timeout: 50000});
             let result = okxProcessBalance(balance.free);
             for(let i = 0;i < result.length;i++){
                 let currency = result[i].currency;
@@ -187,18 +189,18 @@ async function runTask() {
                 let networksObj = networks[currency]['networks'];
                 for(let key in networksObj){
                     if(networksObj[key]['withdraw']){
-                        console.log('networksObj[key]:',key,networksObj[key]);
+                        // console.log('networksObj[key]:',key,networksObj[key]);
                         networksList[key]= networksObj[key]['fee'];
                     }
                     result[i].networks = networksList;
                 }
             }
-            // result = [...result,{currency:'test',balance:1.1},
-            //     {currency:'test1',balance:0.1},
-            //     {currency:'test2',balance:0.2},
-            //     {currency:'test3',balance:0.3},
-            //     {currency:'test4',balance:0.4},
-            //     ];
+            result = [...result,{currency:'test',balance:1.1},
+                {currency:'test1',balance:0.1},
+                {currency:'test2',balance:0.2},
+                {currency:'test3',balance:0.3},
+                {currency:'test4',balance:0.4},
+                ];
             
             sendTaskCompleted(taskData.taskName,true,{type:'result',message:result});
             exit();

@@ -6,8 +6,29 @@ const userAgentPlugin = require('puppeteer-extra-plugin-stealth/evasions/user-ag
 const webglPlugin = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor');
 const path = require('path');
 const ChromeLauncher = require('chrome-launcher');
-metamaskUrl = process.platform === 'win32' ? 'mjdpjdhjlfmaggncnpnmkgclolejmpap' : 'kkkcafaonfieeaemfckipjojojhbbnej';
-
+let extensionId = '';
+async function getMetaMaskId(browser) {
+    const page = await browser.newPage();
+    await page.goto('chrome://extensions/');
+    await sleep(5000);
+    const extensionId = await page.evaluate(() => {
+        const extensions = document.querySelectorAll('extensions-manager');
+        const extension = extensions[0].shadowRoot.querySelector('extensions-item-list').shadowRoot.querySelector('extensions-item').getAttribute('id');
+        return extension;
+    });
+    await page.close();
+    const fs = require('fs');
+    fs.writeFileSync(path.resolve(__dirname, './extensionInfo.json'), JSON.stringify({ extensionId }));
+    return extensionId;
+}
+async function loadMetaMaskId(browser) {
+    try{
+        let extensionInfo = require(path.resolve(__dirname, './extensionInfo.json'));
+        return extensionInfo.extensionId;
+    }catch(e){
+        getMetaMaskId(browser);
+    }
+}
 console.log('收到的URL参数:', url);
 
 let ws = new webSocket(url);
@@ -111,7 +132,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function openWallet(browser) {
     const page = await browser.newPage();
-    await page.goto(`chrome-extension://${metamaskUrl}/home.html#unlock`)
+    try{
+        await page.goto(`chrome-extension://${extensionId}/home.html#unlock`)
+    }catch(error){
+        extensionId = await getMetaMaskId(browser);
+        await page.goto(`chrome-extension://${extensionId}/home.html#unlock`)
+    }
     await sleep(5000);
     try {
         await page.waitForSelector('#password');
@@ -141,7 +167,7 @@ async function autoFaucet(browser){
     //lisen for metamask
     browser.on('targetcreated', async (target) => {
         const page = await target.page();
-        if (page && page.url().includes(metamaskUrl))
+        if (page && page.url().includes(extensionId))
         {
             await new Promise((resolve) => setTimeout(resolve, 3000));
             const next = await page.waitForSelector('[data-testid="page-container-footer-next"]',{timeout:5000});
@@ -260,6 +286,7 @@ async function runTask() {
         exit();
 
     });
+    extensionId = await loadMetaMaskId(browser);
     await sleep(5000)
     const pages = await browser.pages();
     if(pages.length>1){
