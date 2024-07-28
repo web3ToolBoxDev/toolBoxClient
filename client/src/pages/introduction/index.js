@@ -101,6 +101,19 @@ const Introduction = () => {
           </Button>
         </Col>
       </Row>
+      <Row style={{ border: '1px solid black',margin:'5px' }}>
+        <Col md={2} style={{ fontSize: '1.5vw', borderRight: '1px solid black' }}>
+          V0.1.6新增
+        </Col>
+        <Col md={8} style={{ fontSize: '1.5vw', borderRight: '1px solid black' }}>
+          新增内置任务（批量转账、批量提币、自动领水）
+        </Col>
+        <Col md={2}>
+          <Button style={{ fontSize: '1.5vw',margin:'1px'}} onClick={() => openUrl('https://youtu.be/hDmiqCbuOdI')}>
+            查看演示
+          </Button>
+        </Col>
+      </Row>
     </Container>
   );
 }

@@ -5,10 +5,9 @@ const lanPlugin = require('puppeteer-extra-plugin-stealth/evasions/navigator.lan
 const userAgentPlugin = require('puppeteer-extra-plugin-stealth/evasions/user-agent-override');
 const webglPlugin = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor');
 const path = require('path');
-let ChromeLauncher;
-import('chrome-launcher').then((module) => {
-    ChromeLauncher = module;
-});
+const ChromeLauncher = require('chrome-launcher');
+const { send } = require('process');
+
 
 console.log('收到的URL参数:', url);
 
@@ -47,19 +46,14 @@ function sendTaskLog(log) {
         ws.send(taskLogMessage);
     }
 }
-function sendTaskSuccess() {
-    if (ws.readyState === webSocket.OPEN) {
-        const taskSuccessMessage = JSON.stringify({
-            type: 'task_success'
-        });
-        ws.send(taskSuccessMessage);
-    }
-}
 
-function sendTaskCompleted() {
+function sendTaskCompleted(taskName,success,message) {
     if (ws.readyState === webSocket.OPEN) {
         const taskCompletedMessage = JSON.stringify({
-            type: 'task_completed'
+            type: 'task_completed',
+            taskName,
+            success,
+            message
         });
         ws.send(taskCompletedMessage);
     }
@@ -130,7 +124,7 @@ async function runTask() {
         puppeteer.use(userAgentPlugin({ userAgent: wallet.userAgent }));
     if (wallet.webglVendor && wallet.webglRenderer)
         puppeteer.use(webglPlugin({ vendor: wallet.webglVendor, renderer: wallet.webglRenderer }));
-    let metamaskEx = path.resolve(__dirname, './nkbihfbeogaeaoehlefnkodbefgpgknn/10.22.2_0');
+    let metamaskEx = path.resolve(__dirname, './metamask-chrome-11.16.2');
     let argArr = [
         '--disable-blink-features=AutomationControlled',
         '--no-sandbox',
@@ -149,50 +143,71 @@ async function runTask() {
         args: argArr
     }); // Change headless to false for debugging
     const page = await browser.newPage();
-    await page.goto('chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/home.html#initialize/welcome')
+    // await sleep(30000);
 
-    try {
-        await page.bringToFront()
-        const element = await page.waitForSelector('[data-testid="first-time-flow__button"]', { timeout: 3000 })
-        await element.click()
-    } catch (error) {
-        try {
-            let unLockBtn = await page.waitForSelector('[data-testid="unlock-submit"]', { timeout: 3000 })
-            
-            console.log('already initialized')
-            browser.close()
-            sendTaskSuccess();
-            sendTaskCompleted();
+    await page.goto('chrome-extension://kkkcafaonfieeaemfckipjojojhbbnej/home.html#onboarding/welcome',{waitUntil:'networkidle2'});
+    await page.bringToFront();
+    await sleep(2000);
+    try{
+        const checkbox = await page.waitForSelector('input.check-box');
+        await checkbox.click();
+    }catch(e){
+        //有可能已经初始化，检查是否输入密码
+        const passwordInput = await page.waitForSelector('#password');
+        if(passwordInput){
+            console.log('已经初始化');
+            browser.close();
+            sendTaskCompleted(taskData.taskName,true,{type:'success',message:'已经初始化'});
             exit();
-        } catch (error) {
-            browser.close()
+        }else{
+            sendTaskCompleted(taskData.taskName,false,{type:'error',message:'初始化失败'});
+            throw e;
         }
+
+        
     }
-    await sleep(3000);
-    const element2 = await page.waitForSelector('[data-testid="page-container-footer-next"]')
-    await element2.click()
-    await sleep(3000)
-    const element3 = await page.waitForSelector('[data-testid="import-wallet-button"]')
-    await element3.click()
-    await sleep(3000)
-    let words = wallet.mnemonic.split(' ')
+    
+    const importButton = await page.waitForSelector('button.btn-secondary');
+    await importButton.click();
+    const agreeButton = await page.waitForSelector('[data-testid="metametrics-i-agree"]');
+    await agreeButton.click();
+    let mnemonic = wallet.mnemonic;
+    let words = mnemonic.split(' ')
     for (let i = 0; i < words.length; i++) {
         await page.type('#import-srp__srp-word-' + i, words[i], { delay: 10 })
     }
-    await page.type('#password', 'web3ToolBox', { delay: 50 })
-    await page.type('#confirm-password', 'web3ToolBox', { delay: 50 })
-    await page.click("#create-new-vault__terms-checkbox");
-    await sleep(2000)
-    const element4 = await page.waitForSelector('[type="submit"]')
-    await element4.click()
-    await sleep(2000)
-    const element5 = await page.waitForSelector('[data-testid="EOF-complete-button"]')
-    await element5.click()
-    await sleep(2000)
-    sendTaskSuccess();
+    const confirmButton = await page.waitForSelector('[data-testid="import-srp-confirm"]');
+    await confirmButton.click();
+
+    const password = 'web3ToolBox'
+    const passwordInput = await page.waitForSelector('[data-testid="create-password-new"]');
+    await passwordInput.type(password, { delay: 10 });
+    const confirmPasswordInput = await page.waitForSelector('[data-testid="create-password-confirm"]');
+    await confirmPasswordInput.type(password, { delay: 10 });
+    await sleep(1000);
+    const checkBox = await page.waitForSelector('[data-testid="create-password-terms"]');
+    await checkBox.click();
+    await sleep(1000);
+    const createButton = await page.waitForSelector('[data-testid="create-password-import"]');
+    await createButton.click();
+    await sleep(1000);
+    const completeButton = await page.waitForSelector('[data-testid="onboarding-complete-done"]');
+    await completeButton.click();
+    await sleep(1000);
+    const nextButton = await page.waitForSelector('[data-testid="pin-extension-next"]');
+    await nextButton.click();
+    await sleep(1000);
+    const doneButton = await page.waitForSelector('[data-testid="pin-extension-done"]');
+    await doneButton.click();
+    await sleep(1000);
+    const enableButton = await page.waitForSelector('button.mm-box--color-primary-inverse.mm-box--background-color-primary-default.mm-box--rounded-pill');
+    await enableButton.click();
+    await sleep(2000);
+
+    sendTaskCompleted(taskData.taskName,true,{type:'success',message:'导入钱包成功'});
     browser.close()
 
-    sendTaskCompleted();
+    
     exit();
 }
 

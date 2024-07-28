@@ -77,14 +77,18 @@ router.post('/importTask', async(req, res) => {
   res.send(message);
 });
 router.get('/getAllTasks', async(req, res) => {
-  const message = await taskService.getAllTasks();
+  let defaultTask = req.query.defaultTask;
+  //转化为boolean
+  defaultTask = defaultTask === 'true';
+  const message = await taskService.getAllTasks(defaultTask);
   res.send(message);
 });
 router.post('/execTask', async(req, res) => {
   const taskName = req.body.taskName;
   const wallets = req.body.wallets;
-  console.log(wallets)
-  taskService.execTask(taskName,wallets);
+  const taskDataFromFront = req.body.taskData;
+  console.log(taskDataFromFront);
+  taskService.execTask(taskName,wallets,taskDataFromFront);
   res.send("任务已执行，请在任务信息查看任务信息");
 });
 router.post('/getConfigInfo', async(req, res) => {

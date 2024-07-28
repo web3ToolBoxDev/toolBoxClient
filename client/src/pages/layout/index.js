@@ -8,7 +8,7 @@ const menuItems = [
   { name: '工具箱介绍', link: '#/' },
   { name: '钱包管理', link: '#/walletManage' },
   { name: '任务管理', link: '#/taskManage' },
-  { name: '待开发', link: '#' },
+  { name: '内置任务', link: '#/defaultTask' },
   // Add more items as needed
 ];
 

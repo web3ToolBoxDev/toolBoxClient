@@ -7,18 +7,28 @@ import { eventEmitter } from '../../utils/eventEmitter';
 
 function TaskOffcanvas({ show, handleClose }) {
     const [messageList, setMessageList] = useState([]);
-    const ws = new WebSocketManager();
+    const wsManager = new WebSocketManager();
+    
+
+    const clearStoredMessage = () => {
+        window.localStorage.setItem('taskMessagesList', JSON.stringify([]));
+        setMessageList([]);
+    }
+
+    const terminateTask = () => {
+        wsManager.sendMessage(JSON.stringify({ type: 'terminate_process' }));
+    }
     const messageCallback = () => {
-        for (let i = 0; i < ws.getQueueLength(); i++) {
-            let info = ws.popFromQueue();
+        for (let i = 0; i < wsManager.getQueueLength(); i++) {
+            let info = wsManager.popFromQueue();
             let message = '';
             switch (info.type){
                 case 'task_log':
                     message = info.message;
                     break;
                 case 'task_completed':
-                    message = info.message;
-                    eventEmitter.emit('taskCompleted');
+                    console.log('task_completed:', info);
+                    eventEmitter.emit('taskCompleted', info);
                     break;
                 default:
                     break;
@@ -33,27 +43,32 @@ function TaskOffcanvas({ show, handleClose }) {
             setMessageList(taskMessagesList);
         }
     }
-
     const closeCallback = (event) => {
         console.log('连接关闭:', event);
     }
 
-    const clearStoredMessage = () => {
-        window.localStorage.setItem('taskMessagesList', JSON.stringify([]));
-        setMessageList([]);
-    }
-
-    const teminateTask = () => {
-        ws.sendMessage(JSON.stringify({ type: 'terminate_process' }));
-    }
-
     useEffect(() => {
-        ws.connect(messageCallback, closeCallback);
+        wsManager.connect(messageCallback, closeCallback);
         const storedTaskMessagesList = JSON.parse(window.localStorage.getItem('taskMessagesList'));
         console.log('storedTaskMessagesList:', storedTaskMessagesList);
         if (storedTaskMessagesList) {
             setMessageList(storedTaskMessagesList);
         }
+        eventEmitter.on('taskStart', async() => {
+            
+            let connected = await wsManager.connect(messageCallback, closeCallback);
+            if (!connected) {
+                console.log('连接失败');
+                alert('连接失败，请尝试重启程序');
+            }
+        });
+        eventEmitter.on('clientTaskMessage', (message) => {
+            let taskMessagesList = JSON.parse(window.localStorage.getItem('taskMessagesList')) || [];
+            taskMessagesList.push(message);
+            window.localStorage.setItem('taskMessagesList', JSON.stringify(taskMessagesList));
+            setMessageList(taskMessagesList);
+        });
+
     }, []);
 
     return (
@@ -67,7 +82,7 @@ function TaskOffcanvas({ show, handleClose }) {
                         {/* Left section */}
                         <Row>
                             <Col md={12}>
-                                <Button variant="primary" onClick={teminateTask} style={{ fontSize: '1.2vw', margin: '10px' }}>结束任务</Button>
+                                <Button variant="primary" onClick={terminateTask} style={{ fontSize: '1.2vw', margin: '10px' }}>结束任务</Button>
                                 <Button onClick={clearStoredMessage} variant="primary" style={{ fontSize: '1.2vw', margin: '10px' }}>清空消息</Button>
                             </Col>
                         </Row>

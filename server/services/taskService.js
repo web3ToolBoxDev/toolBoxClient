@@ -1,18 +1,18 @@
-const Datastore = require('nedb');
-const path = require('path');
 const webSocketService = require('./webSocketService').getInstance();
 const spawn = require('child_process').spawn;
 const {startProxy,stopProxy,checkProxy} = require('./proxyService');
-
+const {sleep} = require('../utils');
 
 const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
 
 const fs = require('fs');
+
+
 console.log('task isBuild:',isBuild);
 
-const assetsPath = config.getAssetsPath();
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+
 
 class TaskService {
     static instance;
@@ -28,9 +28,8 @@ class TaskService {
             this.isCompleted = {};
             this.defaultExecPath = config.getDefaultExecPath();
             this.initWalletScriptPath = config.getInitWalletScriptPath();
-            this.initTwitterScriptPath = config.getInitTwitterScriptPath();
-            this.initDiscordScriptPath = config.getInitDiscordScriptPath();
             this.openWalletScriptPath = config.getOpenWalletScriptPath();
+             
             this.isSuccess = {};
         }
         return TaskService.instance;
@@ -78,22 +77,17 @@ class TaskService {
         });
     }
     
-    taskCompletedMessage(msg) {
+    taskCompletedMessage(taskName,success,msg) {
         const dateTime = new Date().toLocaleString();
         return JSON.stringify({
             type: 'task_completed',
             time: dateTime,
+            taskName: taskName,
+            success: success,
             message: msg
         });
     }
-    taskSuccessMessage(msg) {
-        const dateTime = new Date().toLocaleString();
-        return JSON.stringify({
-            type: 'task_success',
-            message: msg,
-            time: dateTime
-        });
-    }
+    
     taskErrorMessge(msg) {
         const dateTime = new Date().toLocaleString();
         return JSON.stringify({
@@ -102,6 +96,8 @@ class TaskService {
             time: dateTime
         });
     }
+    
+
     /**
      * 配置json格式示例
      * {
@@ -119,7 +115,10 @@ class TaskService {
 
         if(taskObj.configSchemaPath)
             taskObj.configSchema = JSON.parse(fs.readFileSync(taskObj.configSchemaPath, 'utf-8'));
-        console.log('taskObj:',taskObj);
+        //默认任务为false
+        if(!taskObj.defaultTask){
+            taskObj.defaultTask = false;
+        }
         return new Promise((resolve, reject) => {
             config.getTaskDb().insert(taskObj, (err, doc) => {
                 if (err) {
@@ -131,6 +130,7 @@ class TaskService {
         });
 
     }
+    
     async getTaskByName(taskName) {
         return new Promise((resolve, reject) => {
             config.getTaskDb().findOne({ taskName}, (err, doc) => {
@@ -142,29 +142,53 @@ class TaskService {
             });
         });
     }
-    async getAllTasks() {
+    async getAllTasks(defaultTask) {
+        
         return new Promise((resolve, reject) => {
-            config.getTaskDb().find({}, (err, docs) => {
+            config.getTaskDb().find({ defaultTask }, (err, docs) => {
                 if (err) {
                     reject(err);
                 } else {
                     resolve(docs);
                 }
             });
-        }
-        );
+        });
     }
     shortTaskName(taskName){
+        if(taskName.indexOf('_')===-1){
+            return taskName;
+        }
         const [address,splitTaskName] = taskName.split('_');
         const shortAddress = address.slice(0,5)+'...'+address.slice(-5);
         return `${shortAddress}_${splitTaskName}`;
     }
-    async execTask(taskName,wallets) {
+    async execTask(taskName,wallets,taskDataFromFront){ 
         const task = await this.getTaskByName(taskName);
         if (!task) {
             return {success:false,message:'任务不存在'};
         }
+        
         switch(task.taskType){
+            case 'execWithoutWallet':{
+                console.log('无钱包执行任务',task)
+                let taskNameNew = `${task.taskName}`;
+                if(this.isRunning[taskNameNew]){
+                    return {success:false,message:'任务正在执行'};
+                }
+                const taskData = {};
+                if(task.config){
+                    taskData.config = task.config;
+                }
+                if(taskDataFromFront){
+                    taskData.taskDataFromFront = taskDataFromFront; 
+                }
+                console.log('taskNameNew:',taskNameNew);
+                this.runTask(taskNameNew,taskData,task.execPath||this.defaultExecPath,task.scriptPath);
+                break;
+            }
+            
+
+
             case 'execByOrder':
                 console.log('顺序执行任务',task)
                 for(let i=0;i<wallets.length;i++){
@@ -181,7 +205,7 @@ class TaskService {
                         }
                         config['default'] = task.config['default'];
                     }
-                    const taskData = {...wallet,config};
+                    const taskData = {...wallet,config,taskDataFromFront};
                     this.runTask(taskName,taskData,task.execPath||this.defaultExecPath,task.scriptPath);
                     await this.checkCompleted(taskName);
                 }
@@ -201,13 +225,13 @@ class TaskService {
                         config['default'] = task.config['default'];
                         
                     }
-                    const taskData = {...wallet,config};
+                    const taskData = {...wallet,config,taskDataFromFront};
                     this.runTask(taskName,taskData,task.execPath||this.defaultExecPath,task.scriptPath);
                     this.checkCompleted(taskName);
                 }
                 break;
             case 'execAll':
-                let taskName = `${task.taskName}_全量执行`;
+                let taskName = `${task.taskName}`;
                 if(this.isRunning[taskName]){
                     return {success:false,message:'任务正在执行'};
                 }
@@ -215,7 +239,7 @@ class TaskService {
                 if(task.config){
                     config = task.config;
                 }
-                const taskData = {wallets,config};
+                const taskData = {wallets,config,taskDataFromFront};
                 this.runTask(taskName,taskData,task.execPath||this.defaultExecPath,task.scriptPath);
                 this.checkCompleted(taskName);
                 break;
@@ -263,9 +287,11 @@ class TaskService {
                 break;}
             case 'task_completed':{
                 this.isCompleted[taskName] = true;
-                break;}
-            case 'task_success':{
-                this.isSuccess[taskName] = true;
+                if(data.success){
+                    this.isSuccess[taskName] = true;
+                }
+                this.webSocketService.sendToFront(this.taskLogMessage(`任务:${this.shortTaskName(taskName)}执行完成`));
+                this.webSocketService.sendToFront(this.taskCompletedMessage(taskName,data.success,data.message));
                 break;}
             default:
                 break;
@@ -307,6 +333,7 @@ class TaskService {
 
             this.webSocketService.sendToFront(this.taskLogMessage(message));
             this.isCompleted[taskName] = true;
+            this.webSocketService.sendToFront(this.taskCompletedMessage(taskName,false,{type:'error',message:data}));
             this.isRunning[taskName] = false;
         });
         childProcess.on('close', (code) => {
@@ -325,6 +352,7 @@ class TaskService {
                 this.webSocketService.closeTaskWebSocket(taskName);
                 this.webSocketService.sendToFront(this.taskLogMessage(`任务:${this.shortTaskName(taskName)}执行超时`));
                 this.isCompleted[taskName] = true;
+                this.webSocketService.sendToFront(this.taskCompletedMessage(taskName,false,{type:'timeout',message:'任务执行超时'}));
                 this.isRunning[taskName] = false;
                 
                 return;
@@ -334,10 +362,8 @@ class TaskService {
                 if(taskSuccessCallBack){
                     if(this.isSuccess[taskName]){
                         taskSuccessCallBack(taskData);
-                        this.webSocketService.sendToFront(this.taskSuccessMessage(`任务:${this.shortTaskName(taskName)}执行成功`));
                     }
                 }
-                this.webSocketService.sendToFront(this.taskCompletedMessage(`任务:${this.shortTaskName(taskName)}执行完成`));
                 this.isRunning[taskName] = false;
                 this.webSocketService.closeTaskWebSocket(taskName);
 
@@ -370,7 +396,7 @@ class TaskService {
         }
         for(let i=0;i<wallets.length;i++){
             let wallet=wallets[i];
-            let taskName = `${wallet.address}_初始化`;
+            let taskName = `${wallet.address}_initWallet`;
             if(this.isRunning[taskName]){
                 continue;
             }
@@ -400,7 +426,7 @@ class TaskService {
             return {success:false,message:error.message};
         }
     }
-    async setConfigInfo(taskName,config){
+    async setConfigInfo(taskName,taskConfig){
         const task = await this.getTaskByName(taskName);
         if (!task) {
             return {success:false,message:'任务不存在'};
@@ -408,7 +434,7 @@ class TaskService {
        
         try{
             //更新task配置信息
-            task.config = config;
+            task.config = taskConfig;
             config.getTaskDb().update({taskName:taskName},task,{returnUpdatedDocs:true});
             return {success:true};
         }catch(error){

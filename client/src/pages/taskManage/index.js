@@ -43,7 +43,7 @@ const TaskManage = () => {
               const filePath = await window.electronAPI.openFile()
               if (filePath) {
                 taskObj['execPath'] = filePath;
-                childRef.current.updadteValueObj('execPath', filePath);
+                childRef.current.updateValueObj('execPath', filePath);
               }
             }
           }
@@ -61,7 +61,7 @@ const TaskManage = () => {
               const filePath = await window.electronAPI.openFile()
               if (filePath) {
                 taskObj['scriptPath'] = filePath;
-                childRef.current.updadteValueObj('scriptPath', filePath);
+                childRef.current.updateValueObj('scriptPath', filePath);
               }
             }
           }
@@ -79,7 +79,7 @@ const TaskManage = () => {
               const filePath = await window.electronAPI.openFile()
               if (filePath) {
                 taskObj['configSchemaPath'] = filePath;
-                childRef.current.updadteValueObj('configSchemaPath', filePath);
+                childRef.current.updateValueObj('configSchemaPath', filePath);
               }
             }
           }
@@ -123,10 +123,11 @@ const TaskManage = () => {
   }
   const [taskList, setTaskList] = useState([]);
   useEffect(() => {
-    apiManager.getAllTasks().then((res) => {
+    apiManager.getAllTasks(false).then((res) => {
+      console.log('res:', res);
       setTaskList(res);
     })
-  }, [])
+  }, [apiManager])
   const [selectAll, setSelectAll] = useState(false);
   const execTask = (taskName) => {
     setChooseWalletModalProp({
@@ -143,6 +144,7 @@ const TaskManage = () => {
           }
         })
       }
+      
     })
   }
   // Toggle Select All checkbox

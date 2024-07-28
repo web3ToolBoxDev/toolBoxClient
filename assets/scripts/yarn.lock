@@ -615,15 +615,22 @@ call-bind@^1.0.7:
     get-intrinsic "^1.2.4"
     set-function-length "^1.2.1"
 
-chrome-launcher@^1.1.1:
-  version "1.1.1"
-  resolved "https://registry.npmmirror.com/chrome-launcher/-/chrome-launcher-1.1.1.tgz#17b7302aaf951d79ac3910de377425c915913c94"
-  integrity sha512-OAQgBmpUzrIuShApIwOpjt7WFripGKcDMW/qeYU+kcl6jBPg87mRG+N2C3Vu+VeCVPqZ/ds3GfI2TK7tpz3Yyw==
+ccxt@^4.3.66:
+  version "4.3.66"
+  resolved "https://registry.npmjs.org/ccxt/-/ccxt-4.3.66.tgz#cf7b00f9f7033a86911be9f3105ffb8a1cea6b76"
+  integrity sha512-acsr5PMe30oxTN9SpUvF5EsyiFwVdca/Uwf3pIKpNLhJQf5gvay0cUXVkvTRj13g6ClAfRgI7ZSMSIyC4UgSHw==
+  dependencies:
+    ws "^8.8.1"
+
+chrome-launcher@^0.15.2:
+  version "0.15.2"
+  resolved "https://registry.npmjs.org/chrome-launcher/-/chrome-launcher-0.15.2.tgz#4e6404e32200095fdce7f6a1e1004f9bd36fa5da"
+  integrity sha512-zdLEwNo3aUVzIhKhTtXfxhdvZhUghrnmkvcAq2NoDd+LeOHKf03H5jwZ8T/STsAlzyALkBVK552iaG1fGf1xVQ==
   dependencies:
     "@types/node" "*"
     escape-string-regexp "^4.0.0"
     is-wsl "^2.2.0"
-    lighthouse-logger "^2.0.1"
+    lighthouse-logger "^1.0.0"
 
 chromium-bidi@0.5.16:
   version "0.5.16"
@@ -1243,10 +1250,10 @@ lazy-cache@^1.0.3:
   resolved "https://registry.npmmirror.com/lazy-cache/-/lazy-cache-1.0.4.tgz#a1d78fc3a50474cb80845d3b3b6e1da49a446e8e"
   integrity sha512-RE2g0b5VGZsOCFOCgP7omTRYFqydmZkBwl5oNnQ1lDYC57uyO9KqNnNVxT7COSHTxrRCWVcAVOcbjk+tvh/rgQ==
 
-lighthouse-logger@^2.0.1:
-  version "2.0.1"
-  resolved "https://registry.npmmirror.com/lighthouse-logger/-/lighthouse-logger-2.0.1.tgz#48895f639b61cca89346bb6f47f7403a3895fa02"
-  integrity sha512-ioBrW3s2i97noEmnXxmUq7cjIcVRjT5HBpAYy8zE11CxU9HqlWHHeRxfeN1tn8F7OEMVPIC9x1f8t3Z7US9ehQ==
+lighthouse-logger@^1.0.0:
+  version "1.4.2"
+  resolved "https://registry.npmjs.org/lighthouse-logger/-/lighthouse-logger-1.4.2.tgz#aef90f9e97cd81db367c7634292ee22079280aaa"
+  integrity sha512-gPWxznF6TKmUHrOQjlVo2UbaL2EJ71mb2CCeRs/2qBpi4L/g4LUVc9+3lKQ6DTUZwJswfM7ainGrLO1+fOqa2g==
   dependencies:
     debug "^2.6.9"
     marky "^1.2.2"
@@ -1833,6 +1840,11 @@ ws@8.16.0:
   version "8.16.0"
   resolved "https://registry.npmmirror.com/ws/-/ws-8.16.0.tgz#d1cd774f36fbc07165066a60e40323eab6446fd4"
   integrity sha512-HS0c//TP7Ina87TfiPUz1rQzMhHrl/SG2guqRcTOIUYD2q8uhUdNHZYJUaQ8aTGPzCh+c6oawMKW35nFl1dxyQ==
+
+ws@^8.8.1:
+  version "8.18.0"
+  resolved "https://registry.npmjs.org/ws/-/ws-8.18.0.tgz#0d7505a6eafe2b0e712d232b42279f53bc289bbc"
+  integrity sha512-8VbfWfHLbbwu3+N6OKsOMpBdT4kXPDDB9cJk2bJ6mh9ucxdlnNvH1e+roYkKmN9Nxw2yjz7VzeO9oOz2zJ04Pw==
 
 y18n@^5.0.5:
   version "5.0.8"

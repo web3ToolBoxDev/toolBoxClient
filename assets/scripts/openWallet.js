@@ -5,13 +5,10 @@ const lanPlugin = require('puppeteer-extra-plugin-stealth/evasions/navigator.lan
 const userAgentPlugin = require('puppeteer-extra-plugin-stealth/evasions/user-agent-override');
 const webglPlugin = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor');
 const path = require('path');
+const ChromeLauncher = require('chrome-launcher');
 // const findChrome = require('carlo/lib/find_chrome');
 
 
-let ChromeLauncher;
-import('chrome-launcher').then((module) => {
-    ChromeLauncher = module;
-});
 
 console.log('收到的URL参数:', url);
 
@@ -121,7 +118,7 @@ async function checkBrowserClosed(browser) {
 }
 async function openWallet(browser) {
     const page = await browser.newPage();
-    await page.goto('chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/home.html#initialize/unlock')
+    await page.goto('chrome-extension://kkkcafaonfieeaemfckipjojojhbbnej/home.html#unlock')
     await sleep(5000);
     try {
         await page.waitForSelector('#password');
@@ -130,6 +127,9 @@ async function openWallet(browser) {
         await sleep(2000);
         const element3 = await page.waitForSelector('[data-testid="unlock-submit"]');
         await element3.click();
+        await sleep(5000);
+        const closeButton = await page.waitForSelector('[data-testid="popover-close"]');
+        await closeButton.click();
     }catch(error){
         console.log('error:',error);
     }
@@ -216,7 +216,7 @@ async function runTask() {
         puppeteer.use(userAgentPlugin({ userAgent: wallet.userAgent }));
     if (wallet.webglVendor && wallet.webglRenderer)
         puppeteer.use(webglPlugin({ vendor: wallet.webglVendor, renderer: wallet.webglRenderer }));
-    let metamaskEx = path.resolve(__dirname, './nkbihfbeogaeaoehlefnkodbefgpgknn/10.22.2_0');
+    let metamaskEx = path.resolve(__dirname, './metamask-chrome-11.16.2');
     let argArr = [
         '--disable-blink-features=AutomationControlled',
         '--no-sandbox',
@@ -256,10 +256,10 @@ async function runTask() {
     }
     const page = pages[0];
     openWallet(browser);
-    if(wallet.twitterToken)
-        opentTwitter(browser,wallet.twitterToken);
-    if(wallet.discordToken)
-        openDiscord(browser,wallet.discordToken);
+    // if(wallet.twitterToken)
+    //     opentTwitter(browser,wallet.twitterToken);
+    // if(wallet.discordToken)
+    //     openDiscord(browser,wallet.discordToken);
     
     await checkBrowserClosed(browser);
 }

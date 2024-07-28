@@ -1,11 +1,9 @@
 import React, { useState, useEffect,useRef } from 'react';
-import { Container, Row, Col, Button, InputGroup, FormControl,ProgressBar } from 'react-bootstrap';
+import { Container, Row, Col, Button, InputGroup, FormControl } from 'react-bootstrap';
 import CustomModal from '../../components/customModal';
 import Web3Manager from '../../utils/web3';
 import APIManager from '../../utils/api';
 import { eventEmitter } from '../../utils/eventEmitter';
-
-
 
 const web3Manager = Web3Manager.getInstance();
 const apiManager = APIManager.getInstance();
@@ -13,7 +11,6 @@ const apiManager = APIManager.getInstance();
 const WalletManage = () => {
   const [modalProp, setModalProp] = useState({ show: false });
   const [selectAll, setSelectAll] = useState(false); // State for Select All checkbox
-
   const childRef = useRef();
   const openEdit = (wallet) => {
     let openEditData = wallet;
@@ -26,7 +23,7 @@ const WalletManage = () => {
         title: '查看编辑',
         handleData: (key, value) => {
           openEditData[key] = value;
-          childRef.current.updadteValueObj(key, value);
+          childRef.current.updateValueObj(key, value);
         },
         rowList: [
           [
@@ -326,7 +323,7 @@ const WalletManage = () => {
       title: '新建钱包',
       handleData: (key, value) => {
         createWalletData[key] = value;
-        childRef.current.updadteValueObj(key, value);
+        childRef.current.updateValueObj(key, value);
       },
       rowList: [
         [
@@ -406,23 +403,17 @@ const WalletManage = () => {
       });
       setWalletList(sortedWalletList);
     });
-    eventEmitter.on('taskCompleted', async() => {
-      console.log('taskCompleted');
-      
-      //更新钱包状态
-      apiManager.getAllWallets().then((res) => {
-        // Add selected property to each wallet object
-        const updatedWalletList = res.map(wallet => ({ ...wallet, selected: false }));
-        const sortedWalletList = [...updatedWalletList].sort((a, b) => {
-          return a.name.localeCompare(b.name);
-        });
-        setWalletList(sortedWalletList);
-      });
+    eventEmitter.on('taskCompleted', async(info) => {
+      console.log('taskCompletedInfo',info);
+      if(info.taskName.includes('initWallet')){
+        console.log('initWalletSuccess');
+        setTimeout(() => window.location.reload(), 500);
+      }
     });
-    
-
 
   }, []);
+
+
 
   const checkInfo = (title, info) => {
     setModalProp({
@@ -575,6 +566,7 @@ const WalletManage = () => {
         window.location.reload();
       }
     })
+    
   }
   
   
@@ -854,56 +846,58 @@ const WalletManage = () => {
           操作
         </Col>
       </Row>
-      {walletList.map((wallet, index) => {
-        return (
-          <Row key={index}>
-            {/* Use Select All state for checkbox */}
-            <Col md={1}>
-              <input type='checkbox' checked={wallet.selected} onChange={() => { handleSelect(index) }} />
-            </Col>
-            <Col md={1} style={{ fontSize: '1.0vw' }}>{wallet.name}</Col>
-            <Col md={3}>
-              <InputGroup>
-                <FormControl
-                  placeholder={`${wallet.address.slice(0, 10)}...${wallet.address.slice(-10)}`}
-                  aria-label='Address'
-                  aria-describedby='basic-addon2'
-                  readOnly
-                />
-                <Button style={{ fontSize: '0.8vw' }} onClick={() => handleCopyAddress(wallet.address)} variant='outline-secondary'>
-                  复制
+      <div style={{height:'50vw',overflowY:'auto'}}>
+        {walletList.map((wallet, index) => {
+          return (
+            <Row key={index}>
+              {/* Use Select All state for checkbox */}
+              <Col md={1}>
+                <input type='checkbox' checked={wallet.selected} onChange={() => { handleSelect(index) }} />
+              </Col>
+              <Col md={1} style={{ fontSize: '1.0vw' }}>{wallet.name}</Col>
+              <Col md={3}>
+                <InputGroup>
+                  <FormControl
+                    placeholder={`${wallet.address.slice(0, 10)}...${wallet.address.slice(-10)}`}
+                    aria-label='Address'
+                    aria-describedby='basic-addon2'
+                    readOnly
+                  />
+                  <Button style={{ fontSize: '0.8vw' }} onClick={() => handleCopyAddress(wallet.address)} variant='outline-secondary'>
+                    复制
+                  </Button>
+                </InputGroup>
+              </Col>
+              <Col md={1}>
+                <Button style={{ fontSize: '1.0vw',margin:'1px' }} onClick={() => { checkInfo("助记词", wallet.mnemonic) }}>
+                  查看
                 </Button>
-              </InputGroup>
-            </Col>
-            <Col md={1}>
-              <Button style={{ fontSize: '1.0vw',margin:'1px' }} onClick={() => { checkInfo("助记词", wallet.mnemonic) }}>
-                查看
-              </Button>
-            </Col>
-            <Col md={1}>
-              <Button style={{ fontSize: '1.0vw',margin:'1px' }} onClick={() => { checkInfo("私钥", wallet.privateKey) }}>
-                查看
-              </Button>
-            </Col>
-            <Col md={1}>{wallet.walletInitialized ? '是' : '否'}</Col>
-            <Col md={1}>
-              <Button style={{ fontSize: '1.0vw' }} onClick={() => { checkInfo("浏览器文件路径", wallet.chromeUserDataPath) }}>
-                查看
-              </Button>
-            </Col>
-            <Col md={3}>
-              <Button onClick={() => { openEdit(wallet) }} style={{ fontSize: '1.0vw' }}>查看编辑</Button>
-              {/* Add View/Edit button */}
+              </Col>
+              <Col md={1}>
+                <Button style={{ fontSize: '1.0vw',margin:'1px' }} onClick={() => { checkInfo("私钥", wallet.privateKey) }}>
+                  查看
+                </Button>
+              </Col>
+              <Col md={1}>{wallet.walletInitialized ? '是' : '否'}</Col>
+              <Col md={1}>
+                <Button style={{ fontSize: '1.0vw' }} onClick={() => { checkInfo("浏览器文件路径", wallet.chromeUserDataPath) }}>
+                  查看
+                </Button>
+              </Col>
+              <Col md={3}>
+                <Button onClick={() => { openEdit(wallet) }} style={{ fontSize: '1.0vw' }}>查看编辑</Button>
+                {/* Add View/Edit button */}
 
-              <Button onClick={() => { openWallet({...wallet,useProxy:false}) }} style={{ fontSize: '1.0vw' }} className='ms-2'>
-                打开
-              </Button>
+                <Button onClick={() => { openWallet({...wallet,useProxy:false}) }} style={{ fontSize: '1.0vw' }} className='ms-2'>
+                  打开
+                </Button>
 
-            </Col>
-          </Row>
-        );
-      })}
-      <CustomModal ref={childRef} {...modalProp} />
+              </Col>
+            </Row>
+          );
+        })}
+        <CustomModal ref={childRef} {...modalProp} />
+      </div>
       {/* 显示指纹生成进度参数为 {progressNum,totalGenerateNum}*/}
       
     </Container>

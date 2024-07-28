@@ -26,6 +26,7 @@ async function stopProxy(taskId){
 
 async function checkProxy(ipType,ipHost,ipPort,ipUsername,ipPassword){
     const url = await startProxy('check',ipType,ipHost,ipPort,ipUsername,ipPassword);
+    console.log('url:',url);
     const agent = new HttpProxyAgent(url);
     let cnt = 0
     while(cnt < 3){

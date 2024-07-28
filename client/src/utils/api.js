@@ -55,12 +55,12 @@ class APIManager {
         const res = await axios.post(`${this.baseUrl}/importTask`, taskObj);
         return res.data;
     }
-    async getAllTasks() {
-        const res = await axios.get(`${this.baseUrl}/getAllTasks`);
+    async getAllTasks(defaultTask) {
+        const res = await axios.get(`${this.baseUrl}/getAllTasks?defaultTask=${defaultTask}`);
         return res.data;
     }
-    async execTask(taskName,wallets) {
-        const res = await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,wallets:wallets });
+    async execTask(taskName,wallets,taskData = null) {
+        const res = await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,wallets:wallets,taskData:taskData });
         return res.data;
     }
     async getConfigInfo(taskName) {

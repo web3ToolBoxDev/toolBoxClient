@@ -7,6 +7,7 @@ class WebSocketService {
             this.wsTaskServer = {};
             this.taskKey = {};
             this.wsFrontServer = null;
+            this.frontReady = false;
         }
         return WebSocketService.instance;
     }
@@ -22,6 +23,15 @@ class WebSocketService {
     async initialize(expressApp) {
         this.app = expressApp;
         this.createFrontWebSocket();
+
+        while (!this.wsFrontServer) {
+            await new Promise((resolve) => {
+                setTimeout(() => {
+                    resolve();
+                }, 1000);
+            });
+            console.log('等待WebSocket初始化');
+        }
     }
     // 创建前端通讯的websocket
     createFrontWebSocket() {
@@ -38,9 +48,9 @@ class WebSocketService {
             ws.on('message', (msg) => {
                 const message = JSON.parse(msg);
                 console.log('收到消息:', message);
-                if(message.type === 'terminate_process'){
+                if (message.type === 'terminate_process') {
                     for (let key in this.wsTaskServer) {
-                        console.log('send to task:',key);
+                        console.log('send to task:', key);
                         this.wsTaskServer[key].send(msg);
                     }
                 }
@@ -52,19 +62,27 @@ class WebSocketService {
             });
             this.wsFrontServer = ws;
         });
+        // Dummy WebSocket client to establish connection
+        const WebSocket = require('ws');
+        const ws = new WebSocket('ws://localhost:30001/ws');
+        ws.on('open', () => {
+            this.frontReady = true;
+            ws.close();
+        })
         return 'ws://localhost:30001/ws'
     }
 
     // 发送消息
     async sendToFront(message) {
-        if (!this.wsFrontServer) {
+        // console.log(this.wsFrontServer);
+        if (!this.wsFrontServer || !this.frontReady) {
             console.log('WebSocket未初始化');
             return;
         }
         this.wsFrontServer.send(message);
     }
     // 创建任务进程通讯的websocket
-    createTaskWebSocket(taskName,messageCallback) {
+    createTaskWebSocket(taskName, messageCallback) {
         //防止taskName为中文出错
         this.taskKey[taskName] = Date.now();
         if (!this.app) {
@@ -82,17 +100,17 @@ class WebSocketService {
             });
             this.wsTaskServer[this.taskKey[taskName]] = ws;
         });
-        return 'ws://localhost:30001'+taskUrl
+        return 'ws://localhost:30001' + taskUrl
     }
-    closeTaskWebSocket(taskName){
-        if(this.wsTaskServer[taskName]){
+    closeTaskWebSocket(taskName) {
+        if (this.wsTaskServer[taskName]) {
             this.wsTaskServer[taskName].close();
             delete this.wsTaskServer[taskName];
         }
     }
     // 发送任务消息
-    sendToTask(taskName,message) {
-        if(!this.taskKey[taskName]){
+    sendToTask(taskName, message) {
+        if (!this.taskKey[taskName]) {
             console.log('任务未初始化');
             return;
         }
@@ -102,9 +120,9 @@ class WebSocketService {
         }
         this.wsTaskServer[this.taskKey[taskName]].send(message);
     }
-    checkWebSocket(){
+    checkWebSocket() {
         console.log('检查WebSocket连接');
-        if(!this.wsFrontServer){
+        if (!this.wsFrontServer) {
             this.createFrontWebSocket();
         }
         return true;

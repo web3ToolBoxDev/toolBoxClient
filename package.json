@@ -1,7 +1,7 @@
 {
   "name": "web3toolbox",
   "author": "Aming",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "main": "electron.js",
   "license": "MIT",
@@ -52,7 +52,9 @@
     "@testing-library/react": "^13.0.0",
     "@testing-library/user-event": "^13.2.1",
     "async-mutex": "^0.5.0",
+    "axios": "^1.6.8",
     "bootstrap": "^5.3.3",
+    "ccxt": "4.3.63",
     "cors": "^2.8.5",
     "date-and-time": "^3.1.1",
     "ethers": "^6.11.1",
@@ -66,7 +68,9 @@
     "ip2location-nodejs": "^9.6.1",
     "nedb": "^1.8.0",
     "portscanner": "^2.2.0",
+    "process": "^0.11.10",
     "proxy-chain": "^2.4.0",
+    "qs": "^6.12.3",
     "react": "^18.2.0",
     "react-app-rewired": "^2.2.1",
     "react-bootstrap": "^2.10.1",
@@ -79,11 +83,10 @@
     "socks": "^2.8.1",
     "socks-proxy-agent": "^8.0.3",
     "url": "^0.11.3",
-    "axios": "^1.6.8",
     "web-vitals": "^2.1.0"
   },
   "scripts": {
-    "dev": "electron .",
+    "dev": "IS_BUILD=false electron .",
     "dist": "electron-builder",
     "start": "react-app-rewired start",
     "build": "react-app-rewired build --port 30001",
@@ -110,12 +113,23 @@
     ]
   },
   "devDependencies": {
+    "assert": "^2.1.0",
+    "browserify-zlib": "^0.2.0",
     "concurrently": "^8.2.2",
+    "crypto-browserify": "^3.12.0",
     "customize-cra": "^1.0.0",
     "dotenv": "^16.4.5",
     "electron": "^29.0.1",
     "electron-builder": "^24.12.0",
-    "electron-is-dev": "^3.0.1"
+    "electron-is-dev": "^3.0.1",
+    "https-browserify": "^1.0.0",
+    "os-browserify": "^0.3.0",
+    "stream-browserify": "^3.0.0",
+    "stream-http": "^3.2.0",
+    "webpack": "^5.92.1",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.0.4",
+    "zlib-browserify": "^0.0.3"
   },
   "proxy": "http://localhost:30001"
 }

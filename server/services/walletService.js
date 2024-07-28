@@ -1,6 +1,5 @@
 // service.js
 const fs = require('fs'); // 加入文件系统模块
-const Datastore = require('nedb');
 const path = require('path');
 const excel = require('exceljs');
 const date = require('date-and-time');
@@ -14,7 +13,7 @@ const {generateRandomFingerPrint} = require('./fingerPrintService.js')
 
 console.log('wallet isBuild:', isBuild)
 
-const assetsPath = config.getAssetsPath();
+
 
 async function createWallet(params) {
   console.log('创建钱包');

@@ -1,5 +1,5 @@
 import APIManager from "../../utils/api";
-import { Modal, Button, Row, Col, Container } from "react-bootstrap";
+import { Modal, Button, Row, Col } from "react-bootstrap";
 import { useState, useEffect,useRef } from "react";
 import CustomModal from "../customModal";
 
@@ -24,7 +24,7 @@ const SetWalletConfigModal = ({ taskName,configSchema,show, onHide, confirm }) =
                 setConfig(res.config);
             }
         })
-    }, [show]);
+    }, [apiManager,taskName]);
     const setConfigProp = async(who) => {
         let record = {}
         try{
@@ -46,7 +46,7 @@ const SetWalletConfigModal = ({ taskName,configSchema,show, onHide, confirm }) =
                     { type: 'select', colWidth: 6, key: key, options: configSchema[key].options,defaultValue:record[key]||configSchema[key].defaultValue}
                 ]
             }
-            
+            return [];
         });
         rowList.push([
             { type: 'button', colWidth: 12, text: '确认', style: { textAlign: 'right' },
@@ -56,7 +56,7 @@ const SetWalletConfigModal = ({ taskName,configSchema,show, onHide, confirm }) =
             }
         }]);
         let title = '修改配置';
-        if(who == 'default'){
+        if(who === 'default'){
             title = '修改通用配置'
         }else{
             let shortAddress = who.substring(0, 6) + '...' + who.substring(who.length - 4, who.length);

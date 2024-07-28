@@ -32,7 +32,7 @@ const ChooseWalletModal = ({ show, onHide, confirm }) => {
             const sortedWallets = newWallets.sort((a, b) => a.name.localeCompare(b.name));
             setWallets(sortedWallets);
         });
-    }, [show]);
+    }, [apiManager]);
 
     return (
         <Modal show={show} onHide={onHide} centered>

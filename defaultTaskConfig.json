@@ -1,0 +1,35 @@
+[
+    {
+        "taskName": "initWallet",
+        "scriptPath": "initWallet.js",
+        "taskType": "execByOrder",
+        "defaultTask": true
+    },
+    {
+        "taskName": "openWallet",
+        "scriptPath": "openWallet.js",
+        "taskType": "execByAsync",
+        "defaultTask": true
+    },
+    {
+        "taskName":"ccxtCheckBalance",
+        "scriptPath":"ccxt/checkBalance.js",
+        "taskKey":"ccxtCheckBalance",
+        "defaultTask":true,
+        "taskType":"execWithoutWallet"
+    },
+    {
+        "taskName":"ccxtWithdraw",
+        "scriptPath":"ccxt/withdraw.js",
+        "taskKey":"ccxtWithdraw",
+        "defaultTask":true,
+        "taskType":"execWithoutWallet"
+    },
+    {
+        "taskName":"sepoliaFaucet",
+        "scriptPath":"sepoliaFaucet.js",
+        "taskKey":"sepoliaFaucet",
+        "defaultTask":true,
+        "taskType":"execByOrder"
+    }
+]

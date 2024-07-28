@@ -39,10 +39,13 @@ function sendTaskLog(log) {
     }
 }
 
-function sendTaskCompleted() {
+function sendTaskCompleted(taskName,success,message) {
     if (ws.readyState === webSocket.OPEN) {
         const taskCompletedMessage = JSON.stringify({
-            type: 'task_completed'
+            type: 'task_completed',
+            taskName,
+            success,
+            message
         });
         ws.send(taskCompletedMessage);
     }
@@ -114,7 +117,7 @@ async function runTask() {
         }
     }
     console.log('任务执行完成');
-    sendTaskCompleted();
+    sendTaskCompleted('例子任务',true,'任务执行成功');
     exit();
 }
 

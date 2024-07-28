@@ -15,7 +15,7 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
         [valueObj]
     )
     useImperativeHandle(ref, () => ({
-        updadteValueObj: (key,value) => {
+        updateValueObj: (key,value) => {
             setValueObj({...valueObj,[key]:value});
         },
         clearValueObj: () => {
@@ -54,6 +54,7 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
                                         placeholder={item.placeholder}
                                         onChange={(e) => onChange(e, item.key)}
                                         value={valueObj[item.key] || ''}
+                                        type={item.inputType}
                                     />
                                 )}
                                 {item.type === 'select' && (
