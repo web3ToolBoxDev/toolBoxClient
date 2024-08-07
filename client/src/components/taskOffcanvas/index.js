@@ -68,6 +68,18 @@ function TaskOffcanvas({ show, handleClose }) {
             window.localStorage.setItem('taskMessagesList', JSON.stringify(taskMessagesList));
             setMessageList(taskMessagesList);
         });
+        // 设置定时器检查连接状态
+        const interval = setInterval(() => {
+            if (!wsManager.checkConnection()) {
+                wsManager.connect(messageCallback, closeCallback);
+            }
+        }, 5000);
+        return () => {
+            wsManager.close();
+            eventEmitter.off('taskStart');
+            eventEmitter.off('clientTaskMessage');
+            clearInterval(interval);
+        }
 
     }, []);
 

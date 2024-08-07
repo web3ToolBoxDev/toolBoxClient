@@ -81,6 +81,14 @@ class WebSocketManager {
             this.wss.send(message);
         }
     }
+    //检查连接状态
+    checkConnection(){
+      if(this.wss.readyState === 1){
+        return true;
+      }else{
+        return false;
+      }
+    }
   }
   
   export default WebSocketManager;

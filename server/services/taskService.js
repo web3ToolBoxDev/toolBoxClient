@@ -163,10 +163,12 @@ class TaskService {
         return `${shortAddress}_${splitTaskName}`;
     }
     async execTask(taskName,wallets,taskDataFromFront){ 
+        console.log('execTask:',taskName,wallets,taskDataFromFront);
         const task = await this.getTaskByName(taskName);
         if (!task) {
             return {success:false,message:'任务不存在'};
         }
+        console.log('task:',task);
         
         switch(task.taskType){
             case 'execWithoutWallet':{
@@ -180,7 +182,18 @@ class TaskService {
                     taskData.config = task.config;
                 }
                 if(taskDataFromFront){
-                    taskData.taskDataFromFront = taskDataFromFront; 
+                    taskData.taskDataFromFront = taskDataFromFront;
+                    let config = taskDataFromFront.config;
+                    if(config && config.useProxy){
+                        taskData.useProxy = true;
+                        taskData.ipType = config.ipType;
+                        taskData.ipHost = config.ipHost;
+                        taskData.ipPort = config.ipPort;
+                        taskData.ipUsername = config.ipUsername;
+                        taskData.ipPassword = config.ipPassword;
+                    
+                    }
+                    
                 }
                 console.log('taskNameNew:',taskNameNew);
                 this.runTask(taskNameNew,taskData,task.execPath||this.defaultExecPath,task.scriptPath);
@@ -333,7 +346,6 @@ class TaskService {
 
             this.webSocketService.sendToFront(this.taskLogMessage(message));
             this.isCompleted[taskName] = true;
-            this.webSocketService.sendToFront(this.taskCompletedMessage(taskName,false,{type:'error',message:data}));
             this.isRunning[taskName] = false;
         });
         childProcess.on('close', (code) => {

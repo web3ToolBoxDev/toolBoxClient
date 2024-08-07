@@ -3,6 +3,7 @@ import { useState,useEffect } from 'react';
 import TransferPage from './transferPage';
 import ExchangeWithdrawPage from './exchangeWithdrawPage';
 import FaucetPage from './faucetPage';
+import TwitterMonitor from './twitterMonitorPage';
 
 
 export default function DefaultTask() {
@@ -27,6 +28,11 @@ export default function DefaultTask() {
                 taskKey:"sepoliaFaucet",
                 taskName:"sepolia自动领水",
                 description:"自动领取sepolia水龙头"
+            },
+            {   
+                taskKey:"twitterMonitor",
+                taskName:"推特监听",
+                description:"监听推特上的信息"
             }
         ]);
         
@@ -81,6 +87,7 @@ export default function DefaultTask() {
             {pageState === "transfer"&&<TransferPage task={currentTask} returnMainPage={returnMainPage}/>}
             {pageState === "exchangeWithdraw"&&<ExchangeWithdrawPage task={currentTask} returnMainPage={returnMainPage}/>}
             {pageState === "sepoliaFaucet"&&<FaucetPage task={currentTask} returnMainPage={returnMainPage}/>}
+            {pageState === "twitterMonitor"&&<TwitterMonitor task={currentTask} returnMainPage={returnMainPage}/>}
             
         </Container>
     )

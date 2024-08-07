@@ -31,5 +31,20 @@
         "taskKey":"sepoliaFaucet",
         "defaultTask":true,
         "taskType":"execByOrder"
+    },
+    {
+        "taskName":"checkEmail",
+        "scriptPath":"checkEmail.js",
+        "taskKey":"checkEmail",
+        "defaultTask":true,
+        "taskType":"execWithoutWallet"
+    },
+    {
+        "taskName":"twitterMonitor",
+        "scriptPath":"twitterMonitor/twitterMonitor.js",
+        "taskKey":"twitterMonitor",
+        "defaultTask":true,
+        "taskType":"execWithoutWallet"
+       
     }
 ]
