@@ -101,6 +101,7 @@ export default function TwitterMonitorPage({ task, returnMainPage }) {
                     },
                     { type: 'button', colWidth: 3, text: '保存', style: { marginTop:'1vw', textAlign: 'center' },
                         click: () => {
+                            window.localStorage.setItem('emailConfig',JSON.stringify(config));
                             newTaskData.config = {...taskData.config,...config};
                             setTaskData(newTaskData);
                             setCustomModalProp({ show: false });
@@ -164,6 +165,7 @@ export default function TwitterMonitorPage({ task, returnMainPage }) {
                     },
                     { type: 'button', colWidth: 3, text: '保存', style: { marginTop: '1vw', textAlign: 'center' },
                         click: () => {
+                            window.localStorage.setItem('ipProxyConfig',JSON.stringify(config));
                             newTaskData.config = {...taskData.config,...config};
                             setTaskData(newTaskData);
                             console.log('newTaskData:',newTaskData);
