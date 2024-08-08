@@ -114,6 +114,19 @@ const Introduction = () => {
           </Button>
         </Col>
       </Row>
+      <Row style={{ border: '1px solid black',margin:'5px' }}>
+        <Col md={2} style={{ fontSize: '1.5vw', borderRight: '1px solid black' }}>
+          V0.1.7新增
+        </Col>
+        <Col md={8} style={{ fontSize: '1.5vw', borderRight: '1px solid black' }}>
+          推特监控+邮件提醒
+        </Col>
+        <Col md={2}>
+          <Button style={{ fontSize: '1.5vw',margin:'1px'}} onClick={() => openUrl('https://youtu.be/N_ErhIIAoRQ')}>
+            查看演示
+          </Button>
+        </Col>
+      </Row>
     </Container>
   );
 }

@@ -210,9 +210,8 @@ async function processMonitor(processList) {
         const url = processList[i];
         const pages = await browser.pages();
         const page = pages[i];
-        
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
         startMonitor(page,url);
-        //随机等待时间
         await sleep(waitInterval);
     }
     pageInit = true;
