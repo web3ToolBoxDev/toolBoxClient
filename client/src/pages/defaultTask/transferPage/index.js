@@ -1,10 +1,10 @@
 import { Container, Button, Row, Col, Spinner, Modal, Form } from 'react-bootstrap';
 import { useState, useEffect } from 'react';
 import Web3Manager from '../../../utils/web3';
-import { eventEmitter } from '../../../utils/eventEmitter';
+
 import AddWalletModal from '../components/addWalletModal';
 import ChooseWalletModal from '../components/chooseWalletModal';
-import { shortAddress,formatNumber } from '../../../utils';
+import { shortAddress,formatNumber,log } from '../../../utils';
 
 
 
@@ -95,7 +95,6 @@ function SetConfigModal({ show, onHide, config, confirm , index }) {
 
     useEffect(() => {
         setNetworkList(web3Manager.getNetworkList());
-        console.log('config',config);
         if(config){
             config.network&&setNetworkValue(config.network);
             config.rpc&&setRpc(config.rpc);
@@ -565,10 +564,7 @@ export default function TransferPage({ task, returnMainPage }) {
     useEffect(() => {
         clear();
     }, [task])
-    const log = (message) => {
-        let time = new Date().toLocaleString();
-        eventEmitter.emit('clientTaskMessage', `${time}:${message}`);
-    }
+    
     const execTask = async () => {
         setLoadingShow(true);
         setLoadingText('任务执行中');

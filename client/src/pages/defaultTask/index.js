@@ -3,6 +3,7 @@ import { useState,useEffect } from 'react';
 import TransferPage from './transferPage';
 import ExchangeWithdrawPage from './exchangeWithdrawPage';
 import FaucetPage from './faucetPage';
+import PrivateSwap from './privateSwap';
 import TwitterMonitor from './twitterMonitorPage';
 
 
@@ -33,6 +34,11 @@ export default function DefaultTask() {
                 taskKey:"twitterMonitor",
                 taskName:"推特监听",
                 description:"监听推特上的信息"
+            },
+            {
+                taskKey:"privateSwap",
+                taskName:"隐私交易",
+                description:"支持Uniswap V2的隐私交易"
             }
         ]);
         
@@ -88,7 +94,7 @@ export default function DefaultTask() {
             {pageState === "exchangeWithdraw"&&<ExchangeWithdrawPage task={currentTask} returnMainPage={returnMainPage}/>}
             {pageState === "sepoliaFaucet"&&<FaucetPage task={currentTask} returnMainPage={returnMainPage}/>}
             {pageState === "twitterMonitor"&&<TwitterMonitor task={currentTask} returnMainPage={returnMainPage}/>}
-            
+            {pageState === "privateSwap"&&<PrivateSwap task={currentTask} returnMainPage={returnMainPage}/>}
         </Container>
     )
 }

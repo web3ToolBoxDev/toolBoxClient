@@ -1,7 +1,7 @@
 {
   "name": "web3toolbox",
   "author": "Aming",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "main": "electron.js",
   "license": "MIT",
@@ -48,9 +48,12 @@
     }
   },
   "dependencies": {
+    "@flashbots/ethers-provider-bundle": "^1.0.0",
     "@testing-library/jest-dom": "^5.14.1",
     "@testing-library/react": "^13.0.0",
     "@testing-library/user-event": "^13.2.1",
+    "@uniswap/v2-core": "^1.0.1",
+    "@uniswap/v2-periphery": "^1.1.0-beta.0",
     "async-mutex": "^0.5.0",
     "axios": "^1.6.8",
     "bootstrap": "^5.3.3",

@@ -1,9 +1,7 @@
 {
-    "ETH":["https://eth.llamarpc.com",
-        "https://ethereum.blockpi.network/v1/rpc/public",
-        "https://eth-mainnet.public.blastapi.io"],
-    "BSC":["https://binance.llamarpc.com",
-        "https://bsc-dataseed.binance.org",
+    "ETH":["https://eth-mainnet.public.blastapi.io",
+        "https://ethereum.blockpi.network/v1/rpc/public"],
+    "BSC":["https://bsc-dataseed.binance.org",
         "https://bsc-dataseed1.defibit.io",
         "https://bsc-dataseed1.ninicoin.io"],
     "POLYGON":["https://polygon.llamarpc.com",
