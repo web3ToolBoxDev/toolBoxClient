@@ -496,7 +496,7 @@ class Web3Manager {
                 }
             }
             const blockNumber = await provider.getBlockNumber();
-            const targetBlockNumber = blockNumber + 10;
+            const targetBlockNumber = blockNumber + 1;
 
             if (chainId === 1n) {
                 console.log('signed_txs:', signed_txs);
