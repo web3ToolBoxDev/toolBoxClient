@@ -22,7 +22,8 @@
       "server/**/*",
       "resources/**/*",
       "package.json",
-      "config.js"
+      "config.js",
+      "!assets/savePath.json"
     ],
     "extraResources": [
       {

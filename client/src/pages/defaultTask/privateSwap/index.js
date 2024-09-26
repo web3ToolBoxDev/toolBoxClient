@@ -1,10 +1,18 @@
-import { Container, Button, Row, Col, Card, Spinner, Modal, Form } from 'react-bootstrap';
+import { Container, Button, Row, Col, Spinner, Modal, Form } from 'react-bootstrap';
 import { useState, useEffect, useRef } from 'react';
 import ChooseWalletModal from '../components/chooseWalletModal';
 import AddWalletModal from '../components/addWalletModal';
 import Web3Manager from '../../../utils/web3';
 import CustomModal from '../../../components/customModal';
 import { shortAddress, sleep, formatNumber, log } from '../../../utils';
+
+
+const priorities = {
+    'execTask': 0,
+    'deleteWallet': 1,
+    'setConfig': 2,
+    'updatePairInfo': 3,
+};
 
 
 
@@ -102,16 +110,25 @@ function SetConfigModal({ show, onHide, config, confirm, index }) {
 
         }
     }, [config])
+    const clickSetNetwork = (e) => {
+        if (e.target.value === networkValue) {
+            setRpcShow(true);
+            return
+        }
+        setNetwork(e.target.value);
+        
+        setPairAddress('');
+    }
     return (
         <Modal show={show} onHide={onHide} centered>
             <Modal.Header closeButton>
-                <Modal.Title>{index === -1 ? '全局配置' : `配置第${index + 1}个转账`}</Modal.Title>
+                <Modal.Title>{index === -1 ? '全局配置' : `配置第${index + 1}个交易`}</Modal.Title>
             </Modal.Header>
             <Modal.Body>
                 {index === -1 && <Row>
                     <Col>请选择网络</Col>
                     <Col>
-                        <Form.Select value={networkValue} onChange={(e) => setNetwork(e.target.value)}>
+                        <Form.Select value={networkValue} onChange={(e) => clickSetNetwork(e)}>
                             <option value="" disabled>选择网络</option>
                             {networkList.map((network, index) => (
                                 <option key={index} value={network}>{network}</option>
@@ -140,7 +157,7 @@ function SetConfigModal({ show, onHide, config, confirm, index }) {
                     <Col>请选择交易类型</Col>
                     <Col>
                         <Form.Select value={costType} onChange={(e) => { setCostType(e.target.value) }}>
-                            <option value="" disabled>选择转账类型</option>
+                            <option value="" disabled>选择交易类型</option>
                             <option value="amount">数量</option>
                             <option value="percent">百分比</option>
                         </Form.Select>
@@ -228,10 +245,61 @@ export default function PrivateSwap({ task, returnMainPage }) {
                 setDefaultConfig(JSON.parse(defaultConfigLocal));
             }
 
-
+            reUpdateRef.current = true;
         }
         getWalletList();
     }, [])
+    
+    const actionQueueRef = useRef([]);
+    const isProcessingRef = useRef(false); // 使用 useRef 来管理 isProcessing
+    const reUpdateRef = useRef(false);
+
+    const queueAction = async(action) => {
+        
+        actionQueueRef.current.push(action);
+            // 根据优先级重新排序
+        actionQueueRef.current.sort((a, b) => priorities[a.type] - priorities[b.type]);
+        
+        processAction();
+    };
+    const processAction = async () => {
+        if(isProcessingRef.current){
+            return;
+        }
+        isProcessingRef.current = true;
+
+        while(actionQueueRef.current.length > 0){
+            const action = actionQueueRef.current.shift()
+            if(action.type === 'execTask'){
+                reUpdateRef.current = true;
+                await execTask();
+            }else if(action.type === 'deleteWallet'){
+                reUpdateRef.current = true;
+                console.log('deleteWallet:',action.index);
+                await deleteWallet(action.index);
+                console.log('deleteWalletEnd:',action.index);
+            }else if(action.type === 'setConfig'){
+                reUpdateRef.current = true;
+                console.log('setConfig:',action.index);
+                await updatePairInfo({type:action.type,index:action.index,pairInfo:action.pairInfo});
+                console.log('setConfigEnd:',action.index);
+            }else if(action.type === 'updatePairInfo'){
+
+                if(reUpdateRef.current){
+                    console.log('reUpdate:',reUpdateRef.current);
+                    actionQueueRef.current = [];
+                    isProcessingRef.current = false;
+                    reUpdateRef.current = false;
+                    return;
+                }
+                await updatePairInfo({type:action.type,index:action.index,pairInfo:action.pairInfo});
+            }
+        }
+        isProcessingRef.current = false;
+        if(actionQueueRef.current.length > 0){
+            processAction()
+        }
+    }
 
     const [gasPrice, setGasPrice] = useState(0);
     const [gasMultiplier, setGasMultiplier] = useState(1);
@@ -245,24 +313,26 @@ export default function PrivateSwap({ task, returnMainPage }) {
         if (taskRunning) {
             return;
         }
+        console.log('reUpdateRef:', reUpdateRef.current);
         const updatePair = async () => {
             const pairInfoObj = {}
             for (let i = 0; i < walletList.length; i++) {
                 let pairAddress = walletList[i].pairInfo?.pairAddress;
                 if (pairAddress) {
+                    
                     if (!pairInfoObj[pairAddress]) {
+                        pairInfoObj[pairAddress] = {};
                         const pairInfo = await web3Manager.getUniV2Reserve(pairAddress, walletList[i].pairInfo.rpc);
-
-                        pairInfoObj[pairAddress] = walletList[i].pairInfo;
                         pairInfoObj[pairAddress].leftTokenReserve = pairInfo.leftTokenReserve;
                         pairInfoObj[pairAddress].rightTokenReserve = pairInfo.rightTokenReserve;
                         console.log('pairInfoObj:', pairInfoObj);
                     }
 
-                    await updatePairInfo(i, pairInfoObj[pairAddress]);
+                    queueAction({type:'updatePairInfo',index:i,pairInfo:{...walletList[i].pairInfo,...pairInfoObj[pairAddress]}});
                 }
             }
             if (walletList.length > 0 && walletList[0]?.pairInfo?.rpc) {
+                console.log('pairRpc:', walletList[0].pairInfo.rpc);    
                 const gasPriceNow = await web3Manager.getGasPrice(walletList[0].pairInfo.rpc);
                 setGasPrice(gasPriceNow);
                 calculateGasCost(gasPriceNow, gasMultiplier);
@@ -277,8 +347,12 @@ export default function PrivateSwap({ task, returnMainPage }) {
         return () => {
             clearInterval(interval);
         }
-    }, [walletList.length, taskRunning])
+    }, [reUpdateRef.current, taskRunning])
     const clickChooseWallet = () => {
+        if(taskRunning){
+            alert('任务执行中，请稍后');
+            return
+        }
         setChooseWalletModalProp({
             show: true,
             onHide: () => { setChooseWalletModalProp({ show: false }) },
@@ -290,11 +364,16 @@ export default function PrivateSwap({ task, returnMainPage }) {
                 }
                 setWalletList(newWalletList);
                 setChooseWalletModalProp({ show: false });
+                reUpdateRef.current = true;
             },
         });
     }
     const [addWalletModalProp, setAddWalletModalProp] = useState({ show: false });
     const clickAddWallet = () => {
+        if(taskRunning){
+            alert('任务进行中，请稍后');
+            return;
+        }
         setAddWalletModalProp({
             show: true,
             onHide: () => { setAddWalletModalProp({ show: false }) },
@@ -307,6 +386,7 @@ export default function PrivateSwap({ task, returnMainPage }) {
                 });
                 setWalletList(newWalletList);
                 setAddWalletModalProp({ show: false });
+                reUpdateRef.current = true;
             },
             mode: 'key',
         });
@@ -314,15 +394,21 @@ export default function PrivateSwap({ task, returnMainPage }) {
     const [configModalProp, setConfigModalProp] = useState({ show: false });
     const [defaultConfig, setDefaultConfig] = useState({});
     const clickSetConfig = (index) => {
+        if(taskRunning){
+            alert('任务运行中，请稍后尝试');
+            return
+        }
         setConfigModalProp({
             show: true,
             onHide: () => { setConfigModalProp({ show: false }) },
             config: index === -1 ? defaultConfig : walletList[index].pairInfo,
             confirm: async (config, index) => {
-                console.log('config:', config)
+                console.log('setConfig:', config)
                 if (config.pairAddress) {
                     const pairInfo = await web3Manager.getUniV2Info(config.pairAddress, config.rpc);
-                    updatePairInfo(index, { ...config, ...pairInfo });
+                    console.log('pairInfo:', pairInfo);
+                    queueAction({type:"setConfig",index,pairInfo:{ ...config, ...pairInfo }})
+                    reUpdateRef.current = true;
                 }
                 if (index === -1) {
                     setDefaultConfig(config);
@@ -334,18 +420,25 @@ export default function PrivateSwap({ task, returnMainPage }) {
             index,
         });
     }
-    const updatePairInfo = async (index, pairInfo) => {
+    
+
+
+
+    const updatePairInfo = async ({type,index, pairInfo}) => {
         if (index === -1) {
             for (let i = 0; i < walletList.length; i++) {
-                await updatePairInfo(i, pairInfo);
+                console.log('updatePairInfo:', i, pairInfo);
+                queueAction({type,index:i,pairInfo});
             }
             return;
         }
+        console.log(type, index, pairInfo);
         setLoadingShow(true);
         setLoadingText('更新配置中');
         let newWalletList = [...walletList];
         console.log('index:', index);
         let wallet = newWalletList[index];
+        
         let leftTokenBalance = pairInfo.leftNative ? await web3Manager.getBalance(wallet.address, pairInfo.rpc) :
             await web3Manager.getErc20Balance(wallet.address, pairInfo.leftTokenAddress, pairInfo.rpc);
         let rightTokenBalance = pairInfo.rightNative ? await web3Manager.getBalance(wallet.address, pairInfo.rpc) :
@@ -353,16 +446,22 @@ export default function PrivateSwap({ task, returnMainPage }) {
         
         if (pairInfo.costType === 'percent') {
             if (pairInfo.leftCostPercent) {
+                console.log(pairInfo.leftTokenSymbol, leftTokenBalance);
+
                 pairInfo.leftTokenCost = formatNumber(leftTokenBalance * pairInfo.leftCostPercent / 100);
                 //如果leftNative为true，说明是eth，需要减去gas
                 if (pairInfo.leftNative) {
-                    pairInfo.leftTokenCost = formatNumber(pairInfo.leftTokenCost - gasCost/walletList.length);
+                    pairInfo.leftTokenCost = formatNumber(pairInfo.leftTokenCost);
                 }
             }
             if (pairInfo.rightCostPercent) {
+                console.log(pairInfo.rightTokenSymbol, rightTokenBalance);
                 pairInfo.rightTokenCost = formatNumber(rightTokenBalance * pairInfo.rightCostPercent / 100);
                 if (pairInfo.rightNative) {
-                    pairInfo.rightTokenCost = formatNumber(pairInfo.rightTokenCost - gasCost/walletList.length);
+                    console.log('gasCost:', gasCost);
+                    console.log('walletList.length:', walletList.length);
+                    console.log('rightTokenCost:', pairInfo.rightTokenCost);
+                    pairInfo.rightTokenCost = formatNumber(pairInfo.rightTokenCost);
                 }
             }
         }else if(pairInfo.costType === 'amount'){
@@ -414,8 +513,13 @@ export default function PrivateSwap({ task, returnMainPage }) {
         }
     }
 
-
-    const deleteWallet = (index) => {
+    const clickDeleteWallet = async(index)=>{
+        if(taskRunning){
+            alert("任务执行中请稍后操作")
+        }
+        queueAction({type:"deleteWallet",index})
+    }
+    const deleteWallet = async(index) => {
         let newWalletList = [...walletList];
         newWalletList.splice(index, 1);
         setWalletList(newWalletList);
@@ -570,6 +674,11 @@ export default function PrivateSwap({ task, returnMainPage }) {
                 inAddress = wallet.pairInfo.leftTokenAddress;
                 outAddress = wallet.pairInfo.rightTokenAddress;
                 inAmount = wallet.pairInfo.leftTokenCost;
+
+                if(inAmount <= 0){
+                    log(`${wallet.address} inAmount <= 0,skip`);
+                    return -1;
+                }
                 outAmount = formatNumber(wallet.pairInfo.rightTokenGain * (1 - slippagePercent / 100));
                 inNative = wallet.pairInfo.leftNative;
                 outNative = wallet.pairInfo.rightNative;
@@ -579,11 +688,19 @@ export default function PrivateSwap({ task, returnMainPage }) {
                 inAddress = wallet.pairInfo.rightTokenAddress;
                 outAddress = wallet.pairInfo.leftTokenAddress;
                 inAmount = wallet.pairInfo.rightTokenCost;
+
+                if(inAmount <= 0){
+                    log(`${wallet.address} inAmount <= 0,skip`);
+                    return -1;
+                }
                 outAmount = formatNumber(wallet.pairInfo.leftTokenGain * (1 - slippagePercent / 100));
                 inNative = wallet.pairInfo.rightNative;
                 outNative = wallet.pairInfo.leftNative;
                 inDecimals = wallet.pairInfo.rightTokenDecimals;
                 outDecimals = wallet.pairInfo.leftTokenDecimals;
+            }else{
+                log(`${wallet.name || shortAddress(wallet.address)} leftTokenCost and rightTokenCost both 0,skip`);
+                return -1;
             }
 
             return {
@@ -600,7 +717,8 @@ export default function PrivateSwap({ task, returnMainPage }) {
             }
         });
 
-        web3Manager.execPrivateSwapTask(taskList, gasMultiplier, callback);
+        
+        web3Manager.execPrivateSwapTask(taskList.filter((task)=>task !== -1), gasMultiplier, callback);
 
     }
 
@@ -674,7 +792,7 @@ export default function PrivateSwap({ task, returnMainPage }) {
                             </Col>
                             <Col md={2} style={{ fontSize: '1.2vw' }}>
                                 <Button style={{ fontSize: '1.0vw', margin: "1px 1px" }} onClick={() => clickSetConfig(index)}>设置</Button>
-                                <Button variant="danger" style={{ fontSize: '1.0vw', margin: "1px 1px" }} onClick={() => deleteWallet(index)}>删除</Button>
+                                <Button variant="danger" style={{ fontSize: '1.0vw', margin: "1px 1px" }} onClick={() => clickDeleteWallet(index)}>删除</Button>
                             </Col>
                         </Row>
                     ))}
