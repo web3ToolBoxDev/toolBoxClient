@@ -48,6 +48,44 @@ module.exports = {
             })
         );
 
+        // 忽略源码映射解析告警
+        const smWarning = /Failed to parse source map/;
+        config.ignoreWarnings = Array.isArray(config.ignoreWarnings)
+            ? [...config.ignoreWarnings, smWarning]
+            : [smWarning];
+
+        // 将 source-map-loader 排除对部分第三方包的处理
+        const sourceMapExcludes = [
+            /node_modules[\\/]@solana[\\/]buffer-layout/,
+            /node_modules[\\/]superstruct/,
+        ];
+        const addExcludeForSourceMapLoader = (rules) => {
+            if (!Array.isArray(rules)) return;
+            for (const rule of rules) {
+                if (!rule) continue;
+                // 直接 loader 形式
+                if (rule.loader && String(rule.loader).includes('source-map-loader')) {
+                    rule.exclude = Array.isArray(rule.exclude)
+                        ? [...rule.exclude, ...sourceMapExcludes]
+                        : sourceMapExcludes;
+                }
+                // use 数组形式
+                if (rule.use) {
+                    const uses = Array.isArray(rule.use) ? rule.use : [rule.use];
+                    uses.forEach((u) => {
+                        if (u && u.loader && String(u.loader).includes('source-map-loader')) {
+                            u.exclude = Array.isArray(u.exclude)
+                                ? [...u.exclude, ...sourceMapExcludes]
+                                : sourceMapExcludes;
+                        }
+                    });
+                }
+                if (rule.oneOf) addExcludeForSourceMapLoader(rule.oneOf);
+                if (rule.rules) addExcludeForSourceMapLoader(rule.rules);
+            }
+        };
+        addExcludeForSourceMapLoader(config.module && config.module.rules);
+
         return config;
     }
 };

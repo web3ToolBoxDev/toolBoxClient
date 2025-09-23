@@ -4,6 +4,7 @@ import './index.scss';
 
 import router from './router';
 import {RouterProvider} from 'react-router-dom';
+import './i18n'; // Import i18n configuration
 
 import reportWebVitals from './reportWebVitals';
 

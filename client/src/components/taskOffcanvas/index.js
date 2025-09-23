@@ -1,14 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Offcanvas from 'react-bootstrap/Offcanvas';
-import { Button, Row, Col } from 'react-bootstrap';
+import { Button } from 'react-bootstrap';
 import WebSocketManager from '../../utils/webSocket';
 import { eventEmitter } from '../../utils/eventEmitter';
-
+import './index.scss';
+import { useTranslation } from 'react-i18next';
 
 function TaskOffcanvas({ show, handleClose }) {
     const [messageList, setMessageList] = useState([]);
     const wsManager = new WebSocketManager();
-    
+    const { t } = useTranslation();
+
+    // 用ref保存监听器引用
+    const taskStartListener = useRef();
+    const clientTaskMessageListener = useRef();
 
     const clearStoredMessage = () => {
         window.localStorage.setItem('taskMessagesList', JSON.stringify([]));
@@ -22,7 +27,7 @@ function TaskOffcanvas({ show, handleClose }) {
         for (let i = 0; i < wsManager.getQueueLength(); i++) {
             let info = wsManager.popFromQueue();
             let message = '';
-            switch (info.type){
+            switch (info.type) {
                 case 'task_log':
                     message = info.message;
                     break;
@@ -32,7 +37,6 @@ function TaskOffcanvas({ show, handleClose }) {
                     break;
                 default:
                     break;
-
             }
             if (!message) {
                 continue;
@@ -50,72 +54,70 @@ function TaskOffcanvas({ show, handleClose }) {
     useEffect(() => {
         wsManager.connect(messageCallback, closeCallback);
         const storedTaskMessagesList = JSON.parse(window.localStorage.getItem('taskMessagesList'));
-        console.log('storedTaskMessagesList:', storedTaskMessagesList);
         if (storedTaskMessagesList) {
             setMessageList(storedTaskMessagesList);
         }
-        eventEmitter.on('taskStart', async() => {
-            
+
+        // 定义并保存监听器
+        taskStartListener.current = async () => {
             let connected = await wsManager.connect(messageCallback, closeCallback);
             if (!connected) {
-                console.log('连接失败');
-                alert('连接失败，请尝试重启程序');
+                alert(t('connectionFailedAlert'));
             }
-        });
-        eventEmitter.on('clientTaskMessage', (message) => {
+        };
+        clientTaskMessageListener.current = (message) => {
             let taskMessagesList = JSON.parse(window.localStorage.getItem('taskMessagesList')) || [];
             taskMessagesList.push(message);
             window.localStorage.setItem('taskMessagesList', JSON.stringify(taskMessagesList));
             setMessageList(taskMessagesList);
-        });
+        };
+
+        eventEmitter.on('taskStart', taskStartListener.current);
+        eventEmitter.on('clientTaskMessage', clientTaskMessageListener.current);
+
         // 设置定时器检查连接状态
         const interval = setInterval(() => {
             if (!wsManager.checkConnection()) {
                 wsManager.connect(messageCallback, closeCallback);
             }
         }, 5000);
+
         return () => {
             wsManager.close();
-            eventEmitter.off('taskStart');
-            eventEmitter.off('clientTaskMessage');
+            eventEmitter.off('taskStart', taskStartListener.current);
+            eventEmitter.off('clientTaskMessage', clientTaskMessageListener.current);
             clearInterval(interval);
         }
-
-    }, []);
+    }, [t]);
 
     return (
-        <>
-            <Offcanvas show={show} onHide={() => { handleClose(false) }} placement='bottom' style={{ height: '50%' }}>
-                <Offcanvas.Header closeButton>
-                    <Offcanvas.Title>任务日志</Offcanvas.Title>
-                </Offcanvas.Header>
-                <Offcanvas.Body style={{ display: 'flex' }}>
-                    <div style={{ flex: '0 0 auto', width: '100px', paddingRight: '10px' }}>
-                        {/* Left section */}
-                        <Row>
-                            <Col md={12}>
-                                <Button variant="primary" onClick={terminateTask} style={{ fontSize: '1.2vw', margin: '10px' }}>结束任务</Button>
-                                <Button onClick={clearStoredMessage} variant="primary" style={{ fontSize: '1.2vw', margin: '10px' }}>清空消息</Button>
-                            </Col>
-                        </Row>
-                    </div>
-                    <div style={{ flex: '1', overflowY: 'auto', border: '1px solid #201D32', padding: '12px' }}>
-                        {/* Right section with scrollbar */}
-                        <Row>
-                            <Col md={12}>
-                                {/* Add your content here */}
-                                <ul>
-                                    {messageList.map((message, index) => (
-                                        <li key={index}>{message}</li>
-                                    ))}
-                                </ul>
-                                {/* Add more content if needed */}
-                            </Col>
-                        </Row>
-                    </div>
-                </Offcanvas.Body>
-            </Offcanvas>
-        </>
+        <Offcanvas
+            className="task-offcanvas"
+            show={show}
+            onHide={() => handleClose(false)}
+            placement="bottom"
+        >
+            <Offcanvas.Header closeButton>
+                <Offcanvas.Title>{t('taskLog')}</Offcanvas.Title>
+            </Offcanvas.Header>
+            <Offcanvas.Body>
+                <div className="actions">
+                    <Button className="btn-terminate mb-2" onClick={terminateTask}>
+                        {t('terminateTask')}
+                    </Button>
+                    <Button className="btn-clear" onClick={clearStoredMessage}>
+                        {t('clearMessages')}
+                    </Button>
+                </div>
+                <div className="logs">
+                    <ul>
+                        {messageList.map((message, index) => (
+                            <li key={index}>{message}</li>
+                        ))}
+                    </ul>
+                </div>
+            </Offcanvas.Body>
+        </Offcanvas>
     );
 }
 

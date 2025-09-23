@@ -1,0 +1,117 @@
+@import '../index.scss';
+
+// ===== Design Tokens =====
+$clr-sidebar-bg:      #1F1E3A;
+$clr-sidebar-border:  #2E2C4E;
+$clr-brand-text:      #FFFFFF;
+$clr-link-text:       #A1A1B5;
+
+$clr-btn-primary:     #5A67D8; // 主要操作色
+$clr-btn-primary-hover: darken($clr-btn-primary, 10%);
+
+$clr-btn-warning:     #ED8936; // 警告/信息色
+$clr-btn-warning-hover: darken($clr-btn-warning, 10%);
+
+// ===== 组件样式 =====
+.navbar-brand-my {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  font-size: 1.25rem !important;
+  color: $clr-brand-text !important;
+}
+
+.navbar-brand-my img {
+  height: 40px !important;
+  width: auto;
+}
+
+.nav-link-my {
+  font-size: 1.2em !important;
+  color: $clr-link-text !important;
+  padding: 10px 20px;
+  text-align: center;
+}
+
+.sidebar {
+  background-color: $clr-sidebar-bg;
+  border-right: 1px solid $clr-sidebar-border;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 25%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 0;
+
+  .navbar {
+    flex: 1;
+  }
+
+  .mt-auto {
+    margin-top: auto !important;
+  }
+  .mb-3 {
+    margin-bottom: 1rem !important;
+  }
+
+  // 按钮样式
+  .btn-change-lang,
+  .btn-task-info {
+    display: block;
+    width: 80%;
+    margin: 0.5rem auto;
+    border-radius: 0.25rem;
+    font-size: 1em;
+    font-weight: 500;
+    color: #fff;
+  }
+  .btn-change-lang {
+    background-color: $clr-btn-primary;
+    border: none;
+    &:hover { background-color: $clr-btn-primary-hover; }
+  }
+  .btn-task-info {
+    background-color: $clr-btn-warning;
+    border: none;
+    &:hover { background-color: $clr-btn-warning-hover; }
+  }
+}
+
+.content {
+  margin-left: 25%;
+  padding: 0;
+  overflow: auto;
+  height: 100vh;
+}
+
+.lang-offcanvas {
+  &.offcanvas-end {
+    width: 200px !important;
+    background-color: $clr-sidebar-bg;
+    color: $clr-brand-text;
+    .offcanvas-header {
+      border-bottom: 1px solid $clr-sidebar-border;
+      .btn-close { filter: invert(1); }
+    }
+    .offcanvas-title {
+      font-size: 1.1rem;
+      color: $clr-brand-text;
+    }
+    .offcanvas-body {
+      display: flex;
+      flex-direction: column;
+      padding: 1rem;
+      .btn {
+        width: 100%;
+        margin-bottom: 0.5rem;
+        background-color: $clr-btn-primary;
+        border: none;
+        color: $clr-brand-text;
+        &:hover { background-color: $clr-btn-primary-hover; }
+      }
+    }
+  }
+}

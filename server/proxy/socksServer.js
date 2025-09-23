@@ -28,7 +28,12 @@ class HttpProxy extends EventEmitter {
     }
     _request(proxy, uReq, uRes) {
         const u = url.parse(uReq.url);
-        const socksAgent = new socks_proxy_agent.SocksProxyAgent(`socks://${proxy.userId}:${proxy.password}@${proxy.ipaddress}:${proxy.port}`);
+        // 构造 socksAgent 时用户名/密码可选
+        let auth = '';
+        if(proxy.userId && proxy.password){
+            auth = `${proxy.userId}:${proxy.password}@`;
+        }
+        const socksAgent = new socks_proxy_agent.SocksProxyAgent(`socks://${auth}${proxy.ipaddress}:${proxy.port}`);
         const options = {
             hostname: u.hostname,
             port: u.port || 80,

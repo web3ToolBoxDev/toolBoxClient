@@ -3,6 +3,9 @@ import network from './network.json';
 import ierc20 from './IERC20Metadata.json';
 import { FlashbotsBundleProvider } from '@flashbots/ethers-provider-bundle';
 import axios from 'axios';
+import { Keypair } from '@solana/web3.js';
+import * as bip39 from 'bip39';
+import { derivePath } from 'ed25519-hd-key';
 
 const IRouter02Abi = require('@uniswap/v2-periphery/build/IUniswapV2Router02.json');
 const IPair02Abi = require('@uniswap/v2-core/build/IUniswapV2Pair.json');
@@ -613,6 +616,27 @@ class Web3Manager {
         } 
     }
 
+    /**
+     * Create Solana wallet using ethers mnemonic
+     * @param {string} mnemonic - ethers compatible mnemonic phrase
+     * @param {number} accountIndex - optional account index, default 0
+     * @returns {object} { mnemonic, solAddress, solPrivateKey }
+     */
+    createSolWalletFromMnemonic(mnemonic, accountIndex = 0) {
+        if (!bip39.validateMnemonic(mnemonic)) {
+            throw new Error('Invalid mnemonic');
+        }
+        // Solana derivation path: m/44'/501'/account'/0'
+        const path = `m/44'/501'/${accountIndex}'/0'`;
+        const seed = bip39.mnemonicToSeedSync(mnemonic);
+        const derived = derivePath(path, seed.toString('hex'));
+        const keypair = Keypair.fromSeed(derived.key);
+        return {
+            mnemonic,
+            solAddress: keypair.publicKey.toBase58(),
+            solPrivateKey: Buffer.from(keypair.secretKey).toString('hex')
+        };
+    }
 }
 
 export default Web3Manager;

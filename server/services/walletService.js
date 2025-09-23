@@ -1,76 +1,155 @@
 // service.js
-const fs = require('fs'); // 加入文件系统模块
 const path = require('path');
 const excel = require('exceljs');
 const date = require('date-and-time');
-const ethers = require('ethers');
 const taskServiceManager = require('./taskService').getInstance();
 const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
 const { createDirectoryIfNotExists } = require('../utils.js');
-const {generateRandomFingerPrint} = require('./fingerPrintService.js')
+const fingerPrintService = require('./fingerPrintService.js');
+const web3Manager = require('../web3');
+const { v4: uuidv4 } = require('uuid');
 
 
 console.log('wallet isBuild:', isBuild)
 
-
-
-async function createWallet(params) {
-  console.log('创建钱包');
-  console.log('参数:', params);
-  let res = await config.getSavePath();
-  if(!res.success){
-    throw new Error('获取保存路径失败');
-  }
-  const userDataPath = res.path;
+let wallets = {};
+(async () => {
   try {
-    const {name, address, mnemonic, privateKey } = params;
-    const chromeUserDataPath = path.join(userDataPath, address);
-    const walletData = {name, address, mnemonic, privateKey, walletInitialized: false, chromeUserDataPath };
-    createDirectoryIfNotExists(chromeUserDataPath);
-    await new Promise((resolve, reject) => {
-      config.getWalletDb().insert(walletData, (err, newWallet) => {
+    const docs = await new Promise((resolve, reject) => {
+      config.getWalletDb().find({}, (err, docs) => {
+        if (err) reject(err);
+        else resolve(docs);
+      });
+    });
+    wallets = docs.reduce((acc, cur) => {
+      acc[cur.id] = cur;
+      return acc;
+    }, {});
+    console.log('wallets initialized:', Object.keys(wallets).length);
+  } catch (e) {
+    console.error('wallets initialization failed:', e);
+  }
+})();
+
+// Wallet creation
+// API codes: 3001 - Invalid wallet count, 3002 - Save path fetch failed, 3003 - Insert wallet error
+ async function createWallet(count=1) {
+   console.log('createWallet, count:', count);
+   if (count < 1) {
+     return { success: false, code: 3001, message: 'Invalid wallet count' };
+   }
+   const res = await config.getSavePath();
+   if (!res.success) {
+     return { success: false, code: 3002, message: 'Save path fetch failed' };
+   }
+
+   const walletsToInsert = [];
+   try {
+     for (let i = 0; i < count; i++) {
+       const walletId = uuidv4();
+       const wallet = web3Manager.createWallet();
+       const mnemonic = wallet.mnemonic;
+       const ethPrivateKey = wallet.privateKey;
+       const ethAddress = wallet.address;
+       const solWallet = web3Manager.createSolWalletFromMnemonic(mnemonic);
+       const solAddress = solWallet.solAddress;
+       const solPrivateKey = solWallet.solPrivateKey;
+       const curWallet = {
+         id: walletId,
+         name: walletId,
+         ethAddress,
+         ethPrivateKey,
+         solAddress,
+         solPrivateKey,
+         mnemonic,
+         bindEnvId: '',
+         walletType: 'metamask',
+         walletPluginPath: '',
+         walletInitialized: false,
+         createdAt: Date.now(),
+       };
+       walletsToInsert.push(curWallet);
+       wallets[walletId] = curWallet; // update in-memory cache
+     }
+
+     // Bulk insert and await result
+     await new Promise((resolve, reject) => {
+       config.getWalletDb().insert(walletsToInsert, (err, newDocs) => {
+         if (err) reject(err);
+         else resolve(newDocs);
+       });
+     });
+
+     return { success: true, code: 0, message: `Created ${count} wallets`, wallets };
+   } catch (error) {
+     console.error('createWallet error:', error);
+     return { success: false, code: 3003, message: error.message || 'Insert wallet error' };
+   }
+ }
+
+async function updateWalletName(id, name) {
+  console.log('updateWalletName:', id, name);
+  if (!id || !name) {
+    throw new Error('Missing id or name parameter');
+  }
+  try {
+    const updatedWallet = await new Promise((resolve, reject) => {
+      config.getWalletDb().update({ id }, { $set: { name } }, { returnUpdatedDocs: true }, (err, numAffected, affectedDocuments) => {
         if (err) {
           reject(err);
         } else {
-          resolve(newWallet);
+          if (numAffected === 0) {
+            reject(new Error('Wallet not found'));
+          } else {
+            resolve(affectedDocuments);
+            wallets[id] = { ...wallets[id], name }; // update in-memory cache
+          }
         }
       });
-    });
-
-    console.log('钱包创建成功:', walletData);
-    return walletData;
+    }
+    );
+    console.log('wallet name updated:', updatedWallet);
+    return { success: true, code: 0, message: 'Wallet name updated', wallet: updatedWallet };
   } catch (error) {
-    console.error('创建钱包时出错:', error);
-    throw error;
+    console.error('updateWalletName error:', error);
+    // If wallet not found
+    if (error.message && error.message.includes('Wallet not found')) {
+      return { success: false, code: 3004, message: 'Wallet not found' };
+    }
+    return { success: false, code: 3003, message: error.message || 'updateWalletName error' };
   }
 }
 
-async function getWalletByAddress(address) {
-  console.log('根据地址查询钱包:', address);
-
-  try {
-    const wallet = await new Promise((resolve, reject) => {
-      config.getWalletDb().findOne({ address }, (err, doc) => {
+async function getWalletById(id) {
+  console.log('getWalletById:', id);
+  if (!id) {
+    throw new Error('Missing id parameter');
+  }
+  const wallet = wallets[id];
+  if (!wallet) {
+    // 从db查询
+    const docs = await new Promise((resolve, reject) => {
+      config.getWalletDb().find({ id }, (err, docs) => {
         if (err) {
           reject(err);
         } else {
-          resolve(doc || null);
+          resolve(docs);
         }
       });
     });
-
-    console.log('查询到的钱包:', wallet);
-    return wallet;
-  } catch (error) {
-    console.error('查询钱包时出错:', error);
-    throw error;
+    if (docs.length === 0) {
+      throw new Error('Wallet not found');
+    }else {
+      wallets[id] = docs[0]; // update in-memory cache
+      return docs[0];
+    }
   }
+  return { success: true, code: 0, message: 'Wallet retrieved', data: wallet };
+
 }
 
 async function getAllWallets() {
-  // console.log('查询所有钱包');
-
   try {
     const wallets = await new Promise((resolve, reject) => {
       config.getWalletDb()?.find({}, (err, docs) => {
@@ -82,16 +161,15 @@ async function getAllWallets() {
       });
     });
 
-    // console.log('查询到的钱包:', wallets);
     return wallets;
   } catch (error) {
-    console.error('查询钱包时出错:', error);
+    console.error('getAllWallets error:', error);
     throw error;
   }
 }
 
 async function getWalletCount() {
-  console.log('查询钱包数量');
+  console.log('getWalletCount');
 
   try {
     const count = await new Promise((resolve, reject) => {
@@ -104,84 +182,58 @@ async function getWalletCount() {
       });
     });
 
-    console.log('钱包数量:', count);
+    console.log('wallet count:', count);
     return count;
   } catch (error) {
-    console.error('查询钱包数量时出错:', error);
+    console.error('getWalletCount error:', error);
     throw error;
   }
 }
-async function updateWallet(params) {
-  console.log('更新钱包');
-  const { address,
-    name, userAgent, ipType,ipHost,ipPort,ipUsername,ipPassword,twitterToken,discordToken ,language, webglVendor, webglRenderer,walletInitialized,chromeUserDataPath
-  } = params;
-
-  if (!address) {
-    throw new Error('缺少地址参数');
+async function updateWallet(id,wallet) {
+  console.log('updateWallet:', id, wallet);
+  if (!id || !wallet) {
+    throw new Error('Missing id or wallet parameter');
   }
-
   try {
     const updatedWallet = await new Promise((resolve, reject) => {
-      config.getWalletDb().update({ address }, { $set: { name, userAgent, ipType,ipHost,ipPort,ipUsername,ipPassword,twitterToken,discordToken, language, webglVendor, webglRenderer,walletInitialized,chromeUserDataPath } }, { returnUpdatedDocs: true }, (err, numAffected, affectedDocuments) => {
+      config.getWalletDb().update({ id }, { $set: wallet }, { returnUpdatedDocs: true }, (err, numAffected, affectedDocuments) => {
         if (err) {
           reject(err);
         } else {
           if (numAffected === 0) {
-            reject(new Error('未找到匹配的钱包'));
+            reject(new Error('Wallet not found'));
           } else {
             resolve(affectedDocuments);
+            wallets[id] = { ...wallets[id], ...wallet }; // update in-memory cache
           }
         }
       });
     });
-
-    console.log('钱包更新成功:', updatedWallet);
-    return updatedWallet;
+    console.log('wallet updated:', updatedWallet);
+    return { success: true, code: 0, message: 'Wallet updated', wallet: updatedWallet };
   } catch (error) {
-    console.error('更新钱包时出错:', error);
-    throw error;
-  }
-}
-async function deleteWallet(address) {
-  console.log('删除钱包:', address);
-  //删除chromeUserDataPath
-  const wallet = await getWalletByAddress(address);
-  if (wallet) {
-    fs.rmdirSync(wallet.chromeUserDataPath, { recursive: true });
-  }
-  try {
-    const numRemoved = await new Promise((resolve, reject) => {
-      config.getWalletDb().remove({ address }, {}, (err, numRemoved) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(numRemoved);
-        }
-      });
-    });
-
-    console.log('删除钱包数量:', numRemoved);
-    return numRemoved;
-  } catch (error) {
-    console.error('删除钱包时出错:', error);
-    throw error;
-  }
-}
-async function deleteWallets(addresses) {
-  console.log('删除钱包:', addresses);
-  //删除chromeUserDataPath
-  for (let i = 0; i < addresses.length; i++) {
-    const wallet = await getWalletByAddress(addresses[i]);
-    if (wallet && fs.existsSync(wallet.chromeUserDataPath)) {
-        fs.rmdirSync(wallet.chromeUserDataPath, { recursive: true });
-      
+    console.error('updateWallet error:', error);
+    if (error.message && error.message.includes('Wallet not found')) {
+      return { success: false, code: 3004, message: 'Wallet not found' };
     }
+    return { success: false, code: 3003, message: error.message || 'updateWallet error' };
   }
 
+  
+}
+
+async function deleteWallets(ids) {
+  ids = Array.isArray(ids) ? ids : [ids]; // ensure ids is an array
   try {
+    // 先解绑所有被删除钱包已绑定的指纹环境
+    for (const id of ids) {
+      const wallet = wallets[id];
+      if (wallet && wallet.bindEnvId) {
+        await fingerPrintService.unbindWalletEnv(wallet.bindEnvId);
+      }
+    }
     const numRemoved = await new Promise((resolve, reject) => {
-      config.getWalletDb().remove({ address: { $in: addresses } }, { multi: true }, (err, numRemoved) => {
+      config.getWalletDb().remove({ id: { $in: ids } }, { multi: true }, (err, numRemoved) => {
         if (err) {
           reject(err);
         } else {
@@ -189,264 +241,316 @@ async function deleteWallets(addresses) {
         }
       });
     });
-
-    console.log('删除钱包数量:', numRemoved);
-    return numRemoved;
+    wallets = Object.fromEntries(
+      Object.entries(wallets).filter(([key]) => !ids.includes(key))
+    ); // update in-memory cache
+    return { success: true, code: 0, message: `Deleted ${numRemoved} wallets`, numRemoved };
   } catch (error) {
-    console.error('删除钱包时出错:', error);
+    console.error('deleteWallets error:', error);
     throw error;
   }
 }
-async function exportWallets(addresses, directory) {
-  console.log('导出钱包:', addresses);
+async function exportWallets(ids, directory) {
+  console.log('exportWallets:', ids, directory);
   try {
-    const wallets = await new Promise((resolve, reject) => {
-      config.getWalletDb().find({ address: { $in: addresses } }, (err, docs) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(docs);
-        }
-      });
-    });
-
-    console.log('查询到的钱包:', wallets);
-    
+    const exportedWallets = ids.map(id => wallets[id] || null).filter(wallet => wallet !== null);
+    if (exportedWallets.length === 0) {
+      return { success: false, code: 3004, message: 'No matching wallets' };
+    }
+    // Create a new workbook
     const wb = new excel.Workbook();
+    // Add a new worksheet
     const ws = wb.addWorksheet('Sheet 1');
-    
-    // Set headers
-    ws.addRow(['address', 'mnemonic', 'privateKey','name','ipType','ipHost','ipPort','ipUsername','ipPassword','twitterToken','discordToken', 'userAgent', 'language', 'webglVendor', 'webglRenderer']);
-    
-    // Add data
-    wallets.forEach(wallet => {
-      ws.addRow([
-        wallet.address,
-        wallet.mnemonic || '', // Ensure empty string if value is null
-        wallet.privateKey || '', // Ensure empty string if value is null
-        wallet.name || '', // Ensure empty string if value is null
-        wallet.ipType || '', // Ensure empty string if value is null
-        wallet.ipHost || '', // Ensure empty string if value is null
-        wallet.ipPort || '', // Ensure empty string if value is null
-        wallet.ipUsername || '', // Ensure empty string if value is null
-        wallet.ipPassword || '', // Ensure empty string if value is null
-        wallet.twitterToken || '', //
-        wallet.discordToken || '', //
-        wallet.userAgent || '', // Ensure empty string if value is null
-        wallet.language || '', // Ensure empty string if value is null
-        wallet.webglVendor || '', // Ensure empty string if value is null
-        wallet.webglRenderer || '' // Ensure empty string if value is null
-      ]);
-    });
-
-    const date_time = date.format(new Date(), 'YYYYMMDDHHmmss');
-    const filePath = path.join(directory, `wallets_${date_time}.xlsx`);
-    
+    // Define column headers
+    const columnHeaders = ['id','name', 'mnemonic', 'ethAddress', 'ethPrivateKey', 'solAddress', 'solPrivateKey'];
+    // Add column headers to the first row
+    ws.addRow(columnHeaders);
+    // Iterate over wallets and add them to the worksheet
+    exportedWallets.forEach(wallet => {
+      const row = [
+        wallet.id,
+        wallet.name,
+        wallet.mnemonic,
+        wallet.ethAddress,
+        wallet.ethPrivateKey,
+        wallet.solAddress,
+        wallet.solPrivateKey
+      ];
+      ws.addRow(row);
+    }); 
+    // Create the directory if it doesn't exist
+    createDirectoryIfNotExists(directory);
+    // Define the file path
+    const fileName = `wallets_${date.format(new Date(), 'YYYYMMDD_HHmmss')}.xlsx`;
+    const filePath = path.join(directory, fileName);
+    // Write the workbook to the file
     await wb.xlsx.writeFile(filePath);
-    
-    console.log('导出文件路径:', filePath);
-    return filePath;
+    console.log('export file path:', filePath);
+    return { success: true, code: 0, message: 'Wallets exported', filePath };
   } catch (error) {
-    console.error('导出钱包时出错:', error);
-    throw error;
+    console.error('exportWallets error:', error);
+    return { success: false, code: 3006, message: error.message || 'Wallet export failed' };
   }
 }
 
 async function importWallets(filePath) {
-  console.log('导入钱包');
+  console.log('importWallets');
   try {
     const wb = new excel.Workbook();
-
-    await wb.xlsx.readFile(filePath); // Await for the file reading to complete
-
+    await wb.xlsx.readFile(filePath);
     const ws = wb.getWorksheet('Sheet 1');
-    const wallets = [];
-
-    // Define column headers
-    const columnHeaders = ['address', 'mnemonic', 'privateKey', 'name', 'ipType','ipHost','ipPort','ipUsername','ipPassword','twitterToken','discordToken','userAgent', 'language', 'webglVendor', 'webglRenderer'];
-
-    // Check if column headers match
+    const walletsToInsert = [];
+    const columnHeaders = ['id', 'name', 'mnemonic', 'ethAddress', 'ethPrivateKey', 'solAddress', 'solPrivateKey'];
     const headerRow = ws.getRow(1);
     columnHeaders.forEach((header, index) => {
-      console.log('header:', headerRow.getCell(index + 1).value, header);
       if (headerRow.getCell(index + 1).value !== header) {
-        
-
-        throw new Error('导入文件格式错误');
+        return { success: false, code: 3007, message: 'Import file format error' };
       }
     });
-
-    // 获取现有钱包数量
-    const walletCount = await getWalletCount();
-    
+    // get existing wallet mnemonics
+    const allWallets = await getAllWallets();
+    const existMnemonics = new Set(allWallets.map(w => w.mnemonic).filter(Boolean));
     let repeatNum = 0;
-    
-    // Iterate over rows
     for (let rowNumber = 2; rowNumber <= ws.rowCount; rowNumber++) {
       const row = ws.getRow(rowNumber);
-      //10的对数向上取整
-      let num = Math.ceil(Math.log10(walletCount + rowNumber - 1));
-      let zeroStr = ''
-      for (let j = 0; j < 5-num; j++) {
-        zeroStr += '0';
-      }
-      const wallet = {
-        address: row.getCell(1).value,
-        mnemonic: row.getCell(2).value,
-        privateKey: row.getCell(3).value,
-        name: row.getCell(4).value || `钱包${zeroStr}${walletCount + rowNumber - 1}`,
-        ipType: row.getCell(5).value,
-        ipHost: row.getCell(6).value,
-        ipPort: row.getCell(7).value,
-        ipUsername: row.getCell(8).value,
-        ipPassword: row.getCell(9).value,
-        twitterToken: row.getCell(10).value,
-        discordToken: row.getCell(11).value,
-        userAgent: row.getCell(12).value,
-        language: row.getCell(13).value,
-        webglVendor: row.getCell(14).value,
-        webglRenderer: row.getCell(15).value
-      };
-
-      // Log the first wallet
-      if (rowNumber === 2) {
-        console.log('导入的钱包:', wallet);
-      }
-
-      // Process mnemonic or privateKey
-      if (wallet.mnemonic && wallet.mnemonic.trim() !== '') {
-        const walletTemp = ethers.Wallet.fromPhrase(wallet.mnemonic);
-        wallet.address = walletTemp.address;
-        wallet.privateKey = walletTemp.privateKey;
-      } else if (wallet.privateKey && wallet.privateKey.trim() !== '' &&
-                (!wallet.mnemonic || wallet.mnemonic.trim() === '')) {
-        const walletTemp = new ethers.Wallet(wallet.privateKey);
-        wallet.address = walletTemp.address;
-        wallet.mnemonic = walletTemp.mnemonic;
-      } else {
-        throw new Error('导入文件格式错误');
-      }
-
-      // Check if address already exists in the database
-      const walletDbTemp = await getWalletByAddress(wallet.address);
-      console.log('walletDbTemp:', walletDbTemp)
-      if (!walletDbTemp) {
-        // 设置walletInitialized为false,
-        wallet.walletInitialized = false;
-        let res = await config.getSavePath();
-        if(!res.success){
-          throw new Error('获取保存路径失败');
-        }
-        const userDataPath = res.path;
-        // 创建chromeUserDataPath
-        const chromeUserDataPath = path.join(userDataPath, wallet.address);
-        createDirectoryIfNotExists(chromeUserDataPath);
-        wallet.chromeUserDataPath = chromeUserDataPath;
-        wallets.push(wallet);
-      } else {
-        console.log('地址已经存在:', wallet.address);
+      const mnemonic = row.getCell(3).value;
+      if (mnemonic && existMnemonics.has(mnemonic)) {
         repeatNum++;
+        continue;
       }
+      // 生成新 id
+      const walletId = uuidv4();
+      const wallet = {
+        id: walletId,
+        name: row.getCell(2).value || walletId,
+        mnemonic: mnemonic,
+        ethAddress: row.getCell(4).value,
+        ethPrivateKey: row.getCell(5).value,
+        solAddress: row.getCell(6).value,
+        solPrivateKey: row.getCell(7).value,
+        walletInitialized: false,
+        createdAt: Date.now(),
+      };
+      
+      walletsToInsert.push(wallet);
+      wallets[walletId] = wallet; // update in-memory cache
     }
-
-    console.log('导入的钱包:', wallets);
-
-    // Insert wallets into the database
+    // 插入数据库
     await new Promise((resolve, reject) => {
-      config.getWalletDb().insert(wallets, (err, newDocs) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(newDocs);
-        }
+      config.getWalletDb().insert(walletsToInsert, (err, newDocs) => {
+        if (err) reject(err);
+        else resolve(newDocs);
       });
     });
-
-    let message = `成功导入${wallets.length}个钱包,有${repeatNum}个钱包重复`;
-    return message;
+    let message = `Imported ${walletsToInsert.length} wallets, ${repeatNum} duplicates`;
+    return { success: true, code: 0, message };
   } catch (error) {
-    console.error('导入钱包时出错:', error);
-    throw error;
+    console.error('importWallets error:', error);
+    return { success: false, code: 3003, message: error.message || 'importWallets error' };
   }
 }
 
-async function initSuccessCallBack(wallet,taskName){
-  console.log('初始化成功回调:', wallet);
-  if(taskName === 'initWallets'){
-    wallet.walletInitialized = true;
+async function initSuccessCallBack(arg1, arg2){
+  // 简化回调处理：支持两种签名：initSuccessCallBack(payload) 或 initSuccessCallBack(taskName, payload)
+  const payload = typeof arg1 === 'string' ? arg2 : arg1;
+  console.log('initSuccessCallBack payload:', payload);
+  if (!payload) {
+    return { success: false, code: 3008, message: 'no payload' };
   }
-  await updateWallet(wallet);
-}
-async function initWallets(addresses) {
-  console.log('初始化钱包:', addresses);
-  let wallets = [];
-  //查询wallet所有信息
-  for (let i = 0; i < addresses.length; i++) {
-    let wallet = await getWalletByAddress(addresses[i]);
-    if (!wallet) {
-      throw new Error('未找到匹配的钱包');
+
+  const updated = [];
+  const tryUpdateById = async (id) => {
+    if (!id) return null;
+    try {
+      const res = await updateWallet(id, { walletInitialized: true });
+      if (res && res.success) {
+        updated.push(id);
+      }
+    } catch (e) {
+      console.error('initSuccessCallBack updateWallet 异常:', e);
     }
-    wallets.push(wallet);
+  };
+
+  // 1) payload.env（单个环境）
+  if (payload.env) {
+    const env = payload.env;
+    if (env.bindWalletId) await tryUpdateById(env.bindWalletId);
   }
-  //初始化钱包任务
-  taskServiceManager.initWalletsTask(wallets,(wallet)=>{
-    console.log(wallet)
-    initSuccessCallBack(wallet,'initWallets')});
-  return '初始化钱包任务已创建';
+
+  // 2) payload.wallet（直接传钱包对象）
+  if (payload.wallet) {
+    const w = payload.wallet;
+    const id = w.id || w._id;
+    if (id) await tryUpdateById(id);
+  }
+
+  // 3) payload.envData / payload.envsData：对象，key->value
+  const scan = async (container) => {
+    if (!container || typeof container !== 'object') return;
+    for (const key of Object.keys(container)) {
+      const val = container[key];
+      if (!val) continue;
+      // 如果是 env-like
+      if (val.bindWalletId) {
+        await tryUpdateById(val.bindWalletId);
+        continue;
+      }
+      // 如果是 wallet-like
+      const id = val.id || val._id;
+      if (id) {
+        await tryUpdateById(id);
+      }
+    }
+  };
+
+  await scan(payload.envData);
+  await scan(payload.envsData);
+
+  // 4) payload 直接为 wallet-like
+  if ((payload.id || payload._id) && (payload.mnemonic || payload.ethAddress || payload.bindEnvId)) {
+    const id = payload.id || payload._id;
+    await tryUpdateById(id);
+  }
+
+  if (updated.length === 0) {
+    console.warn('initSuccessCallBack: no wallet updated');
+    return { success: false, code: 3008, message: 'no wallet updated' };
+  }
+
+  return { success: true, code: 0, message: 'updated wallets', updated };
+}
+async function initWallets(ids) {
+  console.log('initWallets:', ids);
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new Error('ids must be a non-empty array');
+  }
+  try {
+    const envsData = {};
+    const envIds = [];
+    const setIds = new Set(ids);
+    for (const id of setIds) {
+      const wallet = wallets[id];
+      if (!wallet) {
+        throw new Error(`Wallet with ID ${id} not found`);
+      }
+      if (!wallet.bindEnvId) {
+        throw new Error(`Wallet ${wallet.name} not bound to fingerprint env`);
+      }
+      envIds.push(wallet.bindEnvId);
+      envsData[wallet.bindEnvId] = wallet;
+    }
+
+
+    // 执行初始化任务
+    const taskName = 'initWallet';
+    const taskData = { envIds, envsData, successCallBack: initSuccessCallBack};
+    // execTask is blocking and will throw on error; no additional validation needed here
+    await taskServiceManager.execTask(taskName, taskData);
+    
+    return { success: true, code: 0, message: 'Init-wallet task dispatched' };
+  } catch (error) {
+    console.error('initWallets error:', error);
+    return { success: false, code: 3010, message: error.message || 'initWallets dispatch failed' };
+  }
+  
   
 }
 
-let progressNum = 0;
-let totalGenerateNum = 0;
-async function updateWalletOfFingerPrints(addresses){
-  progressNum = 0;
-  totalGenerateNum = addresses.length;
-  for (let i = 0; i < addresses.length; i++) {
-    let wallet = await getWalletByAddress(addresses[i]);
-    if (!wallet) {
-      throw new Error('未找到匹配的钱包');
+
+
+
+async function bindWalletEnv(walletId, envId) {
+  console.log('bindWalletEnv:', walletId, envId);
+  try {
+    // 查询钱包
+    const walletRes = await getWalletById(walletId);
+    if (!walletRes.success) {
+      return { success: false, code: 3004, message: walletRes.message || 'Wallet query failed' };
     }
-    let fingerPrint = await generateRandomFingerPrint();
-    wallet.userAgent = fingerPrint.userAgent;
-    wallet.language = fingerPrint.language;
-    wallet.webglVendor = fingerPrint.webglVendor;
-    wallet.webglRenderer = fingerPrint.webglRenderer;
-    await updateWallet(wallet);
-    progressNum++;
+    const wallet = walletRes.data;
+    if (!wallet) {
+      return { success: false, code: 3004, message: 'Wallet not found' };
+    }
+    // 如果钱包已绑定环境，先解绑原环境
+    if(wallet.bindEnvId && wallet.bindEnvId !== envId) {
+      await fingerPrintService.unbindWalletEnv(wallet.bindEnvId);
+    }
+    // 绑定指纹环境
+    const fpRes = await fingerPrintService.bindWalletEnv(walletId, envId);
+    console.log('fingerprint bind result:', fpRes);
+    if (!fpRes || !fpRes.success) {
+      return { success: false, code: 3003, message: fpRes?.message || 'Fingerprint bind failed' };
+    }
+    // 更新钱包绑定环境ID
+    const updateRes = await updateWallet(wallet.id, { bindEnvId: envId, walletInitialized: false });
+    if (!updateRes.success) {
+      return { success: false, code: 3003, message: updateRes.message || 'Wallet bind update failed' };
+    }
+    return { success: true, code: 0, message: 'Wallet environment bound', wallet: updateRes.wallet };
+  } catch (error) {
+    console.error('bindWalletEnv error:', error);
+    return { success: false, code: 3003, message: error.message || 'bindWalletEnv error' };
   }
-}
-//获取生成进度
-async function getFingerPrintProgress(){
-  console.log('获取生成进度:', progressNum,totalGenerateNum);
-  return {progressNum,totalGenerateNum};
-}
-async function generateFingerPrints(addresses){
-  updateWalletOfFingerPrints(addresses);
-  return {success:true,message:'生成指纹任务已创建'};
-}
+ }
 
+async function openWallets(ids) {
+  console.log('openWallets:', ids);
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new Error('ids must be a non-empty array');
+  }
+  try {
+    const envsData = {};
+    const envIds = [];
+    const setIds = new Set(ids);
+    const uninitialized = [];
+    for (const id of setIds) {
+      const wallet = wallets[id];
+      if (!wallet) {
+        throw new Error(`Wallet with ID ${id} not found`);
+      }
+      if (!wallet.bindEnvId) {
+        throw new Error(`Wallet ${wallet.name} not bound to fingerprint env`);
+      }
+      // Check if wallet has been initialized before attempting to open
+      if (!wallet.walletInitialized) {
+        uninitialized.push({ id: wallet.id, name: wallet.name });
+        continue;
+      }
+      envIds.push(wallet.bindEnvId);
+      envsData[wallet.bindEnvId] = wallet;
+    }
 
+    if (uninitialized.length > 0) {
+      // Return a clear error code and the list of wallets that are not initialized
+      return { success: false, code: 3011, message: 'Some wallets are not initialized', uninitialized };
+    }
 
+    // execute open-wallet task
+    const taskName = 'openWallet';
+    const taskData = { envIds, envsData };
+    // execTask is blocking and will throw on error; no additional validation needed here
+    taskServiceManager.execTask(taskName, taskData);
 
+    return { success: true, code: 0, message: 'Open-wallet task dispatched' };
+  } catch (error) {
+    console.error('openWallets error:', error);
+    return { success: false, code: 3009, message: error.message || 'openWallets error' };
+  }
+ }
 
-
-
-
-
-
-module.exports = {
+ module.exports = {
   createWallet,
-  getWalletByAddress,
+  updateWalletName,
+  getWalletById,
   getAllWallets,
   getWalletCount,
   updateWallet, // Adding the updateWallet function to exports
-  deleteWallet,
   deleteWallets,
   exportWallets,
   importWallets,
   initWallets,
-  generateFingerPrints,
-  getFingerPrintProgress
+  openWallets,
+  bindWalletEnv
 };
 
 

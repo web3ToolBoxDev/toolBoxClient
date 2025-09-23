@@ -17,9 +17,13 @@ class APIManager {
     }
 
     
-    async createWallet(params) {
+    async createWallets(params) {
         console.log('params:', params);
         const res = await axios.post(`${this.baseUrl}/createWallet`, params);
+        return res.data;
+    }
+    async updateWalletName(id, name) {
+        const res = await axios.post(`${this.baseUrl}/updateWalletName`, { id, name });
         return res.data;
     }
     async getAllWallets() {
@@ -30,16 +34,16 @@ class APIManager {
         const res = await axios.put(`${this.baseUrl}/updateWallet`, params);
         return res.data;
     }
-    async openWallet(params) {
-        const res = await axios.post(`${this.baseUrl}/openWallet`, params);
+    async openWallets(ids) {
+        const res = await axios.post(`${this.baseUrl}/openWallets`, { ids: ids });
         return res.data;
     }
-    async deleteWallets(addresses) {
-        const res = await axios.delete(`${this.baseUrl}/deleteWallets`, { data: { addresses: addresses } });
+    async deleteWallets(ids) {
+        const res = await axios.delete(`${this.baseUrl}/deleteWallets`, { data:{ids} });
         return res.data;
     }
-    async exportWallets(addresses,directory) {
-        const res = await axios.post(`${this.baseUrl}/exportWallets`, { addresses: addresses,directory:directory });
+    async exportWallets(ids,directory) {
+        const res = await axios.post(`${this.baseUrl}/exportWallets`, { ids,directory });
         return res.data;
     }
     async importWallets(filePath) {
@@ -47,8 +51,8 @@ class APIManager {
         // console.log('res:', res);
         return res.data;
     }
-    async initWallets(addresses) {
-        const res = await axios.post(`${this.baseUrl}/initWallet`, { addresses: addresses });
+    async initWallets(ids) {
+        const res = await axios.post(`${this.baseUrl}/initWallets`, { ids: ids });
         return res.data;
     }
     async importTask(taskObj) {
@@ -59,8 +63,8 @@ class APIManager {
         const res = await axios.get(`${this.baseUrl}/getAllTasks?defaultTask=${defaultTask}`);
         return res.data;
     }
-    async execTask(taskName,wallets,taskData = null) {
-        const res = await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,wallets:wallets,taskData:taskData });
+    async execTask(taskName,taskData = null) {
+        const res = await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,taskData:taskData });
         return res.data;
     }
     async getConfigInfo(taskName) {
@@ -81,6 +85,10 @@ class APIManager {
     }
     async getSavePath() {
         const res = await axios.get(`${this.baseUrl}/getSavePath`);
+        return res.data;
+    }
+    async getWalletScriptDirectory() {
+        const res = await axios.get(`${this.baseUrl}/getWalletScriptDirectory`);
         return res.data;
     }
     async initTwitters(addresses) {
@@ -108,8 +116,13 @@ class APIManager {
         return res.data;
     }
     //生成指纹数据
-    async generateFingerPrints(addresses){
-        const res = await axios.post(`${this.baseUrl}/generateFingerPrints`, { addresses: addresses });
+    async generateFingerPrints(counts){
+        const res = await axios.post(`${this.baseUrl}/generateFingerPrints`, { counts: counts });
+        return res.data;
+    }
+    //获取指纹信息
+    async getFingerPrints(){
+        const res = await axios.get(`${this.baseUrl}/getFingerPrints`);
         return res.data;
     }
     //获取执行进度
@@ -118,9 +131,44 @@ class APIManager {
         console.log('res:', res);
         return res.data;
     }
+    //更新指纹环境名称
+    async updateFingerPrintName(id, name) {
+        const res = await axios.post(`${this.baseUrl}/updateFingerPrintName`, { id, name });
+        return res.data;
+    }
     //清空指纹数据
     async clearFingerPrints(){
         const res = await axios.get(`${this.baseUrl}/clearFingerPrints`);
+        return res.data;
+    }
+    async updateFingerPrintProxy(id, proxy) {
+        const res = await axios.post(`${this.baseUrl}/updateFingerPrintProxy`, { id, proxy });
+        return res.data;
+    }
+    async setChromePath(path) {
+        const res = await axios.post(`${this.baseUrl}/setChromePath`, { path });
+        return res.data;
+    }
+    async getChromePath() {
+        const res = await axios.get(`${this.baseUrl}/getChromePath`);
+        return res.data;
+    }
+    //删除指纹环境
+    async deleteFingerPrints(ids) {
+        const res = await axios.post(`${this.baseUrl}/deleteFingerPrints`, { ids });
+        return res.data;
+    }
+    async openEnv(id) {
+        const res = await axios.post(`${this.baseUrl}/openEnv`, { id });
+        return res.data;
+    }
+    async bindWalletEnv(walletId, envId) {
+        const res = await axios.post(`${this.baseUrl}/bindWalletEnv`, { walletId, envId });
+        return res.data;
+    }
+
+    async setWalletScriptDirectory(directory) {
+        const res = await axios.post(`${this.baseUrl}/setWalletScriptDirectory`, { directory });
         return res.data;
     }
 }

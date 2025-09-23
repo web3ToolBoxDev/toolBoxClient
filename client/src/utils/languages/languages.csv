@@ -1,0 +1,181 @@
+key,en,zh-cn
+chromeManage,Chrome Manager,Chrome管理
+currentChromePath,Current Chrome Path,当前Chrome路径
+notConfigured,Not Configured,未配置
+change,Change,更改
+setChromePath,Set Chrome Path,设置Chrome路径
+currentSavePath,Current Save Path,当前保存路径
+setSavePath,Set Save Path,设置保存路径
+generateFingerprint,Generate Fingerprint,生成指纹
+downloadBaseFingerPrintCount,Download Base Fingerprint Count,下载基础指纹数量
+downloadButton,Download,下载
+importBaseFingerPrintCount,Import Base Fingerprint Count,导入基础指纹数量
+importButton,Import,导入
+baseFingerprintNumber,Base Fingerprint Number,基础指纹数量
+clearBaseFPButton,Clear,清空
+generateFingerprintCount,Generate Count,生成数量
+generateButton,Generate,生成
+clearSuccess,Clear successful,清空成功
+clearFailed,Clear failed,清空失败
+clearError,Clear error,清空出错
+importSuccess,Import successful,导入成功
+importFailed,Import failed,导入失败
+importError,Import error,导入出错
+generateSuccess,Generate successful,生成成功
+generateFailed,Generate failed,生成失败
+generateError,Generate error,生成出错
+invalidGenerateCount,Invalid generate count,生成数量无效
+envDetail,Environment Detail,环境详情
+envName,Environment Name,环境名称
+userAgent,User Agent,浏览器标识
+webgl,WebGL,WebGL
+languageJs,JS Language,JS语言
+languageHttp,HTTP Language,HTTP语言
+screen,Screen,屏幕
+canvas,Canvas,画布
+hardware,Hardware,硬件
+fontsRemove,Fonts Remove,去除字体
+position,Position,地理位置
+timeZone,Time Zone,时区
+webrtc_public,WebRTC Public IP,WebRTC公网IP
+editEnvName,Edit Environment Name,修改环境名称
+inputEnvName,Please input environment name,请输入环境名称
+save,Save,保存
+noSelected,No environment selected,未选中环境
+deleteSuccess,Delete successful,删除成功
+deleteFailed,Delete failed,删除失败
+unknownError,Unknown error,未知错误
+openEnvSuccess,Open environment successful,打开环境成功
+openEnvFailed,Open environment failed,打开环境失败
+openEnvError,Open environment error,打开环境错误
+configProxy,Configure Proxy,配置代理
+proxyType,Proxy Type,代理类型
+proxyIpAddress,Proxy IP Address,代理IP地址
+inputProxyIp,Please input proxy IP,请输入代理IP
+proxyPort,Proxy Port,代理端口
+inputProxyPort,Please input proxy port,请输入代理端口
+proxyUsername,Proxy Username,代理用户名
+inputProxyUsername,Please input proxy username,请输入代理用户名
+proxyPassword,Proxy Password,代理密码
+inputProxyPassword,Please input proxy password,请输入代理密码
+testProxy,Test Proxy,测试
+saveConfig,Save Config,保存
+updateSuccess,Update successful,更新成功
+updateFailed,Update failed,更新失败
+updateError,Update error,更新出错
+fingerprintEnvs,Fingerprint Environments,指纹环境
+deleteSelected,Delete Selected,删除选中
+noFingerprints,No fingerprint environments,暂无指纹环境
+runInElectron,Please run in Electron,请在Electron中运行
+setSuccess,Set successful,设置成功
+fetchBaseFingerprintCountError,Failed to fetch base fingerprint count,获取基础指纹数量失败
+fetchPathError,Failed to fetch path,获取路径失败
+edit,Edit,编辑
+viewDetail,View Detail,查看详情
+open,Open,打开
+welcome,welcome to my app,欢迎来到我的应用
+introduction,Introduction,工具箱介绍
+chromeManage,Chrome Manage,浏览器管理
+walletManage,Wallet Manage,钱包管理
+taskManage,Task Manage,任务管理
+defaultTask,Default Task,默认任务
+changeLang,Languages,Languages
+selectLang,Select Language,选择语言
+taskInfo,Task Info,任务信息
+connectionFailedAlert,"onnection Failed, Please reboot!",连接失败，请尝试重启程序!
+taskLog,Task Log,任务日志
+terminateTask,Terminate,结束任务
+clearMessages,Clear,清空消息
+currentChromePath,Current Chrome Launch Path,当前浏览器路径
+currentSavePath,Current Chrome Data Save Path,当前浏览器数据存储路径
+notConfigured,Not Configured,未配置
+chooseButton,Choose,选择
+confirmButton,Confirm,确认
+setButton,Set,设置
+setConfigPath,Set,配置
+change,Change,更改
+generateFingerprint,Generate FingerPrint,生成指纹
+setChromePath,Set,配置
+setSuccess,Success！,设置成功！
+runInElectron,Please running in Electron,请在Electron环境下运行
+fetchPathError,Fetch Path Error,获取路径失败！
+key,en,zh-cn
+0,Success,成功
+1001,Task name already exists,任务名已存在
+1002,Task does not exist,任务不存在
+1003,Task is running,任务正在运行
+1004,Delete task failed,删除任务失败
+1005,No wallet,没有钱包
+1006,WebSocketService not initialized,WebSocket服务未初始化
+1007,Wallet initialization error,钱包初始化错误
+1008,Wallet open error,打开钱包错误
+1009,Config query error,配置查询错误
+1010,Config update error,配置更新错误
+2001,Failed to load fingerprint file,加载指纹文件失败
+2002,No fingerprint data available,没有指纹数据
+2003,Failed to get fingerprint count,获取指纹数量失败
+2004,Invalid counts parameter,数量参数无效
+2005,No fingerprints found,未找到指纹
+2006,Error fetching fingerprints,获取指纹出错
+2007,Invalid parameters,参数无效
+2008,Environment not found,环境未找到
+2009,Name update error,名称更新错误
+2010,Invalid parameters,参数无效
+2011,Delete error,删除出错
+2012,Invalid parameters,参数无效
+2013,Environment not found,环境未找到
+2014,Env query error,环境查询错误
+2015,Invalid parameters,参数无效
+2016,Environment not found,环境未找到
+2017,Env update error,环境更新错误
+2018,Invalid parameters,参数无效
+2019,Incomplete proxy parameters,代理参数不完整
+2020,Environment not found,环境未找到
+4001,IP address or port is missing,IP地址或端口缺失
+4002,Proxy creation failed: URL is empty,代理创建失败：URL为空
+4003,Invalid proxy URL,代理URL无效
+4004,Proxy request failed,代理请求失败
+4005,No IP found in proxy response,代理响应未找到IP
+4006,Proxy check exception,代理检测异常
+4007,Proxy check failed: unknown error,代理检测失败：未知错误
+wallet.alert.setSavePath,Please set the data storage path in browser settings,请先在浏览器管理配置数据存储路径
+wallet.modal.create.title,Create New Wallet,新建钱包
+wallet.modal.create.countLabel,Quantity,新建数量
+wallet.modal.create.countPlaceholder,Please enter the quantity,请输入新建数量
+wallet.modal.create.createButton,Create,创建
+wallet.modal.create.invalidNumber,Please enter a valid quantity,请输入有效的数量
+wallet.modal.create.successCreated,Successfully created {{count}} wallets,成功创建{{count}}个钱包
+wallet.modal.create.failedGeneric,Create wallet failed; please check the input quantity,创建钱包失败，请检查输入的数量是否正确
+wallet.open.notBound,Wallet not bound to fingerprint environment; cannot open,钱包未绑定指纹环境，无法打开
+wallet.open.started,Open-wallet task started,打开钱包任务已启动
+wallet.open.failed,Open wallet failed,打开钱包失败
+wallet.log.deleting,Deleting wallets:,删除钱包:
+initWallets,Initialize Wallets,初始化钱包
+deleteSelected,Delete Selected,删除选中
+createWallet,Create Wallets,新建钱包
+importWallet,Import Wallets,导入钱包
+exportWallet,Export Wallets,导出钱包
+setWalletScriptDirectory,Set Script,设置脚本
+walletManager,Wallet Manager,钱包管理
+walletList,Wallet List,钱包列表
+noWallets,No wallets,暂无钱包
+rebindEnv,Rebind Env,重新绑定环境
+bindEnv,Bind Env,绑定环境
+edit,Edit,编辑
+viewDetail,View Detail,查看详情
+open,Open,打开
+chooseScriptDirectory,Choose Script Directory,选择脚本目录
+setPath,Set Path,设置路径
+walletDetail.id,"ID",ID
+walletDetail.name,Name,名称
+walletDetail.address,Address,地址
+walletDetail.mnemonic,Mnemonic,助记词
+walletDetail.privateKey,Private Key,私钥
+walletDetail.createdAt,Created At,创建时间
+walletDetail.bindEnvId,Bind Env ID,绑定环境ID
+walletDetail.ethAddress,ETH Address,ETH地址
+walletDetail.ethPrivateKey,ETH Private Key,ETH私钥
+walletDetail.solAddress,SOL Address,SOL地址
+walletDetail.solPrivateKey,SOL Private Key,SOL私钥
+wallet.status.initialized,Initialized,已初始化
+wallet.status.uninitialized,Uninitialized,未初始化

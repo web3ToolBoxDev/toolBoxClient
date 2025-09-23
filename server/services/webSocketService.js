@@ -19,7 +19,7 @@ class WebSocketService {
         return WebSocketService.instance;
     }
 
-    // 初始化与前端的websocket
+    // Initialize websocket with frontend
     async initialize(expressApp) {
         this.app = expressApp;
         this.createFrontWebSocket();
@@ -30,34 +30,37 @@ class WebSocketService {
                     resolve();
                 }, 1000);
             });
-            console.log('等待WebSocket初始化');
+            console.log('Waiting for WebSocket initialization');
         }
     }
-    // 创建前端通讯的websocket
+    // Create websocket for frontend communication
     createFrontWebSocket() {
         if (!this.app) {
-            console.log('app未初始化');
+            console.log('Express app not initialized');
             return false;
         }
         if (this.wsFrontServer) {
             this.wsFrontServer.close();
             this.wsFrontServer = null;
         }
-        console.log('创建前端WebSocket');
+        console.log('Creating frontend WebSocket');
         this.app.ws('/ws', (ws, req) => {
             ws.on('message', (msg) => {
                 const message = JSON.parse(msg);
-                console.log('收到消息:', message);
+                console.log('Received message:', message);
                 if (message.type === 'terminate_process') {
                     for (let key in this.wsTaskServer) {
-                        console.log('send to task:', key);
-                        this.wsTaskServer[key].send(msg);
+                        console.log('Send to task:', key);
+                        this.wsTaskServer[key].send(JSON.stringify({
+                            type: 'terminate_process',
+                            code: 0,
+                            message: 'Terminate process command received from frontend'
+                        }));
                     }
                 }
             });
             ws.on('error', (error) => {
-                console.error('WebSocket连接发生错误:', error);
-                // 关闭连接并退出
+                console.error('WebSocket connection error:', error);
                 ws.close();
             });
             this.wsFrontServer = ws;
@@ -72,28 +75,35 @@ class WebSocketService {
         return 'ws://localhost:30001/ws'
     }
 
-    // 发送消息
-    async sendToFront(message) {
-        // console.log(this.wsFrontServer);
+    // Send message to frontend
+    async sendToFront(message, code = 0) {
         if (!this.wsFrontServer || !this.frontReady) {
-            console.log('WebSocket未初始化');
+            console.log('WebSocket not initialized');
             return;
         }
-        this.wsFrontServer.send(message);
+        // Wrap message with code if it's a string
+        let msgObj;
+        try {
+            msgObj = typeof message === 'string' ? JSON.parse(message) : message;
+        } catch {
+            msgObj = { message };
+        }
+        if (msgObj.code === undefined) msgObj.code = code;
+        this.wsFrontServer.send(JSON.stringify(msgObj));
     }
-    // 创建任务进程通讯的websocket
+    // Create websocket for task process communication
     createTaskWebSocket(taskName, messageCallback) {
-        //防止taskName为中文出错
+        // Prevent taskName error if contains non-ascii
         this.taskKey[taskName] = Date.now();
         if (!this.app) {
-            console.log('WebSocket未初始化');
+            console.log('WebSocket not initialized');
             return false;
         }
         if (this.wsTaskServer[this.taskKey[taskName]]) {
             this.wsTaskServer[this.taskKey[taskName]].close();
         }
         let taskUrl = `/ws/task/${this.taskKey[taskName]}`;
-        console.log('创建任务WebSocket:', taskUrl);
+        console.log('Creating task WebSocket:', taskUrl);
         this.app.ws(taskUrl, (ws, req) => {
             ws.on('message', (msg) => {
                 messageCallback(msg);
@@ -108,27 +118,32 @@ class WebSocketService {
             delete this.wsTaskServer[taskName];
         }
     }
-    // 发送任务消息
-    sendToTask(taskName, message) {
+    // Send message to task process
+    sendToTask(taskName, message, code = 0) {
         if (!this.taskKey[taskName]) {
-            console.log('任务未初始化');
+            console.log('Task not initialized');
             return;
         }
         if (!this.wsTaskServer[this.taskKey[taskName]]) {
-            console.log('WebSocket未初始化');
+            console.log('WebSocket not initialized');
             return;
         }
-        this.wsTaskServer[this.taskKey[taskName]].send(message);
+        let msgObj;
+        try {
+            msgObj = typeof message === 'string' ? JSON.parse(message) : message;
+        } catch {
+            msgObj = { message };
+        }
+        if (msgObj.code === undefined) msgObj.code = code;
+        this.wsTaskServer[this.taskKey[taskName]].send(JSON.stringify(msgObj));
     }
     checkWebSocket() {
-        console.log('检查WebSocket连接');
+        console.log('Checking WebSocket connection');
         if (!this.wsFrontServer) {
             this.createFrontWebSocket();
         }
         return true;
     }
-
-
 }
 
 module.exports = WebSocketService;

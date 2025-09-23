@@ -1,0 +1,8 @@
+key,en,zh
+walletDetail.id,ID,ID
+walletDetail.name,Name,名称
+walletDetail.address,Address,地址
+walletDetail.mnemonic,Mnemonic,助记词
+walletDetail.privateKey,Private Key,私钥
+walletDetail.createdAt,Created At,创建时间
+walletDetail.bindEnvId,Bind Env ID,绑定环境ID

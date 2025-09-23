@@ -1,4 +1,23 @@
 @import '~bootstrap/scss/bootstrap';
+
+// ===== Design Tokens =====
+$clr-layout-bg:       #10101a; // layout区域深色
+$clr-page-bg:         #f5f6fa; // page内容区浅灰
+$clr-sidebar-bg:      $clr-layout-bg;
+$clr-sidebar-border:  #2E2C4E;
+$clr-bg-light:      #F8F9FA; // 浅色背景
+$clr-bg-dark:       #343A40; // 深色背景
+
+$clr-brand-text:      #FFFFFF;
+$clr-link-text:       #A1A1B5;
+$clr-page-text:       #333333; // 页面内容文字颜色
+
+$clr-btn-primary:     #5A67D8;
+$clr-btn-primary-hover: darken($clr-btn-primary, 10%);
+$clr-btn-warning:     #ED8936;
+$clr-btn-warning-hover: darken($clr-btn-warning, 10%);
+
+// ===== 全局基础样式 =====
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -6,9 +25,29 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: $clr-page-bg; // 默认page色
+  color: $clr-page-text;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+// ===== layout专用样式（如sidebar、header等）建议在layout.scss中： =====
+// .sidebar, .layout-header, .layout-footer等用$clr-layout-bg
+
+// ===== 通用组件样式 =====
+.navbar-brand-my {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  font-size: 1.25rem !important;
+  color: $clr-brand-text !important;
+}
+.navbar-brand-my img {
+  height: 40px !important;
+  width: auto;
+}
+.nav-link-my {
+  font-size: 1.2em !important;
+  color: $clr-link-text !important;
+  padding: 10px 20px;
+  text-align: center;
 }

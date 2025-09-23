@@ -13,13 +13,18 @@ const config = require('../config').getInstance();
 //   console.log('message:', message);
 //   res.send(message);
 // });
+
 router.post('/createWallet', async(req, res) => {
-  const params = req.body;
-  const message = await walletService.createWallet(params);
-  console.log('message:', message);
+  const count = req.body.count || 1;
+  const message = await walletService.createWallet(count);
   res.send(message);
 });
 
+router.post('/updateWalletName', async(req, res) => {
+  const { id, name } = req.body;
+  const message = await walletService.updateWalletName(id, name);
+  res.send(message);
+});
 router.get('/getAllWallets', async(req, res) => {
   const message = await walletService.getAllWallets();
   // console.log('message:', message);
@@ -33,16 +38,15 @@ router.put('/updateWallet', async(req, res) => {
 });
 
 router.delete('/deleteWallets', async(req, res) => {
-  const addresses = req.body.addresses;
-  console.log('addresses:', addresses);
-  const deleteNum = await walletService.deleteWallets(addresses);
-  const message = `delete ${deleteNum} wallets`;
+  const ids = req.body.ids;
+  const message = await walletService.deleteWallets(ids);
   res.send(message);
 });
 router.post('/exportWallets', async(req, res) => {
-  const addresses = req.body.addresses;
+  const ids = req.body.ids;
   const directory = req.body.directory;
-  const message = await walletService.exportWallets(addresses,directory);
+  console.log('exportWallets params:', { ids, directory });
+  const message = await walletService.exportWallets(ids,directory);
   console.log('message:', message);
 
   res.send(message);
@@ -59,15 +63,16 @@ router.post('/importWallets', async(req, res) => {
     res.send(error.message);
   }
 })
-router.post('/initWallet', async(req, res) => {
-  const addresses = req.body.addresses;
-  const message = await walletService.initWallets(addresses);
+router.post('/initWallets', async(req, res) => {
+  const ids = req.body.ids;
+  const message = await walletService.initWallets(ids);
   console.log('message:', message);
   res.send(message);
 })
-router.post('/openWallet', async(req, res) => {
-  const wallet = req.body;
-  const message = await taskService.openWallet(wallet);
+router.post('/openWallets', async(req, res) => {
+  const ids = req.body.ids;
+  console.log('ids:', ids);
+  const message = await walletService.openWallets(ids);
   console.log('message:', message);
   res.send(message);
 });
@@ -85,11 +90,10 @@ router.get('/getAllTasks', async(req, res) => {
 });
 router.post('/execTask', async(req, res) => {
   const taskName = req.body.taskName;
-  const wallets = req.body.wallets;
   const taskDataFromFront = req.body.taskData;
   console.log(taskDataFromFront);
-  taskService.execTask(taskName,wallets,taskDataFromFront);
-  res.send("任务已执行，请在任务信息查看任务信息");
+  taskService.execTask(taskName,taskDataFromFront);
+  res.send({success:true, message: `Task ${taskName} is being executed.` });
 });
 router.post('/getConfigInfo', async(req, res) => {
   const taskName = req.body.taskName;
@@ -125,6 +129,7 @@ router.get('/checkWebSocket',async(req,res)=>{
 });
 router.post('/checkProxy',async(req,res)=>{
   const {ipType,ipHost,ipPort,ipUsername,ipPassword} = req.body;
+  console.log('checkProxy params:',req.body);
   const message = await proxyService.checkProxy(ipType,ipHost,ipPort,ipUsername,ipPassword);
   res.send(message);
 })
@@ -138,12 +143,18 @@ router.post('/loadFingerPrints',async(req,res)=>{
   const filePath = req.body.filePath;
   const message = await fingerPrintService.loadFingerPrints(filePath);
   res.send(message);
+ 
 })
 //生成指纹
 router.post('/generateFingerPrints',async(req,res)=>{
-  const addresses = req.body.addresses;
-  const message = await walletService.generateFingerPrints(addresses);
+  const counts = req.body.counts;
+  const message = await fingerPrintService.generateRandomFingerPrint(counts);
   res.send(message);
+})
+//获取指纹信息
+router.get('/getFingerPrints',async(req,res)=>{
+  const fingerPrints = await fingerPrintService.getFingerPrints();
+  res.send(fingerPrints);
 })
 //获取指纹生成进度
 router.get('/getFingerPrintProgress',async(req,res)=>{
@@ -156,4 +167,51 @@ router.get('/clearFingerPrints',async(req,res)=>{
   const message = await fingerPrintService.clearFingerPrints();
   res.send(message);
 })
+// 更新指纹环境代理
+router.post('/updateFingerPrintProxy', async (req, res) => {
+  const { id, proxy } = req.body;
+  const result = await fingerPrintService.updateFingerPrintProxy(id, proxy);
+  res.send(result);
+});
+router.post('/setChromePath', async (req, res) => {
+  const chromePath = req.body.path;
+  const message = config.setChromePath(chromePath);
+  res.send(message);
+});
+
+router.get('/getChromePath', async (req, res) => {
+  const message = config.getChromePath();
+  res.send(message);
+});
+// 修改指纹环境名称
+router.post('/updateFingerPrintName', async (req, res) => {
+  const { id, name } = req.body;
+  const result = await fingerPrintService.updateFingerPrintName(id, name);
+  res.send(result);
+});
+// 批量删除指纹环境
+router.post('/deleteFingerPrints', async (req, res) => {
+  const { ids } = req.body;
+  const result = await fingerPrintService.deleteFingerPrints(ids);
+  res.send(result);
+});
+
+router.post('/bindWalletEnv', async (req, res) => {
+  const { walletId, envId } = req.body;
+  const result = await walletService.bindWalletEnv(walletId, envId);
+  res.send(result);
+});
+
+router.post('/setWalletScriptDirectory', async (req, res) => {
+  const directory = req.body.directory;
+  const message = config.setWalletScriptDirectory(directory);
+
+  res.send(message);
+});
+router.get('/getWalletScriptDirectory', async (req, res) => {
+  const message = config.getWalletScriptDirectory();
+  res.send(message);
+});
+
+
 module.exports = router;

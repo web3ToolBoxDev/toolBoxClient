@@ -1,11 +1,15 @@
 const webSocket = require('ws');
 const url = process.argv[2];
 const puppeteer = require('puppeteer-extra');
-const lanPlugin = require('puppeteer-extra-plugin-stealth/evasions/navigator.languages');
-const userAgentPlugin = require('puppeteer-extra-plugin-stealth/evasions/user-agent-override');
-const webglPlugin = require('puppeteer-extra-plugin-stealth/evasions/webgl.vendor');
 const path = require('path');
-const ChromeLauncher = require('chrome-launcher');
+const fs = require('fs');
+
+
+
+
+let ws = new webSocket(url);
+let webSocketReady = false;
+let taskData = null;
 
 let extensionId = '';
 async function getMetaMaskId(browser) {
@@ -18,7 +22,6 @@ async function getMetaMaskId(browser) {
         return extension;
     });
     await page.close();
-    const fs = require('fs');
     fs.writeFileSync(path.resolve(__dirname, './extensionInfo.json'), JSON.stringify({ extensionId }));
     return extensionId;
 }
@@ -31,11 +34,14 @@ async function loadMetaMaskId(browser) {
     }
 }
 
-console.log('收到的URL参数:', url);
-
-const ws = new webSocket(url);
-let webSocketReady = false;
-let taskData = null;
+const checkIfDirectoryExists = (dirPath) => {
+    try {
+        return fs.existsSync(dirPath) && fs.lstatSync(dirPath).isDirectory();
+    } catch (error) {
+        console.error(`检查目录 ${dirPath} 是否存在时出错:`, error);
+        return false;
+    }
+}
 
 // 心跳包定时发送
 function sendHeartBeat() {
@@ -69,7 +75,7 @@ function sendTaskLog(log) {
     }
 }
 
-function sendTaskCompleted(taskName,success,message) {
+function sendTaskCompleted(taskName, success, message) {
     if (ws.readyState === webSocket.OPEN) {
         const taskCompletedMessage = JSON.stringify({
             type: 'task_completed',
@@ -102,11 +108,11 @@ ws.on('message', (message) => {
     let data = JSON.parse(message);
     switch (data.type) {
         case 'heart_beat':
-            console.log('收到服务端心跳包:');
+            // console.log('收到服务端心跳包:');
             break;
         case 'request_task_data':
-            console.log('收到任务数据:', data);
-            taskData = JSON.parse(data.data);
+            // console.log('收到任务数据:', data);
+            taskData = data.data;
             break;
         case 'terminate_process':
             sendTerminateProcess();
@@ -130,113 +136,212 @@ setInterval(() => {
         ws = new webSocket(url);
     }
 }, 5000); // 每 5 秒检查一次连接状态
-
+// 进行任务时，需要发送心跳包，接收任务数据，发送任务日志，完成任务
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let closeSignal = false;
+// 检测浏览器是否关闭
+async function checkBrowserClosed(browser) {
+    while (!closeSignal) {
+        await sleep(5000);
+    }
+    await browser.close();
+    exit();
+}
+async function getStartedPhase(page) {
+    // page active
+    await page.bringToFront();
+    console.log('开始初始化设置');
+    // 点击 "Get Started" 按钮,等待页面加载
+    const startButton = await page.waitForSelector('[data-testid="onboarding-get-started-button"]', { visible: true });
+    console.log('点击 "Get Started" 按钮');
+    console.log('startButton', startButton);
+    await startButton.click();
+
+
+    const termCheckbox = await page.waitForSelector('.terms-of-use__checkbox', { visible: true });
+    await termCheckbox.click();
+
+    // scroll to bottom
+    await page.evaluate(() => {
+        const termsBox = document.querySelector('.terms-of-use-popup__body');
+        termsBox.scrollTop = termsBox.scrollHeight;
+    });
+
+    const acceptButton = await page.waitForSelector('button[data-testid="terms-of-use-agree-button"]', { visible: true });
+    // make accept button clickable
+    await page.evaluate((button) => button.removeAttribute('disabled'), acceptButton);
+    await acceptButton.click();
+}
+
+async function startInitialSetup(page) {
+    try {
+        await getStartedPhase(page);
+    } catch (error) {
+        console.error('Error during getStartedPhase,it seems the wallet is already passed this step:', error);
+    }
+    
+
+    // click "Import wallet"
+    const importWalletButton = await page.waitForSelector('[data-testid="onboarding-import-wallet"]', { visible: true });
+    await importWalletButton.click();
+
+    // click onboarding-import-with-srp-button
+    const importWithSeedPhraseButton = await page.waitForSelector('[data-testid="onboarding-import-with-srp-button"]', { visible: true });
+    await importWithSeedPhraseButton.click();
+
+    // 输入助记词
+    const seedPhraseInput = await page.waitForSelector('textarea[data-testid="srp-input-import__srp-note"]', { visible: true });
+    console.log(typeof taskData);
+    if (typeof taskData === 'string') {
+        taskData = JSON.parse(taskData);
+    }
+    await seedPhraseInput.type(taskData.envData.mnemonic, { delay: 100 });
+
+    // import-srp-confirm button
+    const srpConfirmButton = await page.waitForSelector('button[data-testid="import-srp-confirm"]', { visible: true });
+    await srpConfirmButton.click();
+
+    //data-testid="create-password-new-input
+    const passwordInput = await page.waitForSelector('input[data-testid="create-password-new-input"]', { visible: true });
+    await passwordInput.type('web3toolbox', { delay: 100 });
+
+    //data-testid="create-password-confirm-input
+    const passwordConfirmInput = await page.waitForSelector('input[data-testid="create-password-confirm-input"]', { visible: true });
+    await passwordConfirmInput.type('web3toolbox', { delay: 100 });
+
+    // data-testid="create-password-terms
+    const termsCheckbox = await page.waitForSelector('input[data-testid="create-password-terms"]', { visible: true });
+    await termsCheckbox.click();
+
+    // data-testid="create-password-submit
+    const passwordSubmitButton = await page.waitForSelector('button[data-testid="create-password-submit"]', { visible: true });
+    await passwordSubmitButton.click();
+    // data-testid="metametrics-no-thanks
+    const noThanksButton = await page.waitForSelector('button[data-testid="metametrics-no-thanks"]', { visible: true });
+    await noThanksButton.click();
+
+    // data-testid="onboarding-complete-done
+    const allDoneButton = await page.waitForSelector('button[data-testid="onboarding-complete-done"]', { visible: true });
+    await allDoneButton.click();
+
+    // data-testid="download-app-continue
+    const continueButton = await page.waitForSelector('button[data-testid="download-app-continue"]', { visible: true });
+    await continueButton.click();
+
+    // data-testid="pin-extension-done
+    const pinDoneButton = await page.waitForSelector('button[data-testid="pin-extension-done"]', { visible: true });
+    await pinDoneButton.click();
+    await sleep(3000);
+}
+
 
 // 进行任务逻辑
 async function runTask() {
     console.log('任务开始执行');
-    const chromePath = ChromeLauncher.Launcher.getInstallations();
-    console.log('chromePath:', chromePath);
-
-    let wallet = taskData;
-    if (wallet.language)
-        puppeteer.use(lanPlugin({ language: wallet.language.split(',') }));
-    if (wallet.userAgent)
-        puppeteer.use(userAgentPlugin({ userAgent: wallet.userAgent }));
-    if (wallet.webglVendor && wallet.webglRenderer)
-        puppeteer.use(webglPlugin({ vendor: wallet.webglVendor, renderer: wallet.webglRenderer }));
-    let metamaskEx = path.resolve(__dirname, './metamask-chrome-11.16.2');
-    let argArr = [
-        '--disable-blink-features=AutomationControlled',
+    console.log('任务数据:', taskData);
+    if (typeof taskData === 'string') {
+        taskData = JSON.parse(taskData);
+    }
+    // 检查是否有 Chrome 路径
+    if (!taskData || !taskData.chromePath) {
+        console.log(Object.keys(taskData));
+        console.error('任务数据中缺少 Chrome 路径');
+        sendTaskCompleted('例子任务', false, '任务执行失败: 缺少 Chrome 路径');
+        exit();
+    }
+    // 检查是否有 userDataDir目录
+    const userDataDir = path.join(taskData.savePath, taskData.env.id);
+    if (!checkIfDirectoryExists(userDataDir)) {
+        // 如果目录不存在，尝试创建
+        try {
+            fs.mkdirSync(userDataDir, { recursive: true });
+            console.log(`创建目录成功: ${userDataDir}`);
+        } catch (error) {
+            console.error(`创建目录失败: ${userDataDir}`, error);
+            sendTaskCompleted('例子任务', false, `任务执行失败: 创建目录失败 - ${error.message}`);
+            exit();
+        }
+    }
+    console.log('useProxy', taskData.env.useProxy);
+    let metamaskEx = path.resolve(__dirname, './metamask-chrome-13.2.0');
+    let fingerprints = '';
+    let args = ['--disable-blink-features=AutomationControlled',
         '--no-sandbox',
         '--disabled-setupid-sandbox',
         '--disable-infobars',
+        `--user-agent=${taskData.env.user_agent}`,
+        `--lang=${taskData.env.language_js}`,
         '--disable-extensions-except=' + metamaskEx
     ];
-    if (wallet.ip)
-        argArr.push('--proxy-server=' + wallet.ip);
+    if (taskData.env.useProxy) {
+        fingerprints = JSON.stringify({
+            canvas: taskData.env.canvas,
+            hardware: taskData.env.hardware,
+            screen: taskData.env.screen,
+            clientHint: taskData.env.clientHint,
+            languages_js: taskData.env.language_js,
+            languages_http: taskData.env.language_http,
+            fonts_remove: taskData.env.fonts_remove + ',Tahoma',
+            position: taskData.env.position,
+            timeZone: taskData.env.timeZone,
+            webrtc_public: taskData.env.webrtc_public,
+        });
+        args.push(`--proxy-server=${taskData.env.proxyUrl}`);
+
+
+
+    } else {
+        fingerprints = JSON.stringify({
+            canvas: taskData.env.canvas,
+            hardware: taskData.env.hardware,
+            screen: taskData.env.screen,
+            clientHint: taskData.env.clientHint,
+            languages_js: taskData.env.language_js,
+            languages_http: taskData.env.language_http,
+            fonts_remove: taskData.env.fonts_remove + ',Tahoma'
+        });
+    }
+
+    args.push(`--toolbox=${fingerprints}`);
+
+
+
+
+    console.log('指纹数据:', fingerprints);
     const browser = await puppeteer.launch({
         headless: false,
-        executablePath: chromePath[0],
+        executablePath: taskData.chromePath,
         ignoreDefaultArgs: ['--enable-automation'],
-        userDataDir: wallet.chromeUserDataPath,
+        userDataDir: userDataDir,
+        args,
         defaultViewport: null,
-        args: argArr
-    }); // Change headless to false for debugging
+
+    });
+
+
+
+    browser.on('disconnected', () => {
+        console.log('Browser disconnected.');
+        // 在这里执行您希望在浏览器关闭时进行的操作
+        closeSignal = true;
+
+    });
+
     const page = await browser.newPage();
     // await sleep(30000);
     extensionId = await loadMetaMaskId(browser);
-    try{
-        await page.goto(`chrome-extension://${extensionId}/home.html#onboarding/welcome`,{waitUntil:'networkidle2'});
-    }catch(e){
-        console.log('打开metamask失败');
-        extensionId = await getMetaMaskId(browser);
-        await page.goto(`chrome-extension://${extensionId}/home.html#onboarding/welcome`,{waitUntil:'networkidle2'});
-    }
-
-    await page.bringToFront();
-    await sleep(2000);
-    try{
-        const checkbox = await page.waitForSelector('input.check-box',{timeout:100000});
-        await checkbox.click();
-    }catch(e){
-        //有可能已经初始化，检查是否输入密码
-        const passwordInput = await page.waitForSelector('#password',{timeout:100000});
-        if(passwordInput){
-            console.log('已经初始化');
-            browser.close();
-            sendTaskCompleted(taskData.taskName,true,{type:'success',message:'已经初始化'});
-            exit();
-        }else{
-            sendTaskCompleted(taskData.taskName,false,{type:'error',message:'初始化失败'});
-            throw e;
-        }
-
-        
-    }
     
-    const importButton = await page.waitForSelector('button.btn-secondary',{timeout:100000});
-    await importButton.click();
-    const agreeButton = await page.waitForSelector('[data-testid="metametrics-i-agree"]',{timeout:100000});
-    await agreeButton.click();
-    let mnemonic = wallet.mnemonic;
-    let words = mnemonic.split(' ')
-    for (let i = 0; i < words.length; i++) {
-        await page.type('#import-srp__srp-word-' + i, words[i], { delay: 10 })
+    console.log('MetaMask Extension ID:', extensionId);
+    await page.goto(`chrome-extension://${extensionId}/home.html#onboarding/welcome`);
+    try {
+        await startInitialSetup(page);
+    } catch (error) {
+        console.log('初始化设置失败:', error);
+        sendTaskCompleted('initWallet', false, 'initial setup failed: ' + error.message);
     }
-    const confirmButton = await page.waitForSelector('[data-testid="import-srp-confirm"]',{timeout:100000});
-    await confirmButton.click();
-
-    const password = 'web3ToolBox'
-    const passwordInput = await page.waitForSelector('[data-testid="create-password-new"]',{timeout:100000});
-    await passwordInput.type(password, { delay: 10 });
-    const confirmPasswordInput = await page.waitForSelector('[data-testid="create-password-confirm"]',{timeout:100000});
-    await confirmPasswordInput.type(password, { delay: 10 });
-    await sleep(2000);
-    const checkBox = await page.waitForSelector('[data-testid="create-password-terms"]',{timeout:100000});
-    await checkBox.click();
-    await sleep(2000);
-    const createButton = await page.waitForSelector('[data-testid="create-password-import"]',{timeout:100000});
-    await createButton.click();
-    await sleep(5000);
-    const completeButton = await page.waitForSelector('[data-testid="onboarding-complete-done"]',{timeout:100000});
-    await completeButton.click();
-    await sleep(2000);
-    const nextButton = await page.waitForSelector('[data-testid="pin-extension-next"]',{timeout:100000});
-    await nextButton.click();
-    await sleep(2000);
-    const doneButton = await page.waitForSelector('[data-testid="pin-extension-done"]',{timeout:100000});
-    await doneButton.click();
-    await sleep(2000);
-    const enableButton = await page.waitForSelector('button.mm-box--color-primary-inverse.mm-box--background-color-primary-default.mm-box--rounded-pill',{timeout:100000});
-    await enableButton.click();
-    await sleep(2000);
-
-    sendTaskCompleted(taskData.taskName,true,{type:'success',message:'导入钱包成功'});
-    browser.close()
-
-    
+    sendTaskCompleted('initWallet', true, 'initial setup success');
+    closeSignal = true;
+    await checkBrowserClosed(browser);
     exit();
 }
 
@@ -245,15 +350,15 @@ async function runTask() {
         if (webSocketReady) {
             // console.log('发送任务日志');
             sendRequestTaskData();
-            // sendTaskLog('任务日志内容:测试');
+
             if (taskData) {
-                console.log('任务数据:', taskData);
-                sendTaskLog('收到任务数据，完成初始化，开始执行任务');
+                // sendTaskLog('任务日志内容:测试');
+                // sendTaskLog(`收到任务数据:${taskData}`);
                 await runTask();
             }
         }
         await new Promise((resolve) => {
-            setTimeout(resolve, 2000);
+            setTimeout(resolve, 1000);
         });
     }
 })();

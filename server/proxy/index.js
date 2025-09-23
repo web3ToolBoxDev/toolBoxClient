@@ -1,4 +1,3 @@
-
 const portscanner = require('portscanner');
 const SocksServer = require('./socksServer');
 const ProxyChain = require('proxy-chain');
@@ -20,18 +19,22 @@ class ProxyManager{
     }
     async createServer(taskId,ipType,ipHost,ipPort,ipUsername,ipPassword){
         let url = '';
+        console.log('createServer参数:', {taskId,ipType,ipHost,ipPort,ipUsername,ipPassword});
+        if(!ipHost || !ipPort){
+            console.error('createServer参数缺失:', {ipHost, ipPort});
+            return '';
+        }
         if(this.serverList[taskId]){
             this.serverList[taskId].close();
         }
-        console.log('ipType:',ipType);
-        if(ipType === 'socks5'){
-            console.log('socks5');
+        // 兼容 socket/socks5
+        if(ipType === 'socks5' || ipType === 'socket'){
             ({server:this.serverList[taskId], url} = await this.createSocksServer(ipHost, ipPort,ipUsername,ipPassword));
         }
         if(ipType === 'http'){
             ({server:this.serverList[taskId], url} = await this.createHttpServer(ipHost, ipPort,ipUsername,ipPassword));
         }
-        console.log('url:',url);
+        console.log('createServer生成url:',url);
         return url;
     }
     async createSocksServer(socksHost, socksPort,socksUsername,socksPassword){
@@ -42,8 +45,9 @@ class ProxyManager{
             listenPort,
             socksHost,
             socksPort:+socksPort,
-            socksUsername,
-            socksPassword,
+            // 仅在有用户名/密码时传递
+            ...(socksUsername ? { socksUsername } : {}),
+            ...(socksPassword ? { socksPassword } : {})
         };
         console.log('options:',options);
         
@@ -59,7 +63,14 @@ class ProxyManager{
     }
     async createHttpServer(httpHost, httpPort, username, password){
         const listenPort = await portscanner.findAPortNotInUse(30000, 40000);
-        const oldProxyUrl = `http://${username}:${password}@${httpHost}:${httpPort}`;
+        // 构造 oldProxyUrl 时用户名/密码可选
+        let oldProxyUrl = '';
+        if(username && password){
+            oldProxyUrl = `http://${username}:${password}@${httpHost}:${httpPort}`;
+        } else {
+            oldProxyUrl = `http://${httpHost}:${httpPort}`;
+        }
+        
         const newProxyUrl = await ProxyChain.anonymizeProxy({
           url: oldProxyUrl,
           port: listenPort,

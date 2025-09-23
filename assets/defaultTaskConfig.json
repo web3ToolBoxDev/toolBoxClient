@@ -1,5 +1,18 @@
 [
     {
+        "taskName": "openChrome",
+        "scriptPath": "openChrome.js",
+        "taskType": "execByOrder",
+        "defaultTask": true
+    },
+    {
+        "taskName": "initConfig",
+        "scriptPath": "initConfig.js",
+        "taskType": "execByOrder",
+        "defaultTask": true
+
+    },
+    {
         "taskName": "initWallet",
         "scriptPath": "initWallet.js",
         "taskType": "execByOrder",

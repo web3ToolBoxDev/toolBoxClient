@@ -30,3 +30,6 @@ export {
     formatNumber,
     log
 }
+
+export {default as en} from './languages/en.json';
+export {default as zh_cn} from './languages/zh-cn.json';

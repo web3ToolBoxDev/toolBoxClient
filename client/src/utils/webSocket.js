@@ -89,6 +89,14 @@ class WebSocketManager {
         return false;
       }
     }
+
+    // 关闭WebSocket连接
+    close() {
+      if (this.wss) {
+        this.wss.close();
+        this.wss = null; // 清除引用
+      }
+    }
   }
   
   export default WebSocketManager;

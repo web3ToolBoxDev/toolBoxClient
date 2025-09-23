@@ -1,0 +1,88 @@
+// filepath: [index.scss](http://_vscodecontentref_/0)
+@import '../../index.scss';
+
+// 仅保留 taskOffcanvas 特有样式
+.task-offcanvas {
+  &.offcanvas-bottom {
+    height: 50% !important;
+    background-color: $clr-sidebar-bg;
+    border-top: 1px solid $clr-sidebar-border;
+
+    .offcanvas-header {
+      border-bottom: 1px solid $clr-sidebar-border;
+      padding: 0.5rem 1rem;
+
+      .btn-close { filter: invert(1); }
+    }
+
+    .offcanvas-title {
+      font-size: 1rem; // 调小标题尺寸
+      color: $clr-brand-text;
+      font-weight: 600;
+    }
+
+    .offcanvas-body {
+      display: flex !important;
+      flex-direction: column;
+      padding: 0.75rem 1rem 1rem 1rem;
+
+      .actions {
+        flex: 0 0 auto;
+        width: 100%;
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+
+        .btn-terminate,
+        .btn-clear {
+          flex: 1;
+          height: 40px; // 强制高度一致
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 1rem;
+          padding: 0 0.75rem; // 左右内边距
+          line-height: 1.2;
+          box-sizing: border-box;
+        }
+
+        .btn-terminate {
+          background-color: $clr-btn-warning;
+          border: none;
+          color: $clr-brand-text;
+          &:hover { background-color: $clr-btn-warning-hover; }
+        }
+
+        .btn-clear {
+          background-color: $clr-btn-primary;
+          border: none;
+          color: $clr-brand-text;
+          &:hover { background-color: $clr-btn-primary-hover; }
+        }
+      }
+
+      .logs {
+        flex: 1;
+        overflow-y: auto;
+        border: 1px solid $clr-sidebar-border;
+        background-color: #232146; // 更深的协调色
+        padding: 0.75rem;
+        border-radius: 4px;
+
+        ul {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+
+          li {
+            margin-bottom: 0.5rem;
+            color: #e0e0e0;
+            font-family: monospace;
+            font-size: 0.95em;
+            word-break: break-all;
+          }
+        }
+      }
+    }
+  }
+}
