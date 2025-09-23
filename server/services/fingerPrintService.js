@@ -20,9 +20,19 @@ if (fs.existsSync(fpDataPath)) {
 // envData 以 {id: value} 形式存在内存
 const envData = {};
 
+// 检查指纹数据库是否可用
+function isFingerPrintDbAvailable() {
+    const db = config.getFingerPrintDb();
+    return db !== null && db !== undefined;
+}
+
 // 启动时自动加载数据库到 envData
 (async function loadEnvDataOnStart() {
     try {
+        if (!isFingerPrintDbAvailable()) {
+            console.log('[envData] FingerPrint database not initialized yet, skipping data load');
+            return;
+        }
         const db = config.getFingerPrintDb();
         const util = require('util');
         const findAsync = util.promisify(db.find).bind(db);
@@ -92,6 +102,11 @@ async function generateRandomFingerPrint(counts) {
         return { success: false, code: 2004, message: 'Invalid counts parameter' };
     }
 
+    // 检查数据库是否可用
+    if (!isFingerPrintDbAvailable()) {
+        return { success: false, code: 2030, message: 'FingerPrint database not available. Please set save path first.' };
+    }
+
     // 校验基础数据
     if (!fpData.userdata || !Array.isArray(fpData.userdata.fontsFamily) || fpData.userdata.fontsFamily.length === 0) {
         return { success: false, message: 'fontsFamily missing' };
@@ -157,6 +172,12 @@ async function getFingerPrints() {
         if (Object.keys(envData).length > 0) {
             return { success: true, code: 0, data: { ...envData } };
         }
+        
+        // 检查数据库是否可用
+        if (!isFingerPrintDbAvailable()) {
+            return { success: false, code: 2031, message: 'FingerPrint database not available. Please set save path first.' };
+        }
+        
         const db = config.getFingerPrintDb();
         const findAsync = util.promisify(db.find).bind(db);
         const fingerprints = await findAsync({});
@@ -190,6 +211,12 @@ async function updateFingerPrintName(id, newName) {
     if (!id || !newName) {
         return { success: false, code: 2007, message: 'Invalid parameters' };
     }
+    
+    // 检查数据库是否可用
+    if (!isFingerPrintDbAvailable()) {
+        return { success: false, code: 2032, message: 'FingerPrint database not available. Please set save path first.' };
+    }
+    
     const db = config.getFingerPrintDb();
     const updateAsync = util.promisify(db.update).bind(db);
     try {
@@ -209,6 +236,12 @@ async function deleteFingerPrints(ids) {
     if (!Array.isArray(ids) || ids.length === 0) {
         return { success: false, code: 2010, message: 'Invalid parameters' };
     }
+    
+    // 检查数据库是否可用
+    if (!isFingerPrintDbAvailable()) {
+        return { success: false, code: 2033, message: 'FingerPrint database not available. Please set save path first.' };
+    }
+    
     const db = config.getFingerPrintDb();
     const removeAsync = util.promisify(db.remove).bind(db);
     try {
@@ -227,6 +260,12 @@ async function getEnvById(id){
     if (envData[id]) {
         return { success: true, code: 0, data: envData[id] };
     }
+    
+    // 检查数据库是否可用
+    if (!isFingerPrintDbAvailable()) {
+        return { success: false, code: 2034, message: 'FingerPrint database not available. Please set save path first.' };
+    }
+    
     const db = config.getFingerPrintDb();
     const findAsync = util.promisify(db.findOne).bind(db);
     try {
@@ -246,6 +285,12 @@ async function setEnvById(id, env) {
     if (!id || !env) {
         return { success: false, code: 2015, message: 'Invalid parameters' };
     }
+    
+    // 检查数据库是否可用
+    if (!isFingerPrintDbAvailable()) {
+        return { success: false, code: 2035, message: 'FingerPrint database not available. Please set save path first.' };
+    }
+    
     const db = config.getFingerPrintDb();
     const updateAsync = util.promisify(db.update).bind(db);
     try {
@@ -365,6 +410,36 @@ async function unbindWalletEnv(envId) {
     return { success: true, code: 0, message: 'Unbound wallet from environment successfully', data: env };
 }
 
+// 重新初始化数据库连接并加载数据到内存（当设置保存路径后调用）
+async function reinitializeDatabase() {
+    try {
+        if (!isFingerPrintDbAvailable()) {
+            return { success: false, code: 2036, message: 'FingerPrint database still not available after reinitialization' };
+        }
+        
+        // 清空当前内存数据
+        Object.keys(envData).forEach(key => delete envData[key]);
+        
+        // 重新加载数据库数据到内存
+        const db = config.getFingerPrintDb();
+        const util = require('util');
+        const findAsync = util.promisify(db.find).bind(db);
+        const fingerprints = await findAsync({});
+        
+        if (Array.isArray(fingerprints)) {
+            fingerprints.forEach(fp => {
+                envData[fp.id || fp._id] = fp;
+            });
+            console.log(`[envData] Reloaded ${Object.keys(envData).length} fingerprints into memory.`);
+        }
+        
+        return { success: true, code: 0, message: `Database reinitialized successfully, loaded ${Object.keys(envData).length} fingerprints` };
+    } catch (e) {
+        console.error('[envData] Failed to reinitialize database:', e);
+        return { success: false, code: 2037, message: 'Failed to reinitialize database: ' + e.message };
+    }
+}
+
 module.exports = {
     loadFingerPrints,
     generateRandomFingerPrint,
@@ -378,4 +453,6 @@ module.exports = {
     updateFingerPrintProxy,
     bindWalletEnv,
     unbindWalletEnv,
+    reinitializeDatabase,
+    isFingerPrintDbAvailable,
 };

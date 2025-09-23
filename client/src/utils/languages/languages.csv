@@ -111,6 +111,9 @@ key,en,zh-cn
 1008,Wallet open error,打开钱包错误
 1009,Config query error,配置查询错误
 1010,Config update error,配置更新错误
+1011,Task database not available. Please set save path first.,任务数据库不可用，请先设置保存路径
+1012,Task database not available. Please set save path first.,任务数据库不可用，请先设置保存路径
+1013,Task database not available. Please set save path first.,任务数据库不可用，请先设置保存路径
 2001,Failed to load fingerprint file,加载指纹文件失败
 2002,No fingerprint data available,没有指纹数据
 2003,Failed to get fingerprint count,获取指纹数量失败
@@ -131,6 +134,39 @@ key,en,zh-cn
 2018,Invalid parameters,参数无效
 2019,Incomplete proxy parameters,代理参数不完整
 2020,Environment not found,环境未找到
+2021,Invalid parameters,参数无效
+2022,Environment not found,环境未找到
+2023,Failed to bind wallet to environment,绑定钱包到环境失败
+2024,Environment already bound to another wallet,环境已绑定到其他钱包
+2025,Invalid parameters,参数无效
+2026,Environment not found,环境未找到
+2027,Failed to unbind wallet from environment,解绑钱包环境失败
+2030,FingerPrint database not available. Please set save path first.,指纹数据库不可用，请先设置保存路径
+2031,FingerPrint database not available. Please set save path first.,指纹数据库不可用，请先设置保存路径
+2032,FingerPrint database not available. Please set save path first.,指纹数据库不可用，请先设置保存路径
+2033,FingerPrint database not available. Please set save path first.,指纹数据库不可用，请先设置保存路径
+2034,FingerPrint database not available. Please set save path first.,指纹数据库不可用，请先设置保存路径
+2035,FingerPrint database not available. Please set save path first.,指纹数据库不可用，请先设置保存路径
+2036,FingerPrint database still not available after reinitialization,数据库重新初始化后仍不可用
+2037,Failed to reinitialize database,重新初始化数据库失败
+3001,Invalid wallet count,钱包数量无效
+3002,Save path fetch failed,获取保存路径失败
+3003,Insert wallet error,插入钱包错误
+3004,Wallet not found,钱包未找到
+3005,Wallet updated,钱包已更新
+3006,Wallet export failed,钱包导出失败
+3007,Import file format error,导入文件格式错误
+3008,No wallet updated,没有钱包被更新
+3009,Open-wallet dispatch failed,打开钱包任务分发失败
+3010,Wallet not bound to fingerprint environment,钱包未绑定指纹环境
+3011,Some wallets are not initialized,部分钱包未初始化
+3012,Wallet database not available. Please set save path first.,钱包数据库不可用，请先设置保存路径
+3013,Wallet database not available. Please set save path first.,钱包数据库不可用，请先设置保存路径
+3014,Wallet database not available. Please set save path first.,钱包数据库不可用，请先设置保存路径
+3015,Wallet database not available. Please set save path first.,钱包数据库不可用，请先设置保存路径
+3016,Wallet database not available. Please set save path first.,钱包数据库不可用，请先设置保存路径
+3017,Wallet database still not available after reinitialization,钱包数据库重新初始化后仍不可用
+3018,Failed to reinitialize wallet database,重新初始化钱包数据库失败
 4001,IP address or port is missing,IP地址或端口缺失
 4002,Proxy creation failed: URL is empty,代理创建失败：URL为空
 4003,Invalid proxy URL,代理URL无效
@@ -179,3 +215,6 @@ walletDetail.solAddress,SOL Address,SOL地址
 walletDetail.solPrivateKey,SOL Private Key,SOL私钥
 wallet.status.initialized,Initialized,已初始化
 wallet.status.uninitialized,Uninitialized,未初始化
+initSuccess,Initialization successful,初始化成功
+initFailed,Initialization failed,初始化失败
+wallet.status.notBound,Not bound to environment,未绑定环境

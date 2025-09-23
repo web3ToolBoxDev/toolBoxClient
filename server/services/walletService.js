@@ -13,9 +13,19 @@ const { v4: uuidv4 } = require('uuid');
 
 console.log('wallet isBuild:', isBuild)
 
+// 检查钱包数据库是否可用
+function isWalletDbAvailable() {
+    const db = config.getWalletDb();
+    return db !== null && db !== undefined;
+}
+
 let wallets = {};
 (async () => {
   try {
+    if (!isWalletDbAvailable()) {
+      console.log('Wallet database not initialized yet, skipping wallet data load');
+      return;
+    }
     const docs = await new Promise((resolve, reject) => {
       config.getWalletDb().find({}, (err, docs) => {
         if (err) reject(err);
@@ -39,6 +49,12 @@ let wallets = {};
    if (count < 1) {
      return { success: false, code: 3001, message: 'Invalid wallet count' };
    }
+   
+   // 检查数据库是否可用
+   if (!isWalletDbAvailable()) {
+     return { success: false, code: 3012, message: 'Wallet database not available. Please set save path first.' };
+   }
+   
    const res = await config.getSavePath();
    if (!res.success) {
      return { success: false, code: 3002, message: 'Save path fetch failed' };
@@ -93,6 +109,12 @@ async function updateWalletName(id, name) {
   if (!id || !name) {
     throw new Error('Missing id or name parameter');
   }
+  
+  // 检查数据库是否可用
+  if (!isWalletDbAvailable()) {
+    return { success: false, code: 3013, message: 'Wallet database not available. Please set save path first.' };
+  }
+  
   try {
     const updatedWallet = await new Promise((resolve, reject) => {
       config.getWalletDb().update({ id }, { $set: { name } }, { returnUpdatedDocs: true }, (err, numAffected, affectedDocuments) => {
@@ -126,8 +148,14 @@ async function getWalletById(id) {
   if (!id) {
     throw new Error('Missing id parameter');
   }
+  
   const wallet = wallets[id];
   if (!wallet) {
+    // 检查数据库是否可用
+    if (!isWalletDbAvailable()) {
+      return { success: false, code: 3014, message: 'Wallet database not available. Please set save path first.' };
+    }
+    
     // 从db查询
     const docs = await new Promise((resolve, reject) => {
       config.getWalletDb().find({ id }, (err, docs) => {
@@ -151,6 +179,11 @@ async function getWalletById(id) {
 
 async function getAllWallets() {
   try {
+    // 检查数据库是否可用
+    if (!isWalletDbAvailable()) {
+      throw new Error('Wallet database not available. Please set save path first.');
+    }
+    
     const wallets = await new Promise((resolve, reject) => {
       config.getWalletDb()?.find({}, (err, docs) => {
         if (err) {
@@ -172,6 +205,11 @@ async function getWalletCount() {
   console.log('getWalletCount');
 
   try {
+    // 检查数据库是否可用
+    if (!isWalletDbAvailable()) {
+      throw new Error('Wallet database not available. Please set save path first.');
+    }
+    
     const count = await new Promise((resolve, reject) => {
       config.getWalletDb().count({}, (err, count) => {
         if (err) {
@@ -194,6 +232,12 @@ async function updateWallet(id,wallet) {
   if (!id || !wallet) {
     throw new Error('Missing id or wallet parameter');
   }
+  
+  // 检查数据库是否可用
+  if (!isWalletDbAvailable()) {
+    return { success: false, code: 3015, message: 'Wallet database not available. Please set save path first.' };
+  }
+  
   try {
     const updatedWallet = await new Promise((resolve, reject) => {
       config.getWalletDb().update({ id }, { $set: wallet }, { returnUpdatedDocs: true }, (err, numAffected, affectedDocuments) => {
@@ -224,6 +268,12 @@ async function updateWallet(id,wallet) {
 
 async function deleteWallets(ids) {
   ids = Array.isArray(ids) ? ids : [ids]; // ensure ids is an array
+  
+  // 检查数据库是否可用
+  if (!isWalletDbAvailable()) {
+    throw new Error('Wallet database not available. Please set save path first.');
+  }
+  
   try {
     // 先解绑所有被删除钱包已绑定的指纹环境
     for (const id of ids) {
@@ -295,6 +345,12 @@ async function exportWallets(ids, directory) {
 
 async function importWallets(filePath) {
   console.log('importWallets');
+  
+  // 检查数据库是否可用
+  if (!isWalletDbAvailable()) {
+    return { success: false, code: 3016, message: 'Wallet database not available. Please set save path first.' };
+  }
+  
   try {
     const wb = new excel.Workbook();
     await wb.xlsx.readFile(filePath);
@@ -538,6 +594,37 @@ async function openWallets(ids) {
   }
  }
 
+// 重新初始化数据库连接并加载数据到内存（当设置保存路径后调用）
+async function reinitializeWalletDatabase() {
+  try {
+    if (!isWalletDbAvailable()) {
+      return { success: false, code: 3017, message: 'Wallet database still not available after reinitialization' };
+    }
+    
+    // 清空当前内存数据
+    Object.keys(wallets).forEach(key => delete wallets[key]);
+    
+    // 重新加载数据库数据到内存
+    const docs = await new Promise((resolve, reject) => {
+      config.getWalletDb().find({}, (err, docs) => {
+        if (err) reject(err);
+        else resolve(docs);
+      });
+    });
+    
+    wallets = docs.reduce((acc, cur) => {
+      acc[cur.id] = cur;
+      return acc;
+    }, {});
+    
+    console.log(`[walletService] Reloaded ${Object.keys(wallets).length} wallets into memory.`);
+    return { success: true, code: 0, message: `Wallet database reinitialized successfully, loaded ${Object.keys(wallets).length} wallets` };
+  } catch (e) {
+    console.error('[walletService] Failed to reinitialize database:', e);
+    return { success: false, code: 3018, message: 'Failed to reinitialize wallet database: ' + e.message };
+  }
+}
+
  module.exports = {
   createWallet,
   updateWalletName,
@@ -550,7 +637,9 @@ async function openWallets(ids) {
   importWallets,
   initWallets,
   openWallets,
-  bindWalletEnv
+  bindWalletEnv,
+  reinitializeWalletDatabase,
+  isWalletDbAvailable,
 };
 
 

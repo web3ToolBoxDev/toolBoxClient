@@ -613,15 +613,29 @@ const WalletManage = () => {
       alert(t('noSelected'));
       return;
     }
+    
+    // 检查是否有未绑定环境的钱包
+    const unboundWallets = selectedWallets.filter(wallet => !wallet.bindEnvId);
+    if (unboundWallets.length > 0) {
+      const unboundNames = unboundWallets.map(w => w.name).join(', ');
+      alert(t('3010') + ': ' + unboundNames);
+      return;
+    }
+    
     apiManager.initWallets(selectedWallets.map(wallet => wallet.id)).then(async (res) => {
       console.log('initWallets res:', res);
       if (res.success) {
         await updateWalletList();
         alert(t('initSuccess'));
-        
       } else {
         console.warn('initWallets failed:', res);
+        // 显示具体的错误信息
+        const errorMsg = t(res.code) || res.message || t('unknownError');
+        alert(errorMsg);
       }
+    }).catch((err) => {
+      console.error('initWallets error:', err);
+      alert(t('initFailed') + ': ' + (err.message || err));
     });
   }
 
@@ -691,8 +705,11 @@ const WalletManage = () => {
                   />
                 </Col>
                 <Col xs={4} className="wallet-name text-truncate p-0" title={wallet.name}>
-                  <span style={{ color: wallet.walletInitialized ? '#28a745' : undefined }}>
+                  <span style={{ 
+                    color: wallet.walletInitialized ? '#28a745' : (wallet.bindEnvId ? '#007bff' : '#6c757d')
+                  }}>
                     {wallet.name}
+                    {wallet.bindEnvId ? '' : ` (${t('wallet.status.notBound')})`}
                   </span>
                 </Col>
                 <Col xs="auto" className="p-0">

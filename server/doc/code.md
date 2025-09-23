@@ -37,6 +37,21 @@
 | 2018  | Invalid parameters                   | Parameter error                   |
 | 2019  | Incomplete proxy parameters          | Proxy param error                 |
 | 2020  | Environment not found                | Env not found                     |
+| 2021  | Invalid parameters                   | Parameter error                   |
+| 2022  | Environment not found                | Env not found                     |
+| 2023  | Failed to bind wallet to environment | Wallet bind error                 |
+| 2024  | Environment already bound to another wallet | Env already bound            |
+| 2025  | Invalid parameters                   | Parameter error                   |
+| 2026  | Environment not found                | Env not found                     |
+| 2027  | Failed to unbind wallet from environment | Wallet unbind error              |
+| 2030  | FingerPrint database not available   | Database not initialized          |
+| 2031  | FingerPrint database not available   | Database not initialized          |
+| 2032  | FingerPrint database not available   | Database not initialized          |
+| 2033  | FingerPrint database not available   | Database not initialized          |
+| 2034  | FingerPrint database not available   | Database not initialized          |
+| 2035  | FingerPrint database not available   | Database not initialized          |
+| 2036  | FingerPrint database still not available | Database reinitialization failed |
+| 2037  | Failed to reinitialize database     | Database reinitialization error   |
 
 ## Proxy Service (4000~4099)
 | Code  | Message Example                      | Description                       |
