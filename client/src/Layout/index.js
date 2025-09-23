@@ -10,8 +10,8 @@ const menuItems = [
   { name: 'introduction', link: '#/' },
   { name: 'chromeManage', link: '#/chromeManager' },
   { name: 'walletManage', link: '#/walletManage' },
-  { name: 'taskManage', link: '#/taskManage' },
-  { name: 'defaultTask', link: '#/defaultTask' },
+  { name: 'syncFunction', link: '#/syncFunction' },
+  { name: 'taskManage', link: '#/taskManage' }
 ];
 const langOptions = [
   { code: 'zh-CN', label: '中文' },

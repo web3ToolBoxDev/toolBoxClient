@@ -203,5 +203,6 @@
     "wallet.status.uninitialized": "\u672a\u521d\u59cb\u5316",
     "initSuccess": "\u521d\u59cb\u5316\u6210\u529f",
     "initFailed": "\u521d\u59cb\u5316\u5931\u8d25",
-    "wallet.status.notBound": "\u672a\u7ed1\u5b9a\u73af\u5883"
+    "wallet.status.notBound": "\u672a\u7ed1\u5b9a\u73af\u5883",
+    "syncFunction": "\u540c\u6b65\u529f\u80fd"
 }

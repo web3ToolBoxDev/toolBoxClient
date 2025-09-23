@@ -218,3 +218,4 @@ wallet.status.uninitialized,Uninitialized,未初始化
 initSuccess,Initialization successful,初始化成功
 initFailed,Initialization failed,初始化失败
 wallet.status.notBound,Not bound to environment,未绑定环境
+syncFunction,Sync Function,同步功能

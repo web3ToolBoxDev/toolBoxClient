@@ -1,0 +1,115 @@
+@import '../../index.scss';
+
+.sync-function-page {
+  h1 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    text-align: center;
+    margin-top: 1rem;
+    color: $clr-page-text;
+  }
+  .control-panel {
+    max-width: 600px;
+    margin: 0 auto 1.5rem auto;
+    background: #fff;
+    border: 1px solid $clr-sidebar-border;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px 0 rgba(0,0,0,0.03);
+    .card-body {
+      padding: 1.2rem 1rem 1rem 1rem;
+      .btn-row {
+        display: flex;
+        justify-content: center;
+        gap: 2rem;
+        margin-top: 1rem;
+        .btn {
+          font-size: 0.95rem;
+          border-radius: 4px;
+          color: #fff;
+          background: $clr-btn-primary;
+          border: none;
+          padding: 0.5rem 0.5rem;
+          min-width: 0;
+          white-space: nowrap;
+          &:hover { background: $clr-btn-primary-hover; }
+        }
+      }
+    }
+  }
+  .browser-list-card {
+    max-width: 600px;
+    margin: 0 auto 1rem auto;
+    background: #fff;
+    border: 1px solid $clr-sidebar-border;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px 0 rgba(0,0,0,0.03);
+    .card-header {
+      font-size: 1.05rem;
+      font-weight: 600;
+      background: $clr-bg-light;
+      border-bottom: 1px solid $clr-sidebar-border;
+      border-radius: 8px 8px 0 0;
+      padding: 0.7rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      .header-checkbox-align {
+        display: flex;
+        align-items: center;
+        height: 36px;
+      }
+      input[type="checkbox"] {
+        width: 1.1rem;
+        height: 1.1rem;
+        accent-color: $clr-btn-primary;
+        margin-right: 8px;
+        margin-top: 0;
+      }
+    }
+    .browser-list-scroll {
+      max-height: 230px;
+      overflow-y: auto;
+      padding: 1rem 1rem 0.5rem 1rem;
+      scrollbar-width: thin;
+      scrollbar-color: $clr-btn-primary $clr-bg-light;
+    }
+    .browser-row {
+      border-bottom: 1px solid #f0f0f0;
+      padding-bottom: 0.1rem;
+      margin-bottom: 0.1rem;
+      min-height: 36px;
+      &:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+      }
+      .browser-name {
+        font-size: 0.96rem;
+        font-weight: 500;
+        color: $clr-page-text;
+        max-width: 120px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      input[type="checkbox"] {
+        width: 1.05rem;
+        height: 1.05rem;
+        accent-color: $clr-btn-primary;
+        margin-top: 0;
+        margin-right: 4px;
+      }
+      .btn {
+        font-size: 0.9rem;
+        padding: 0.18rem 0.55rem;
+        border-radius: 4px;
+        margin-right: 0.12rem;
+        &:last-child { margin-right: 0; }
+      }
+    }
+    .text-muted {
+      padding: 32px 0;
+      text-align: center;
+      color: #aaa;
+    }
+  }
+}

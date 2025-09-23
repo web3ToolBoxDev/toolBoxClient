@@ -6,6 +6,7 @@ import { eventEmitter } from '../../utils/eventEmitter';
 import { useTranslation } from 'react-i18next';
 import usePathStore from '../../store/pathStore';
 import useFingerPrintStore from '../../store/fingerPrintStore';
+import useWalletStore from '../../store/walletStore';
 import './index.scss';
 
 
@@ -48,29 +49,16 @@ const WalletManage = () => {
   const fetchPaths = usePathStore((state) => state.fetchPaths);
   const fingerPrints = useFingerPrintStore((state) => state.fingerPrints);
   const fetchFingerPrints = useFingerPrintStore((state) => state.fetchFingerPrints);
+  const fetchWallets = useWalletStore((state) => state.fetchWallets);
+  const wallets = useWalletStore((state) => state.wallets);
 
   const childRef = useRef();
 
   const updateWalletList = async () => {
-    const res = await apiManager.getAllWallets();
-    console.log('getAllWallets res:', res);
-    // Sort by createdAt ascending (oldest first), then by id ascending
-    const updatedWalletList = res
-      .slice()
-      .sort((a, b) => {
-        if ((a.createdAt || 0) !== (b.createdAt || 0)) {
-          return (a.createdAt || 0) - (b.createdAt || 0);
-        }
-        if (a.id < b.id) return -1;
-        if (a.id > b.id) return 1;
-        return 0;
-      })
-      .map(wallet => ({ ...wallet, selected: false }));
+    await fetchWallets();
+    const updatedWalletList = wallets.map(w => ({ ...w, selected: false }));
     setWalletList(updatedWalletList);
   };
-
-
-
 
 
   useEffect(() => {

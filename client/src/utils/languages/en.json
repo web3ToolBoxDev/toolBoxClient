@@ -203,5 +203,6 @@
     "wallet.status.uninitialized": "Uninitialized",
     "initSuccess": "Initialization successful",
     "initFailed": "Initialization failed",
-    "wallet.status.notBound": "Not bound to environment"
+    "wallet.status.notBound": "Not bound to environment",
+    "syncFunction": "Sync Function"
 }
