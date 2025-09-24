@@ -219,3 +219,42 @@ initSuccess,Initialization successful,初始化成功
 initFailed,Initialization failed,初始化失败
 wallet.status.notBound,Not bound to environment,未绑定环境
 syncFunction,Sync Function,同步功能
+customModal.selected,Selected,已选择
+syncFunction.title,Sync Function,同步功能
+sync.chooseMaster,Choose Master,选择主钱包
+sync.chooseSlaves,Choose Slaves,选择从钱包
+sync.selectedMaster,Selected Master,已选主钱包
+sync.selectedSlaves,Selected Slaves,已选从钱包
+sync.noMaster,No Master,未选择主钱包
+sync.noSlaves,No Slaves,未选择从钱包
+sync.unit,wallets,个钱包
+sync.addGroup,Add Group,添加组合
+sync.groupList,Group List,组合列表
+sync.noGroups,No groups,暂无组合
+sync.selectMasterAndSlaves,Please select master and slaves,请选择主钱包和从钱包
+sync.groupExists,Group already exists,组合已存在
+sync.groupStarted,Group started,组合已启动
+sync.status.running,Running,运行中
+sync.status.stopped,Stopped,已停止
+sync.startGroup,Start,启动
+sync.confirmDeleteGroups,Are you sure you want to delete {{count}} group(s)?,确定要删除{{count}}个组合吗？
+sync.currentSelection,Current Selection,当前选择
+sync.more,more,更多
+searchWalletName,Search wallet name,搜索钱包名称
+searchEnvName,Search environment name,搜索环境名称
+selectWallet,Select Wallet,选择钱包
+selectEnv,Select Environment,选择环境
+setSyncScriptDirectory,Set Sync Script,设置同步脚本
+syncScriptDirectory.current,Current Directory,当前目录
+syncScriptDirectory.selectNew,Select New Directory,选择新目录
+syncScriptDirectory.placeholder,Enter directory path,输入目录路径
+syncScriptDirectory.selectFolder,Select Folder,选择
+syncScriptDirectory.selectError,Failed to select folder,选择文件夹失败
+syncScriptDirectory.pathRequired,Directory path is required,目录路径不能为空
+syncScriptDirectory.setSuccess,Sync script directory set successfully,同步脚本目录设置成功
+syncScriptDirectory.setFailed,Failed to set sync script directory,设置同步脚本目录失败
+syncScriptDirectory.setError,Error setting sync script directory,设置同步脚本目录出错
+syncScriptDirectory.resetSuccess,Sync script directory reset to default successfully,同步脚本目录重置为默认成功
+syncScriptDirectory.resetFailed,Failed to reset sync script directory,重置同步脚本目录失败
+syncScriptDirectory.resetError,Error resetting sync script directory,重置同步脚本目录出错
+resetToDefault,Reset to Default,重置为默认

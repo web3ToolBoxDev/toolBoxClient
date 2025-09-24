@@ -171,5 +171,20 @@ class APIManager {
         const res = await axios.post(`${this.baseUrl}/setWalletScriptDirectory`, { directory });
         return res.data;
     }
+
+    async setSyncScriptDirectory(directory) {
+        const res = await axios.post(`${this.baseUrl}/setSyncScriptDirectory`, { directory });
+        return res.data;
+    }
+
+    async getSyncScriptDirectory() {
+        const res = await axios.get(`${this.baseUrl}/getSyncScriptDirectory`);
+        return res.data;
+    }
+
+    async resetSyncScriptDirectory() {
+        const res = await axios.post(`${this.baseUrl}/resetSyncScriptDirectory`);
+        return res.data;
+    }
 }
 export default APIManager;

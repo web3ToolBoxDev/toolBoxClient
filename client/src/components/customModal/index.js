@@ -1,11 +1,11 @@
 import React,{useState,useEffect,forwardRef,useImperativeHandle} from 'react';
 import { Modal, Button, Row, Col, Form,ProgressBar } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import './index.scss';
 
 const CustomModal = forwardRef(({ show, handleClose, title, rowList },ref)=> {
     const [valueObj,setValueObj] = useState({});
-    // 新增：多选select当前高亮项
-    const [multiSelectActive, setMultiSelectActive] = useState({});
+    const { t } = useTranslation();
 
     // 初始化 valueObj，保证 defaultValue 生效
     useEffect(() => {
@@ -25,18 +25,23 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList },ref)=> {
     const onChange = (e, key) => {
         setValueObj({...valueObj,[key]:e.target.value});
     }
-    // 多选添加：将select当前高亮项加入已选
-    const multipleAdd = (item) => {
-      const selected = valueObj[item.key] || [];
-      const actives = multiSelectActive[item.key] || [];
-      const merged = Array.from(new Set([...selected, ...actives]));
-      setValueObj({ ...valueObj, [item.key]: merged });
+    // 多选添加：将指定选项加入已选
+    const multipleAdd = (itemKey, optionValue) => {
+      const selected = valueObj[itemKey] || [];
+      const newSelected = Array.from(new Set([...selected, optionValue]));
+      setValueObj({ ...valueObj, [itemKey]: newSelected });
     };
-    // 多选移除：将select当前高亮项从已选中移除
-    const multipleMinus = (item) => {
-      const selected = valueObj[item.key] || [];
-      const actives = multiSelectActive[item.key] || [];
-      setValueObj({ ...valueObj, [item.key]: selected.filter(v => !actives.includes(v)) });
+    // 多选移除：将指定选项从已选中移除
+    const multipleMinus = (itemKey, optionValue) => {
+      const selected = valueObj[itemKey] || [];
+      const newSelected = selected.filter(v => v !== optionValue);
+      setValueObj({ ...valueObj, [itemKey]: newSelected });
+    };
+    // 检查选项是否已选中（使用Set优化时间复杂度）
+    const isOptionSelected = (itemKey, optionValue) => {
+      const selected = valueObj[itemKey] || [];
+      const selectedSet = new Set(selected);
+      return selectedSet.has(optionValue);
     };
 
     useImperativeHandle(ref, () => ({
@@ -87,41 +92,48 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList },ref)=> {
                                 {item.type === 'select' && (
                                   item.multiple ? (
                                     <>
-                                      <select
-                                        multiple
-                                        className="form-select"
-                                        value={multiSelectActive[item.key] || []}
-                                        onChange={e => {
-                                          const actives = Array.from(e.target.selectedOptions).map(opt => opt.value);
-                                          setMultiSelectActive(prev => ({ ...prev, [item.key]: actives }));
-                                        }}
-                                        style={item.style}
-                                      >
-                                        {item.options.map((option, index) => (
-                                          <option key={index} value={option.value}>
-                                            {option.text}
-                                          </option>
-                                        ))}
-                                      </select>
-                                      {/* 已选项显示与按钮分区 */}
-                                      <div style={{ display: 'flex', alignItems: 'center', marginTop: 4, minHeight: 24 }}>
-                                        <div style={{ fontSize: 13, color: '#888', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                          {Array.isArray(valueObj[item.key]) && valueObj[item.key].length > 0
-                                            ? valueObj[item.key].map(val => {
-                                                const opt = item.options.find(o => o.value === val);
-                                                return opt ? opt.text : val;
-                                              }).join(', ')
-                                            : null}
-                                        </div>
-                                        <div style={{ display: 'flex', gap: 6 }}>
-                                          <Button size="sm" variant="outline-secondary" className="p-0 px-2" 
-                                            style={{ fontSize: 14, minWidth: 26, height: 26, borderRadius: 4, marginLeft: 8 }}
-                                            onClick={() => multipleAdd(item)}>+</Button>
-                                          <Button size="sm" variant="outline-secondary" className="p-0 px-2"
-                                            style={{ fontSize: 14, minWidth: 26, height: 26, borderRadius: 4 }}
-                                            onClick={() => multipleMinus(item)}>-</Button>
-                                        </div>
+                                      {/* 选项列表，整个选项可点击 */}
+                                      <div className="multiple-select-container" style={item.style}>
+                                        {item.options.map((option, index) => {
+                                          const isSelected = isOptionSelected(item.key, option.value);
+                                          return (
+                                            <div 
+                                              key={index} 
+                                              className={`multiple-select-option ${isSelected ? 'selected' : ''}`}
+                                              onClick={() => isSelected 
+                                                ? multipleMinus(item.key, option.value) 
+                                                : multipleAdd(item.key, option.value)
+                                              }
+                                            >
+                                              <span className="option-text">{option.text}</span>
+                                            </div>
+                                          );
+                                        })}
                                       </div>
+                                      {/* 已选项显示 */}
+                                      {(() => {
+                                        if (!Array.isArray(valueObj[item.key]) || valueObj[item.key].length === 0) {
+                                          return null;
+                                        }
+                                        
+                                        const selectedTexts = valueObj[item.key].map(val => {
+                                          const opt = item.options.find(o => o.value === val);
+                                          return opt ? opt.text : val;
+                                        });
+                                        
+                                        const fullText = selectedTexts.join(', ');
+                                        const maxLength = 60; // 设置最大显示长度
+                                        const displayText = fullText.length <= maxLength ? fullText : fullText.slice(0, maxLength) + '...';
+                                        
+                                        return (
+                                          <div 
+                                            className="selected-items-display"
+                                            title={fullText}
+                                          >
+                                            {t('customModal.selected')} ({valueObj[item.key].length}): {displayText}
+                                          </div>
+                                        );
+                                      })()}
                                     </>
                                   ) : (
                                     <Form.Select

@@ -209,9 +209,12 @@ class Config {
 			autoload: true,
 		});
 		this.loadDefaultTask();
-		// 如果之前已设置过钱包脚本目录，则在初始化 DB 后加载其中的任务
+		// 如果之前已设置过钱包脚本目录/同步脚本目录，则在初始化 DB 后加载其中的任务
 		if (this._paths.walletScriptDirectory) {
 			this._loadTasksFromDirectory(this._paths.walletScriptDirectory);
+		}
+		if (this._paths.syncScriptDirectory) {
+			this._loadTasksFromDirectory(this._paths.syncScriptDirectory);
 		}
 		return { success: true };
 	}
@@ -266,6 +269,15 @@ class Config {
 		}
 		return { success: true, code: 0, directory: 'default' };
 	}
+
+	// 获取同步脚本目录：若用户已设置且有效则返回目录路径，否则返回 'default'
+	getSyncScriptDirectory() {
+		const dir = this._paths.syncScriptDirectory;
+		if (dir && fs.existsSync(dir)) {
+			return { success: true, code: 0, directory: dir };
+		}
+		return { success: true, code: 0, directory: 'default' };
+	}
 	setWalletScriptDirectory(directory) {
 		console.log("设置钱包脚本目录:", directory);
 		const initWalletPath = path.join(directory, 'initWallet.js');
@@ -285,6 +297,28 @@ class Config {
 			return { success: false, code: 2, message: loadRes.message || '加载任务失败' };
 		}
 		return { success: true, code: 0, ...(loadRes?.message ? { message: loadRes.message } : {}) };
+	}
+
+	setSyncScriptDirectory(directory) {
+		console.log("设置同步脚本目录:", directory);
+		if (!fs.existsSync(directory)) {
+			return { success: false, code: 1, message: '目录不存在' };
+		}
+		this._paths.syncScriptDirectory = directory;
+		this._saveAllPathsToJson();
+		// 加载并 upsert 自定义目录下的任务
+		const loadRes = this._loadTasksFromDirectory(directory);
+		if (!loadRes.success) {
+			return { success: false, code: 2, message: loadRes.message || '加载任务失败' };
+		}
+		return { success: true, code: 0, ...(loadRes?.message ? { message: loadRes.message } : {}) };
+	}
+
+	resetSyncScriptDirectory() {
+		console.log("重置同步脚本目录到默认");
+		delete this._paths.syncScriptDirectory;
+		this._saveAllPathsToJson();
+		return { success: true, code: 0 };
 	}
 	
 	

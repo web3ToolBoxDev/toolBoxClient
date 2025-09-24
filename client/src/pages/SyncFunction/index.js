@@ -3,14 +3,18 @@ import { Container, Card, Row, Col, Button } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import CustomModal from '../../components/customModal';
 import useWalletStore from '../../store/walletStore';
+import APIManager from '../../utils/api';
 import { useEffect } from 'react';
+import './index.scss';
 
 
 const SyncFunction = () => {
     const { t } = useTranslation();
+    const apiManager = APIManager.getInstance();
     const [selectedMaster, setSelectedMaster] = useState(null);
     const [selectedSlaves, setSelectedSlaves] = useState([]);
-    const [groups, setGroups] = useState([]); // [{master, slaves, status}]
+    const [groups, setGroups] = useState([]); // [{master, slaves, status, id}]
+    const [selectedGroupIds, setSelectedGroupIds] = useState([]);
     const [modalProp, setModalProp] = useState({ show: false });
     const wallets = useWalletStore((state) => state.wallets);
     const fetchWallets = useWalletStore((state) => state.fetchWallets);
@@ -19,12 +23,36 @@ const SyncFunction = () => {
 
 
 
+    // 从 localStorage 加载 groups
+    const loadGroupsFromStorage = () => {
+        try {
+            const storedGroups = localStorage.getItem('syncGroups');
+            if (storedGroups) {
+                const parsedGroups = JSON.parse(storedGroups);
+                setGroups(parsedGroups.map((group, index) => ({ ...group, id: group.id || `group_${index}` })));
+            }
+        } catch (error) {
+            console.error('Failed to load groups from localStorage:', error);
+        }
+    };
+
+    // 保存 groups 到 localStorage
+    const saveGroupsToStorage = (newGroups) => {
+        try {
+            localStorage.setItem('syncGroups', JSON.stringify(newGroups));
+        } catch (error) {
+            console.error('Failed to save groups to localStorage:', error);
+        }
+    };
+
     useEffect(() => {
         fetchWallets().then(() => {
             // 处理获取到的钱包数据
             console.log('Fetched wallets:', wallets);
             setWalletList(wallets.filter(w => w.walletInitialized));
         });
+        // 加载存储的 groups
+        loadGroupsFromStorage();
     }, []);
 
 
@@ -134,6 +162,22 @@ const SyncFunction = () => {
         });
     };
 
+    // 选中/取消选中单个 group
+    const toggleSelectGroup = (groupId) => {
+        setSelectedGroupIds((prev) =>
+            prev.includes(groupId) ? prev.filter((id) => id !== groupId) : [...prev, groupId]
+        );
+    };
+
+    // 全选/取消全选
+    const toggleSelectAllGroups = () => {
+        if (selectedGroupIds.length === groups.length) {
+            setSelectedGroupIds([]);
+        } else {
+            setSelectedGroupIds(groups.map(g => g.id));
+        }
+    };
+
     // 添加group
     const handleAddGroup = () => {
         if (!selectedMaster || selectedSlaves.length === 0) {
@@ -145,18 +189,150 @@ const SyncFunction = () => {
             alert(t('sync.groupExists'));
             return;
         }
-        setGroups([...groups, { master: selectedMaster, slaves: [...selectedSlaves], status: 'stopped' }]);
+        const newGroup = { 
+            id: `group_${Date.now()}`, 
+            master: selectedMaster, 
+            slaves: [...selectedSlaves], 
+            status: 'stopped' 
+        };
+        const newGroups = [...groups, newGroup];
+        setGroups(newGroups);
+        saveGroupsToStorage(newGroups);
         setSelectedMaster(null);
         setSelectedSlaves([]);
     };
     // 启动group
     const handleStartGroup = (idx) => {
-        setGroups(groups.map((g, i) => i === idx ? { ...g, status: 'running' } : g));
+        const newGroups = groups.map((g, i) => i === idx ? { ...g, status: 'running' } : g);
+        setGroups(newGroups);
+        saveGroupsToStorage(newGroups);
         alert(t('sync.groupStarted'));
     };
 
+    // 删除选中的 groups
+    const deleteSelectedGroups = () => {
+        if (selectedGroupIds.length === 0) {
+            alert(t('noSelected'));
+            return;
+        }
+        
+        if (window.confirm(t('sync.confirmDeleteGroups', { count: selectedGroupIds.length }))) {
+            const newGroups = groups.filter(g => !selectedGroupIds.includes(g.id));
+            setGroups(newGroups);
+            saveGroupsToStorage(newGroups);
+            setSelectedGroupIds([]);
+            alert(t('deleteSuccess'));
+        }
+    };
+
+    // 设置同步脚本目录
+    const setSyncScriptDirectory = async () => {
+        // 获取当前脚本目录状态
+        let currentDirectory = 'default';
+        try {
+            const result = await apiManager.getSyncScriptDirectory();
+            if (result.success && result.directory !== 'default') {
+                currentDirectory = result.directory;
+            }
+        } catch (error) {
+            console.error('获取当前脚本目录失败:', error);
+        }
+
+        setModalProp({
+            show: true,
+            title: t('setSyncScriptDirectory'),
+            handleClose: () => setModalProp({ show: false }),
+            rowList: [
+                [
+                    { type: 'label', text: t('syncScriptDirectory.current'), colWidth: 4 },
+                    { type: 'text', key: 'currentDir', text: currentDirectory, colWidth: 8 }
+                ],
+                [
+                    { type: 'label', text: t('syncScriptDirectory.selectNew'), colWidth: 4 },
+                    { 
+                        type: 'input', 
+                        key: 'directoryPath', 
+                        inputType: 'text', 
+                        colWidth: 5, 
+                        placeholder: t('syncScriptDirectory.placeholder'), 
+                        defaultValue: '' 
+                    },
+                    {
+                        type: 'button',
+                        text: t('syncScriptDirectory.selectFolder'),
+                        colWidth: 3,
+                        click: async () => {
+                            try {
+                                if (!window.electronAPI) {
+                                    alert(t('runInElectron'));
+                                    return;
+                                }
+                                const scriptDirectory = await window.electronAPI.chooseDirectory({});
+                                if (scriptDirectory) {
+                                    childRef.current?.updateValueObj('directoryPath', scriptDirectory);
+                                }
+
+                            } catch (error) {
+                                console.error('选择文件夹失败:', error);
+                                alert(t('syncScriptDirectory.selectError'));
+                            }
+                        }
+                    }
+                ],
+                [
+                    {
+                        type: 'button',
+                        text: t('confirmButton'),
+                        colWidth: 6,
+                        click: async () => {
+                            const directoryPath = childRef.current?.getValue('directoryPath');
+                            if (!directoryPath || directoryPath.trim() === '') {
+                                alert(t('syncScriptDirectory.pathRequired'));
+                                return;
+                            }
+
+                            try {
+                                const result = await apiManager.setSyncScriptDirectory(directoryPath);
+                                if (result.success) {
+                                    alert(t('syncScriptDirectory.setSuccess'));
+                                    setModalProp({ show: false });
+                                } else {
+                                    alert(t('syncScriptDirectory.setFailed') + ': ' + (result.message || ''));
+                                }
+                            } catch (error) {
+                                console.error('设置脚本目录失败:', error);
+                                alert(t('syncScriptDirectory.setError'));
+                            }
+                        }
+                    },
+                    {
+                        type: 'button',
+                        text: t('resetToDefault'),
+                        colWidth: 6,
+                        click: async () => {
+                            try {
+                                const result = await apiManager.resetSyncScriptDirectory();
+                                if (result.success) {
+                                    alert(t('syncScriptDirectory.resetSuccess'));
+                                    setModalProp({ show: false });
+                                } else {
+                                    alert(t('syncScriptDirectory.resetFailed'));
+                                }
+                            } catch (error) {
+                                console.error('重置脚本目录失败:', error);
+                                alert(t('syncScriptDirectory.resetError'));
+                            }
+                        }
+                    }
+                ]
+            ]
+        });
+    };
+
     // 展示已选master/slaves
-    const masterName = walletList.find(w => w.id === selectedMaster)?.name || t('sync.noMaster');
+    const masterWalletName = walletList.find(w => w.id === selectedMaster)?.name || t('sync.noMaster');
+    const masterName = masterWalletName === t('sync.noMaster') ? masterWalletName : 
+        (masterWalletName.length > 15 ? masterWalletName.slice(0, 15) + '...' : masterWalletName);
     // 名称截断与tooltip显示工具
     function getDisplayNames(names, maxShow, maxNameLen, unit, t) {
         const ellipsis = (str, len) => str.length > len ? str.slice(0, len) + '...' : str;
@@ -178,48 +354,110 @@ const SyncFunction = () => {
             {/* 控制面板 */}
             <Card className="control-panel mb-4">
                 <Card.Body>
-                    <Row>
-                        <Col className="text-center">
-                            <Button className="btn" onClick={openMasterModal}>
-                                {t('sync.chooseMaster')}
-                            </Button>
-                            <div style={{ marginTop: 8, fontSize: 13, color: '#888' }}>{t('sync.selectedMaster')}: {masterName}</div>
-                        </Col>
-                        <Col className="text-center">
-                            <Button className="btn" onClick={openSlavesModal}>
-                                {t('sync.chooseSlaves')}
-                            </Button>
-                            <div style={{ marginTop: 8, fontSize: 13, color: '#888' }}>
-                                {t('sync.selectedSlaves')}: {
-                                    selectedSlaves.length === 0 ? t('sync.noSlaves') :
-                                    getDisplayNames(selectedSlaves.map(id => walletList.find(w => w.id === id)?.name).filter(Boolean), 2, 8, t('sync.unit'), t)
-                                }
+                    <div className="btn-row">
+                        <Button className="btn" onClick={() => openMasterModal()}>
+                            {t('sync.chooseMaster')}
+                        </Button>
+                        <Button className="btn" onClick={() => openSlavesModal()}>
+                            {t('sync.chooseSlaves')}
+                        </Button>
+                        <Button className="btn" onClick={handleAddGroup}>
+                            {t('sync.addGroup')}
+                        </Button>
+                        <Button className="btn" onClick={() => setSyncScriptDirectory()}>
+                            {t('setSyncScriptDirectory')}
+                        </Button>
+                    </div>
+                </Card.Body>
+            </Card>
+
+            {/* 选择展示面板 */}
+            <Card className="selection-display-card mb-4">
+                <Card.Header>
+                    <span>{t('sync.currentSelection')}</span>
+                </Card.Header>
+                <Card.Body>
+                    <Row className="align-items-center h-100 w-100">
+                        <Col md={5} className="selection-section">
+                            <div className="selection-label">{t('sync.selectedMaster')}:</div>
+                            <div className="selection-content">
+                                {selectedMaster ? (
+                                    <span className="wallet-badge master-badge" title={walletList.find(w => w.id === selectedMaster)?.name}>
+                                        <i className="fas fa-crown"></i> {masterName}
+                                    </span>
+                                ) : (
+                                    <span className="empty-selection">{t('sync.noMaster')}</span>
+                                )}
                             </div>
                         </Col>
-                        <Col className="text-center">
-                            <Button className="btn" onClick={handleAddGroup}>
-                                {t('sync.addGroup')}
-                            </Button>
+                        <Col md={2} className="text-center d-flex align-items-center justify-content-center">
+                            <div className="arrow-separator">→</div>
+                        </Col>
+                        <Col md={5} className="selection-section">
+                            <div className="selection-label">{t('sync.selectedSlaves')}:</div>
+                            <div className="selection-content">
+                                {selectedSlaves.length === 0 ? (
+                                    <span className="empty-selection">{t('sync.noSlaves')}</span>
+                                ) : (
+                                    <div className="slaves-container">
+                                        {selectedSlaves.slice(0, 3).map(slaveId => {
+                                            const slaveName = walletList.find(w => w.id === slaveId)?.name;
+                                            const displayName = slaveName && slaveName.length > 12 ? slaveName.slice(0, 12) + '...' : slaveName;
+                                            return (
+                                                <span key={slaveId} className="wallet-badge slave-badge" title={slaveName}>
+                                                    <i className="fas fa-user"></i> {displayName}
+                                                </span>
+                                            );
+                                        })}
+                                        {selectedSlaves.length > 3 && (
+                                            <span className="more-count">+{selectedSlaves.length - 3} {t('sync.more')}</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </Col>
                     </Row>
                 </Card.Body>
             </Card>
+
             <CustomModal ref={childRef} {...modalProp} />
             {/* group列表部分 */}
-            <Card className="browser-list-card mt-4">
+            <Card className="group-list-card mt-4">
                 <Card.Header className="d-flex justify-content-between align-items-center">
                     <div className="header-checkbox-align">
+                        <input
+                            type="checkbox"
+                            checked={groups.length > 0 && selectedGroupIds.length === groups.length}
+                            indeterminate={selectedGroupIds.length > 0 && selectedGroupIds.length < groups.length}
+                            onChange={toggleSelectAllGroups}
+                            style={{ marginRight: 8 }}
+                        />
                         <span>{t('sync.groupList')}</span>
                     </div>
+                    <div style={{ display: 'flex', gap: '8px', marginLeft: 'auto' }}>
+                        <Button size="sm" variant="danger" onClick={deleteSelectedGroups}>{t('deleteSelected')}</Button>
+                    </div>
                 </Card.Header>
-                <Card.Body className="browser-list-scroll">
+                <Card.Body className="group-list-scroll">
                     {groups.length > 0 ? (
                         groups.map((group, idx) => (
-                            <Row key={idx} className="align-items-center browser-row">
-                                <Col xs={3} className="browser-name text-truncate p-0" title={group.master}>
-                                    <span style={{ color: '#007bff', fontWeight: 600 }}>{walletList.find(w => w.id === group.master)?.name || group.master}</span>
+                            <Row key={group.id} className="align-items-center group-row">
+                                <Col xs={1} className="d-flex align-items-center p-0">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedGroupIds.includes(group.id)}
+                                        onChange={() => toggleSelectGroup(group.id)}
+                                    />
                                 </Col>
-                                <Col xs={5} className="p-0">
+                                <Col xs={3} className="group-name text-truncate p-0" title={walletList.find(w => w.id === group.master)?.name || group.master}>
+                                    <span style={{ color: '#007bff', fontWeight: 600 }}>
+                                        {(() => {
+                                            const fullName = walletList.find(w => w.id === group.master)?.name || group.master;
+                                            return fullName.length > 15 ? fullName.slice(0, 15) + '...' : fullName;
+                                        })()}
+                                    </span>
+                                </Col>
+                                <Col xs={4} className="p-0">
                                     {(() => {
                                         const names = group.slaves.map(id => walletList.find(w => w.id === id)?.name).filter(Boolean);
                                         return getDisplayNames(names, 2, 8, t('sync.unit'), t);

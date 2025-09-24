@@ -55,9 +55,33 @@ const WalletManage = () => {
   const childRef = useRef();
 
   const updateWalletList = async () => {
-    await fetchWallets();
-    const updatedWalletList = wallets.map(w => ({ ...w, selected: false }));
-    setWalletList(updatedWalletList);
+    try {
+      await fetchWallets();
+      // wallets 的变化会通过 useEffect 自动同步到 walletList
+    } catch (error) {
+      console.error('Failed to update wallet list:', error);
+      // 如果 store 方法失败，回退到直接 API 调用
+      try {
+        const res = await apiManager.getAllWallets();
+        console.log('getAllWallets res (fallback):', res);
+        if (res && Array.isArray(res)) {
+          const updatedWalletList = res
+            .slice()
+            .sort((a, b) => {
+              if ((a.createdAt || 0) !== (b.createdAt || 0)) {
+                return (a.createdAt || 0) - (b.createdAt || 0);
+              }
+              if (a.id < b.id) return -1;
+              if (a.id > b.id) return 1;
+              return 0;
+            })
+            .map(wallet => ({ ...wallet, selected: false }));
+          setWalletList(updatedWalletList);
+        }
+      } catch (fallbackError) {
+        console.error('Fallback wallet fetch also failed:', fallbackError);
+      }
+    }
   };
 
 
@@ -96,6 +120,14 @@ const WalletManage = () => {
     };
   }, []);
 
+  // 监听 wallets store 的变化，同步到本地 walletList
+  useEffect(() => {
+    if (wallets && wallets.length >= 0) {
+      const updatedWalletList = wallets.map(w => ({ ...w, selected: false }));
+      setWalletList(updatedWalletList);
+    }
+  }, [wallets]);
+
   // 选中/取消选中单个钱包
   const toggleSelect = (id) => {
     setSelectedIds((prev) =>
@@ -132,7 +164,10 @@ const WalletManage = () => {
               apiManager.updateWalletName(wallet.id, newName).then((data) => {
                 if (data && data.success) {
                   alert(t('0'));
+                  // 更新本地状态
                   setWalletList(walletList.map(w => w.id === wallet.id ? { ...w, name: newName } : w));
+                  // 同时刷新 store
+                  updateWalletList();
                 } else {
                   alert(t(data.code) + ': ' + (data.message || t('unknownError')));
                 }
@@ -280,10 +315,12 @@ const WalletManage = () => {
     apiManager.deleteWallets(selectedIds).then((res) => {
       setDeleting(false);
       if (res && res.success) {
+        // 从本地状态中移除已删除的钱包
         setWalletList(walletList.filter(w => !selectedIds.includes(w.id)));
         setSelectedIds([]);
         alert(t('deleteSuccess'));
         fetchFingerPrints(); // refresh fingerprint envs
+        updateWalletList(); // 刷新钱包列表
       } else {
         alert(t('deleteFailed') + ': ' + (res && res.message ? res.message : t('unknownError')));
       }
@@ -507,23 +544,9 @@ const WalletManage = () => {
   };
 
 
-  const refreshWalletAndFingerPrints = () => {
+  const refreshWalletAndFingerPrints = async () => {
     fetchFingerPrints();
-    apiManager.getAllWallets().then((res) => {
-      // Sort by createdAt ascending (oldest first), then by id ascending
-      const updatedWalletList = res
-        .slice()
-        .sort((a, b) => {
-          if ((a.createdAt || 0) !== (b.createdAt || 0)) {
-            return (a.createdAt || 0) - (b.createdAt || 0);
-          }
-          if (a.id < b.id) return -1;
-          if (a.id > b.id) return 1;
-          return 0;
-        })
-        .map(wallet => ({ ...wallet, selected: false }));
-      setWalletList(updatedWalletList);
-    });
+    await updateWalletList();
   };
 
   // setInitWallet = () => {

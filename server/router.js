@@ -213,5 +213,21 @@ router.get('/getWalletScriptDirectory', async (req, res) => {
   res.send(message);
 });
 
+router.post('/setSyncScriptDirectory', async (req, res) => {
+  const directory = req.body.directory;
+  const message = config.setSyncScriptDirectory(directory);
+  res.send(message);
+});
+
+router.get('/getSyncScriptDirectory', async (req, res) => {
+  const message = config.getSyncScriptDirectory();
+  res.send(message);
+});
+
+router.post('/resetSyncScriptDirectory', async (req, res) => {
+  const message = config.resetSyncScriptDirectory();
+  res.send(message);
+});
+
 
 module.exports = router;

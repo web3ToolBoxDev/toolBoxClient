@@ -292,7 +292,19 @@ class TaskService {
                         continue;
                     }
 
-                    const taskData = { env,envData, taskDataFromFront, chromePath: this.chromePath, savePath: this.savePath };
+                    // 获取钱包扩展路径
+                    const walletScriptDirResult = config.getWalletScriptDirectory();
+                    const walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
+
+
+                    const taskData = { 
+                        env, 
+                        envData, 
+                        taskDataFromFront, 
+                        chromePath: this.chromePath, 
+                        savePath: this.savePath,
+                        walletExtensionPath: walletExtensionPath,
+                    };
                     this.runTask(taskName, taskData, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
                     await this.checkCompleted(taskName);
                 }
@@ -308,7 +320,18 @@ class TaskService {
                         continue;
                     }
 
-                    const taskData = { env,envData, taskDataFromFront, chromePath: this.chromePath, savePath: this.savePath };
+                    // 获取钱包扩展路径
+                    const walletScriptDirResult = config.getWalletScriptDirectory();
+                    const walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
+
+                    const taskData = { 
+                        env, 
+                        envData, 
+                        taskDataFromFront, 
+                        chromePath: this.chromePath, 
+                        savePath: this.savePath,
+                        walletExtensionPath: walletExtensionPath,
+                    };
                     this.runTask(taskName, taskData, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
                     this.checkCompleted(taskName);
                 }
@@ -328,7 +351,19 @@ class TaskService {
                         }
                     }
                 }
-                const taskDataAll = { envs,envsData, taskDataFromFront, chromePath: this.chromePath, savePath: this.savePath };
+                
+                // 获取钱包扩展路径
+                const walletScriptDirResult = config.getWalletScriptDirectory();
+                const walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
+
+                const taskDataAll = { 
+                    envs, 
+                    envsData, 
+                    taskDataFromFront, 
+                    chromePath: this.chromePath, 
+                    savePath: this.savePath,
+                    walletExtensionPath: walletExtensionPath
+                };
                 this.runTask(taskNameAll, taskDataAll, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
                 this.checkCompleted(taskNameAll);
                 break;
