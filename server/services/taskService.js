@@ -5,6 +5,8 @@ const { sleep } = require('../utils');
 const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
 const { getEnvById } = require('./fingerPrintService');
+// 移除顶层从 walletService 解构，避免循环依赖导致 undefined
+// const { getWalletById } = require('./walletService');
 
 const fs = require('fs');
 
@@ -219,6 +221,31 @@ class TaskService {
         const shortAddress = address.slice(0, 5) + '...' + address.slice(-5);
         return `${shortAddress}_${splitTaskName}`;
     }
+
+    // 将绑定的钱包信息添加到 envData 中（若存在 bindWalletId）
+    async _attachWalletToEnvData(env, envData = {}) {
+        try {
+            if (env && env.bindWalletId) {
+                // 延迟引入，避免循环依赖
+                const { getWalletById } = require('./walletService');
+                const res = await getWalletById(env.bindWalletId);
+                let walletDoc = null;
+                if (res && res.success && res.data) {
+                    walletDoc = res.data;
+                } else if (res && (res.id || res._id || res.mnemonic || res.ethAddress)) {
+                    // 兼容 getWalletById 直接返回文档的情况
+                    walletDoc = res;
+                }
+                if (walletDoc) {
+                    return { ...envData, wallet: walletDoc };
+                }
+            }
+        } catch (e) {
+            console.error('[TaskService] _attachWalletToEnvData error:', e);
+        }
+        return envData;
+    }
+
     /**
      * 
      * @param {*} taskName 
@@ -286,6 +313,9 @@ class TaskService {
                     let id = ids[i];
                     let env = (await getEnvById(id)).data;
                     let envData = envsData[id] || {};
+                    // enrich envData with wallet if bound
+                    envData = await this._attachWalletToEnvData(env, envData);
+                    console.log('envData after attach wallet:', envData);
                     // 使用 env.id 保证唯一性，回退到 env.name 以兼容旧数据
                     let taskName = `${env.id || env.name}_${task.taskName}`;
                     if (this.isRunning[taskName]) {
@@ -314,6 +344,8 @@ class TaskService {
                     let id = ids[i];
                     let env = (await getEnvById(id)).data;
                     let envData = envsData[id] || {};
+                    // enrich envData with wallet if bound
+                    envData = await this._attachWalletToEnvData(env, envData);
                     // 使用 env.id 保证唯一性，回退到 env.name 以兼容旧数据
                     let taskName = `${env.id || env.name}_${task.taskName}`;
                     if (this.isRunning[taskName]) {
@@ -348,6 +380,9 @@ class TaskService {
                         let env = (await getEnvById(id)).data;
                         if (env) {
                             envs.push(env);
+                            const key = env.id || env._id || env.name;
+                            const base = envsData[key] || {};
+                            envsData[key] = await this._attachWalletToEnvData(env, base);
                         }
                     }
                 }

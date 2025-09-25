@@ -13,7 +13,7 @@ const SyncFunction = () => {
     const apiManager = APIManager.getInstance();
     const [selectedMaster, setSelectedMaster] = useState(null);
     const [selectedSlaves, setSelectedSlaves] = useState([]);
-    const [groups, setGroups] = useState([]); // [{master, slaves, status, id}]
+    const [groups, setGroups] = useState([]); // [{master, slaves, id}]
     const [selectedGroupIds, setSelectedGroupIds] = useState([]);
     const [modalProp, setModalProp] = useState({ show: false });
     const wallets = useWalletStore((state) => state.wallets);
@@ -55,6 +55,48 @@ const SyncFunction = () => {
         loadGroupsFromStorage();
     }, []);
 
+
+
+    // 启动当前选择（master/slaves）的同步任务
+    const startSyncForCurrentSelection = async (masterId, slaveIds) => {
+        try {
+            // 将 walletId 映射为其绑定的指纹环境 ID（bindEnvId）
+            const masterEnvId = walletList.find(w => w.id === masterId)?.bindEnvId;
+            const slaveEnvIds = (slaveIds || [])
+                .map(id => walletList.find(w => w.id === id)?.bindEnvId)
+                .filter(Boolean);
+
+            // 简单校验
+            if (!masterEnvId) {
+                alert(t('sync.masterNotBoundEnv') || 'Master wallet not bound to an environment');
+                return false;
+            }
+            if (slaveEnvIds.length === 0) {
+                alert(t('sync.noValidSlavesEnv') || 'No valid slave environments found');
+                return false;
+            }
+
+            // 去重
+            const envIds = Array.from(new Set([masterEnvId, ...slaveEnvIds]));
+            console.log('Starting syncFunction task with envIds:', envIds, 'masterId:', masterId, 'slaveIds:', slaveIds);
+            const result = await apiManager.execTask('syncFunction', {
+                envIds,
+                masterId,
+                slaveIds
+            });
+            if (result && result.success) {
+                // 可选：给出成功提示
+                // alert(t('sync.groupStarted'));
+                return true;
+            }
+            // alert(t('sync.startFailed'));
+            return false;
+        } catch (error) {
+            console.error('startSyncForCurrentSelection error:', error);
+            // alert(t('sync.startError'));
+            return false;
+        }
+    };
 
 
     // 打开选择master钱包modal
@@ -189,24 +231,43 @@ const SyncFunction = () => {
             alert(t('sync.groupExists'));
             return;
         }
+        // 先缓存当前选择，供启动任务使用
+        const masterId = selectedMaster;
+        const slaveIds = [...selectedSlaves];
+
         const newGroup = { 
             id: `group_${Date.now()}`, 
-            master: selectedMaster, 
-            slaves: [...selectedSlaves], 
-            status: 'stopped' 
+            master: masterId, 
+            slaves: [...slaveIds]
         };
         const newGroups = [...groups, newGroup];
         setGroups(newGroups);
         saveGroupsToStorage(newGroups);
+
+        // 调用后端启动同步任务
+        startSyncForCurrentSelection(masterId, slaveIds).then((ok) => {
+            if (ok) {
+                alert(t('sync.groupStarted'));
+            } else {
+                alert(t('sync.startFailed'));
+            }
+        });
+
+        // 重置当前选择
         setSelectedMaster(null);
         setSelectedSlaves([]);
     };
     // 启动group
     const handleStartGroup = (idx) => {
-        const newGroups = groups.map((g, i) => i === idx ? { ...g, status: 'running' } : g);
-        setGroups(newGroups);
-        saveGroupsToStorage(newGroups);
-        alert(t('sync.groupStarted'));
+        const g = groups[idx];
+        if (!g) return;
+        startSyncForCurrentSelection(g.master, g.slaves).then((ok) => {
+            if (ok) {
+                alert(t('sync.groupStarted'));
+            } else {
+                alert(t('sync.startFailed'));
+            }
+        });
     };
 
     // 删除选中的 groups
@@ -457,25 +518,15 @@ const SyncFunction = () => {
                                         })()}
                                     </span>
                                 </Col>
-                                <Col xs={4} className="p-0">
+                                <Col xs={5} className="p-0">
                                     {(() => {
                                         const names = group.slaves.map(id => walletList.find(w => w.id === id)?.name).filter(Boolean);
                                         return getDisplayNames(names, 2, 8, t('sync.unit'), t);
                                     })()}
                                 </Col>
-                                <Col xs={2} className="p-0">
-                                    <span style={{
-                                        padding: '2px 8px',
-                                        borderRadius: 8,
-                                        fontSize: 12,
-                                        background: group.status === 'running' ? '#28a745' : '#6c757d',
-                                        color: '#fff',
-                                    }}>
-                                        {group.status === 'running' ? t('sync.status.running') : t('sync.status.stopped')}
-                                    </span>
-                                </Col>
+                                {/* 移除状态展示列 */}
                                 <Col xs="auto" className="p-0">
-                                    <Button size="sm" variant="outline-success" onClick={() => handleStartGroup(idx)} disabled={group.status === 'running'}>
+                                    <Button size="sm" variant="outline-success" onClick={() => handleStartGroup(idx)}>
                                         {t('sync.startGroup')}
                                     </Button>
                                 </Col>

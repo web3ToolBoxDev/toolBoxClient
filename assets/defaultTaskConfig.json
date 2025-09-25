@@ -25,6 +25,12 @@
         "defaultTask": true
     },
     {
+        "taskName": "syncFunction",
+        "scriptPath": "syncFunction.js",
+        "taskType": "execAll",
+        "defaultTask": true
+    },
+    {
         "taskName":"ccxtCheckBalance",
         "scriptPath":"ccxt/checkBalance.js",
         "taskKey":"ccxtCheckBalance",

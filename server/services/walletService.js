@@ -2,7 +2,8 @@
 const path = require('path');
 const excel = require('exceljs');
 const date = require('date-and-time');
-const taskServiceManager = require('./taskService').getInstance();
+// 顶层不再获取 taskService 实例，避免循环依赖
+// const taskServiceManager = require('./taskService').getInstance();
 const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
 const { createDirectoryIfNotExists } = require('../utils.js');
@@ -493,13 +494,16 @@ async function initWallets(ids) {
         throw new Error(`Wallet ${wallet.name} not bound to fingerprint env`);
       }
       envIds.push(wallet.bindEnvId);
-      envsData[wallet.bindEnvId] = wallet;
+      // 不再在此处填充 envsData，交由 execTask 统一根据 env.bindWalletId 注入钱包数据
+      // envsData[wallet.bindEnvId] = wallet;
     }
 
 
     // 执行初始化任务
     const taskName = 'initWallet';
     const taskData = { envIds, envsData, successCallBack: initSuccessCallBack};
+    // 在调用前按需获取 taskService 实例，避免循环依赖问题
+    const taskServiceManager = require('./taskService').getInstance();
     // execTask is blocking and will throw on error; no additional validation needed here
     await taskServiceManager.execTask(taskName, taskData);
     
@@ -573,7 +577,7 @@ async function openWallets(ids) {
         continue;
       }
       envIds.push(wallet.bindEnvId);
-      envsData[wallet.bindEnvId] = wallet;
+      // envsData[wallet.bindEnvId] = wallet;
     }
 
     if (uninitialized.length > 0) {
@@ -584,6 +588,8 @@ async function openWallets(ids) {
     // execute open-wallet task
     const taskName = 'openWallet';
     const taskData = { envIds, envsData };
+    // 在调用前按需获取 taskService 实例，避免循环依赖问题
+    const taskServiceManager = require('./taskService').getInstance();
     // execTask is blocking and will throw on error; no additional validation needed here
     taskServiceManager.execTask(taskName, taskData);
 

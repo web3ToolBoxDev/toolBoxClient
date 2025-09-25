@@ -318,7 +318,31 @@ class Config {
 		console.log("重置同步脚本目录到默认");
 		delete this._paths.syncScriptDirectory;
 		this._saveAllPathsToJson();
-		return { success: true, code: 0 };
+		try {
+			// 仅重新加载默认的 syncFunction 任务
+			const defaultTaskConfig = require(path.join(this.assetsPath, "/defaultTaskConfig.json"));
+			const syncTask = Array.isArray(defaultTaskConfig) ? defaultTaskConfig.find(t => t.taskName === 'syncFunction') : null;
+			if (!this.#taskDb) {
+				return { success: false, code: 1, message: '任务数据库未初始化' };
+			}
+			if (syncTask) {
+				const taskObj = { ...syncTask };
+				if (taskObj.scriptPath) {
+					taskObj.scriptPath = path.join(this.defaultScriptPath, taskObj.scriptPath);
+				}
+				if (typeof taskObj.defaultTask === 'undefined') {
+					taskObj.defaultTask = true;
+				}
+				// upsert 同名任务
+				this.#taskDb.update({ taskName: taskObj.taskName }, taskObj, { upsert: true });
+			} else {
+				console.warn('[resetSyncScriptDirectory] defaultTaskConfig 未找到 syncFunction 配置');
+			}
+			return { success: true, code: 0 };
+		} catch (e) {
+			console.error('[resetSyncScriptDirectory] 重新加载默认 syncFunction 失败:', e);
+			return { success: false, code: 2, message: e.message };
+		}
 	}
 	
 	

@@ -195,7 +195,7 @@ async function startInitialSetup(page) {
     if (typeof taskData === 'string') {
         taskData = JSON.parse(taskData);
     }
-    await seedPhraseInput.type(taskData.envData.mnemonic, { delay: 100 });
+    await seedPhraseInput.type(taskData.envData.wallet.mnemonic, { delay: 100 });
 
     // import-srp-confirm button
     const srpConfirmButton = await page.waitForSelector('button[data-testid="import-srp-confirm"]', { visible: true });
