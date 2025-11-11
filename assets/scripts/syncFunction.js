@@ -3,6 +3,8 @@ const url = process.argv[2];
 const puppeteer = require('puppeteer-extra');
 const path = require('path');
 const fs = require('fs');
+const { fork } = require('child_process');
+
 
 let ws = new WebSocket(url);
 let webSocketReady = false;
@@ -12,408 +14,726 @@ function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
 
 // 统一消息
 function sendHeartBeat() {
-  setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'heart_beat' }));
-  }, 5000);
+    setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'heart_beat' }));
+    }, 5000);
 }
 function sendRequestTaskData() {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'request_task_data', data: '' }));
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'request_task_data', data: '' }));
 }
 function sendTaskLog(message) {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'task_log', message }));
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'task_log', message }));
 }
 function sendTerminateProcess() {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'terminate_process' }));
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'terminate_process' }));
 }
 
 ws.on('open', () => { webSocketReady = true; sendHeartBeat(); });
 ws.on('message', (message) => {
-  let data = JSON.parse(message);
-  switch (data.type) {
-    case 'heart_beat':
-      break;
-    case 'request_task_data':
-      taskData = data.data;
-      break;
-    case 'terminate_process':
-      sendTerminateProcess();
-      gracefulExit();
-      break;
-    default:
-      break;
-  }
+    let data = JSON.parse(message);
+    switch (data.type) {
+        case 'heart_beat':
+            break;
+        case 'request_task_data':
+            taskData = data.data;
+            break;
+        case 'terminate_process':
+            sendTerminateProcess();
+            gracefulExit();
+            break;
+        default:
+            break;
+    }
 });
 ws.on('error', (err) => { console.error('[syncFunction] WebSocket error:', err); process.exit(1); });
 setInterval(() => {
-  if (ws.readyState === WebSocket.CLOSED) {
-    try { ws = new WebSocket(url); } catch {}
-  }
+    if (ws.readyState === WebSocket.CLOSED) {
+        try { ws = new WebSocket(url); } catch { }
+    }
 }, 5000);
 
 function ensureTaskDataIsObject() {
-  if (typeof taskData === 'string') {
-    try { taskData = JSON.parse(taskData); } catch {}
-  }
-  return taskData || {};
+    if (typeof taskData === 'string') {
+        try { taskData = JSON.parse(taskData); } catch { }
+    }
+    return taskData || {};
 }
 
 let browsers = [];
 async function gracefulExit() {
-  try { await Promise.allSettled(browsers.map(b => b.close())); } catch {}
-  try { ws.close(); } catch {}
-  process.exit(0);
+    try { await Promise.allSettled(browsers.map(b => b.close())); } catch { }
+    try { ws.close(); } catch { }
+    shutdown();
+    process.exit(0);
 }
 
 function buildFingerprints(env) {
-  const base = {
-    canvas: env.canvas,
-    hardware: env.hardware,
-    screen: env.screen,
-    clientHint: env.clientHint,
-    languages_js: env.language_js,
-    languages_http: env.language_http,
-    fonts_remove: (env.fonts_remove || '') + ',Tahoma'
-  };
-  if (env.useProxy) {
-    base.position = env.position;
-    base.timeZone = env.timeZone;
-    base.webrtc_public = env.webrtc_public;
-  }
-  return JSON.stringify(base);
+    const base = {
+        canvas: env.canvas,
+        hardware: env.hardware,
+        screen: env.screen,
+        clientHint: env.clientHint,
+        languages_js: env.language_js,
+        languages_http: env.language_http,
+        fonts_remove: (env.fonts_remove || '') + ',Tahoma'
+    };
+    if (env.useProxy) {
+        base.position = env.position;
+        base.timeZone = env.timeZone;
+        base.webrtc_public = env.webrtc_public;
+    }
+    return JSON.stringify(base);
 }
 
 function buildLaunchArgs(env, metamaskDir) {
-  const args = [
-    '--disable-blink-features=AutomationControlled',
-    '--no-sandbox',
-    '--disabled-setupid-sandbox',
-    '--disable-infobars',
-    `--user-agent=${env.user_agent}`,
-    `--lang=${env.language_js}`,
-    `--disable-extensions-except=${metamaskDir}`,
-    `--load-extension=${metamaskDir}`,
-  ];
-  if (env.useProxy && env.proxyUrl) args.push(`--proxy-server=${env.proxyUrl}`);
-  args.push(`--toolbox=${buildFingerprints(env)}`);
-  return args;
-}
-
-async function launchChromeForEnv(env, chromePath, savePath, metamaskDir, position) {
-  const userDataDir = path.join(savePath, env.id);
-  if (!fs.existsSync(userDataDir)) {
-    throw new Error(`用户数据目录不存在: ${userDataDir}`);
-  }
-  const browser = await puppeteer.launch({
-    headless: false,
-    executablePath: chromePath,
-    ignoreDefaultArgs: ['--enable-automation'],
-    userDataDir,
-    args: [
-      ...buildLaunchArgs(env, metamaskDir),
-      ...(position ? [
-        `--window-position=${position.x},${position.y}`,
-        `--window-size=${position.width},${position.height}`,
-      ] : [])
-    ],
-    defaultViewport: null,
-  });
-  browsers.push(browser);
-  return browser;
-}
-
-function setupMasterPageSync(masterPage, pageId, slavePageGetters) {
-  // 让页面事件回调到 Node
-  masterPage.exposeFunction('__reportEvent', async (evt) => {
-    try {
-      // 广播到所有 slave 页面
-      for (const getPage of slavePageGetters) {
-        const page = await getPage(pageId);
-        if (!page) continue;
-        await replicateEventToSlave(page, evt);
-      }
-    } catch (e) {
-      sendTaskLog('[syncFunction] relay error: ' + e.message);
+    const args = [
+        '--disable-blink-features=AutomationControlled',
+        '--no-sandbox',
+        '--disabled-setupid-sandbox',
+        '--disable-infobars',
+    ];
+    if (env && env.user_agent) args.push(`--user-agent=${env.user_agent}`);
+    if (env && env.language_js) args.push(`--lang=${env.language_js}`);
+    if (metamaskDir) {
+        args.push(`--disable-extensions-except=${metamaskDir}`);
+        args.push(`--load-extension=${metamaskDir}`);
     }
-  }).catch(() => {});
-
-  masterPage.evaluateOnNewDocument((pid) => {
-    // 避免向 globalThis/window 写入属性，使用闭包中常量承载 pageId
-    const __PID = pid;
-    const safeReport = (msg) => { try { if (window.__reportEvent) window.__reportEvent(msg); } catch (e) {} };
-
-    const getSelector = (el) => {
-      if (!(el instanceof Element)) return null;
-      if (el.id) return `#${el.id}`;
-      const parts = [];
-      while (el && el.nodeType === 1) {
-        const tag = el.tagName; // 使用局部常量避免闭包引用循环变量
-        let sel = tag.toLowerCase();
-        if (el.classList.length > 0) sel += `.${el.classList.item(0)}`;
-        const parent = el.parentNode;
-        if (parent) {
-          const siblings = Array.from(parent.children).filter((c) => c.tagName === tag);
-          if (siblings.length > 1) {
-            const idx = siblings.indexOf(el) + 1;
-            sel += `:nth-of-type(${idx})`;
-          }
-        }
-        parts.unshift(sel);
-        el = el.parentElement;
-      }
-      return parts.join(' > ');
-    };
-
-    window.addEventListener('click', (e) => {
-      const selector = getSelector(e.target);
-      safeReport({ type: 'click', pageId: __PID, x: e.clientX, y: e.clientY, button: e.button, selector });
-    }, true);
-
-    window.addEventListener('input', (e) => {
-      const t = e.target;
-      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t.isContentEditable) {
-        const selector = getSelector(t);
-        const value = (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) ? t.value : t.innerText;
-        safeReport({ type: 'input', pageId: __PID, selector, value });
-      }
-    }, true);
-
-    let scrollTimeout = null;
-    window.addEventListener('scroll', () => {
-      if (scrollTimeout) return;
-      scrollTimeout = setTimeout(() => {
-        safeReport({ type: 'scroll', pageId: __PID, scrollX: window.scrollX, scrollY: window.scrollY });
-        scrollTimeout = null;
-      }, 100);
-    }, true);
-  }, pageId).catch(() => {});
-
-  // 立即为当前已加载的文档绑定一次（MetaMask 解锁页等不会自动重载的页面）
-  masterPage.evaluate((pid) => {
-    try {
-      const root = document.documentElement;
-      if (root && root.dataset && root.dataset.syncBound === '1') return; // 避免重复绑定
-      if (root && root.dataset) root.dataset.syncBound = '1';
-      const __PID = pid;
-      const safeReport = (msg) => { try { if (window.__reportEvent) window.__reportEvent(msg); } catch (e) {} };
-
-      const getSelector = (el) => {
-        if (!(el instanceof Element)) return null;
-        if (el.id) return `#${el.id}`;
-        const parts = [];
-        while (el && el.nodeType === 1) {
-          const tag = el.tagName;
-          let sel = tag.toLowerCase();
-          if (el.classList.length > 0) sel += `.${el.classList.item(0)}`;
-          const parent = el.parentNode;
-          if (parent) {
-            const siblings = Array.from(parent.children).filter((c) => c.tagName === tag);
-            if (siblings.length > 1) {
-              const idx = siblings.indexOf(el) + 1;
-              sel += `:nth-of-type(${idx})`;
-            }
-          }
-          parts.unshift(sel);
-          el = el.parentElement;
-        }
-        return parts.join(' > ');
-      };
-
-      window.addEventListener('input', (e) => {
-        const t = e.target;
-        if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t.isContentEditable) {
-          const selector = getSelector(t);
-          const value = (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) ? t.value : t.innerText;
-          safeReport({ type: 'input', pageId: __PID, selector, value });
-        }
-      }, true);
-      window.addEventListener('change', (e) => {
-        const t = e.target;
-        if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) {
-          const selector = getSelector(t);
-          const payload = { type: 'change', pageId: __PID, selector };
-          if (t instanceof HTMLInputElement && (t.type === 'checkbox' || t.type === 'radio')) {
-            payload.checked = !!t.checked;
-          } else {
-            payload.value = t.value;
-          }
-          safeReport(payload);
-        }
-      }, true);
-      window.addEventListener('keydown', (e) => {
-        const t = e.target;
-        if (!(t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t.isContentEditable)) return;
-        const interesting = ['Enter', 'Tab'];
-        if (!interesting.includes(e.key)) return;
-        const selector = getSelector(t);
-        safeReport({ type: 'keydown', pageId: __PID, selector, key: e.key, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey });
-      }, true);
-    } catch {}
-  }, pageId).catch(() => {});
+    if (env && env.useProxy && env.proxyUrl) args.push(`--proxy-server=${env.proxyUrl}`);
+    if (env) args.push(`--toolbox=${buildFingerprints(env)}`);
+    return args;
 }
 
-async function replicateEventToSlave(page, evt) {
+
+
+function isExtensionUrl(url) {
+    return typeof url === 'string' && url.startsWith('chrome-extension://');
+}
+
+let masterBrowser = null;
+let slaveWorkers = [];
+let pageIdSeq = 0;
+const pageIdByTargetId = new Map();  // target._targetId -> pageId
+const pageById = new Map();          // pageId -> Page
+const lastUrlByPageId = new Map();   // pageId -> url
+const pageStateSnapshot = new Map(); // pageId -> { url, exists: true/false }
+let monitorTimer = null;
+let lastActivePageId = null;        // 追踪上次激活的页面，防止重复激活
+
+// 新增：记录每个 Page 的 CDP 客户端与注入状态
+const cdpClientByPage = new WeakMap();
+const cdpNavHooked = new WeakSet();
+const eondInstalled = new WeakSet();
+// 新增：标记是否已为该 Page 注入主世界脚本
+const cdpMainWorldInjected = new WeakSet();
+
+function spawnSlaveWorkers(slaveEnvs, options) {
+    const { chromePath, savePath, metamaskDir, positionBase } = options;
+    const SLAVE_WINDOW = Object.assign({ x: 80, y: 80, width: 900, height: 700 }, positionBase || {});
+    sendTaskLog(`[syncFunction] 启动 ${slaveEnvs.length} 个 Slave 进程...`);
+
+    slaveWorkers = slaveEnvs.map((env, i) => {
+        const worker = fork(path.resolve(__dirname, 'replicatorWorker.js'));
+        const position = {
+            x: SLAVE_WINDOW.x + i * (SLAVE_WINDOW.width + 20),
+            y: SLAVE_WINDOW.y,
+            width: SLAVE_WINDOW.width,
+            height: SLAVE_WINDOW.height,
+        };
+        worker.send({
+            type: 'init',
+            payload: { env, chromePath, savePath, metamaskDir, position }
+        });
+        worker.on('message', (m) => {
+            if (m && m.type === 'log') sendTaskLog('[slave] ' + (m.message || ''));
+        });
+        worker.on('exit', (code, signal) => {
+            sendTaskLog(`[slave] 退出 code=${code} signal=${signal}`);
+        });
+        return worker;
+    });
+}
+
+function broadcastToSlaves(evt) {
+    for (const w of slaveWorkers) {
+        try { w.send({ type: 'event', payload: evt }); } catch { }
+    }
+}
+
+/** ------------ Master browser ------------ */
+async function launchMaster(masterEnv, chromePath, savePath, metamaskDir, position) {
+    const args = buildLaunchArgs(masterEnv, metamaskDir);
+    const userDataDir = path.join(savePath, masterEnv.id);
+    if (position && Number.isFinite(position.x)) {
+        args.push(`--window-position=${position.x},${position.y}`);
+        args.push(`--window-size=${position.width || 1200},${position.height || 900}`);
+    }
+    masterBrowser = await puppeteer.launch({
+        headless: false,
+        executablePath: chromePath,
+        userDataDir: userDataDir,
+        ignoreDefaultArgs: ['--enable-automation'],
+        args,
+    });
+    browsers.push(masterBrowser);
+    sendTaskLog('[syncFunction] Master \u6d4f\u89c8\u5668\u5df2\u542f\u52a8');
+    return masterBrowser;
+}
+
+function cleanupPageMappings(pid) {
+  try { pageById.delete(pid); } catch {}
+  try { lastUrlByPageId.delete(pid); } catch {}
+  try { pageStateSnapshot.delete(pid); } catch {}
+  // 如果你还保留 targetId -> pageId 的映射，这里一并清理
   try {
-    if (evt.type === 'navigate') {
-      await page.goto(evt.url, { waitUntil: 'networkidle2' });
-      return;
+    for (const [tid, mapped] of pageIdByTargetId.entries()) {
+      if (mapped === pid) pageIdByTargetId.delete(tid);
     }
-    if (evt.type === 'click') {
-      let clicked = false;
-      if (evt.selector) {
+  } catch {}
+}
+
+// 新增：使用 CDP 在隔离世界里注入监听（适用于 chrome-extension:// 页面）
+async function installCdpListener(page, pageId) {
+  try {
+    let client = cdpClientByPage.get(page);
+    if (!client) {
+      client = await page.target().createCDPSession();
+      await client.send('Runtime.enable');
+      await client.send('Page.enable');
+      cdpClientByPage.set(page, client);
+
+      // 只注册一次 binding 回调
+      client.on('Runtime.bindingCalled', async (e) => {
+        if (e.name !== '__cdpReport') return;
         try {
-          await page.waitForSelector(evt.selector, { timeout: 3000 });
-          const el = await page.$(evt.selector);
-          if (el) { await el.click(); clicked = true; }
-        } catch {}
-      }
-      if (!clicked) await page.mouse.click(evt.x, evt.y);
-      return;
-    }
-    if (evt.type === 'scroll') {
-      await page.evaluate((xx, yy) => window.scrollTo(xx, yy), evt.scrollX, evt.scrollY);
-      return;
-    }
-    if (evt.type === 'input') {
-      await page.evaluate((sel, val) => {
-        const el = document.querySelector(sel);
-        if (!el) return;
-        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-          el.focus(); el.value = val; el.dispatchEvent(new Event('input', { bubbles: true }));
-        } else if (el.isContentEditable) {
-          el.focus(); el.innerText = val; el.dispatchEvent(new InputEvent('input', { bubbles: true }));
-        }
-      }, evt.selector, evt.value);
-      return;
-    }
-  } catch (e) {
-    sendTaskLog('[syncFunction] replicate error: ' + e.message);
-  }
-}
-
-function hasManifest(dir) {
-  try { return !!dir && fs.existsSync(path.join(dir, 'manifest.json')); } catch { return false; }
-}
-function resolveMetamaskDir(walletExtensionPath) {
-  // 1) 如果传入的就是扩展根目录
-  if (hasManifest(walletExtensionPath)) return walletExtensionPath;
-  // 2) 如果传入的是脚本目录，尝试其子目录 metamask-chrome-13.2.0
-  const candidate = walletExtensionPath ? path.join(walletExtensionPath, 'metamask-chrome-13.2.0') : null;
-  if (hasManifest(candidate)) return candidate;
-  // 3) 回退到当前脚本同级的默认目录
-  const local = path.resolve(__dirname, './metamask-chrome-13.2.0');
-  if (hasManifest(local)) return local;
-  return null;
-}
-
-(async () => {
-  while (true) {
-    if (webSocketReady) {
-      sendRequestTaskData();
-      if (taskData) break;
-    }
-    await sleep(1000);
-  }
-
-  const currentTaskData = ensureTaskDataIsObject();
-  const { envs = [], taskDataFromFront = {}, chromePath, savePath, walletExtensionPath } = currentTaskData || {};
-  if (!chromePath || !savePath) {
-    console.error('[syncFunction] 缺少 chromePath 或 savePath');
-    return gracefulExit();
-  }
-
-  // 解析 master/slaves 对应的 env
-  const { masterId, slaveIds = [] } = taskDataFromFront || {};
-  const masterEnv = envs.find(e => e && e.bindWalletId === masterId);
-  const slaveEnvs = envs.filter(e => e && slaveIds.includes(e.bindWalletId));
-  if (!masterEnv || slaveEnvs.length === 0) {
-    console.error('[syncFunction] 未找到 master 或 slaves 的环境');
-    return gracefulExit();
-  }
-
-  const metamaskDir = resolveMetamaskDir(walletExtensionPath);
-  if (!metamaskDir) {
-    sendTaskLog('[syncFunction] 未找到有效的 MetaMask 扩展目录（缺少 manifest.json）');
-    console.error('[syncFunction] MetaMask 扩展目录无效，manifest.json 不存在');
-    return gracefulExit();
-  }
-  sendTaskLog('[syncFunction] 使用扩展目录: ' + metamaskDir);
-
-  // 启动 Master 与 Slave 浏览器
-  const MASTER_WINDOW = { x: 0, y: 0, width: 900, height: 700 };
-  const SLAVE_WINDOW = { x: 920, y: 0, width: 900, height: 700 };
-
-  sendTaskLog('[syncFunction] 启动 Master 浏览器...');
-  const masterBrowser = await launchChromeForEnv(masterEnv, chromePath, savePath, metamaskDir, MASTER_WINDOW);
-
-  sendTaskLog('[syncFunction] 启动 Slave 浏览器...');
-  const slaveBrowsers = [];
-  for (let i = 0; i < slaveEnvs.length; i++) {
-    const pos = { ...SLAVE_WINDOW, x: SLAVE_WINDOW.x + i * (SLAVE_WINDOW.width + 20) };
-    const b = await launchChromeForEnv(slaveEnvs[i], chromePath, savePath, metamaskDir, pos);
-    slaveBrowsers.push(b);
-  }
-
-  // 初始页映射：page-0
-  const masterPages = await masterBrowser.pages();
-  let initialMasterPage = masterPages.find(p => p.url().startsWith('about:blank')) || masterPages[0];
-
-  const slavePagesGetters = slaveBrowsers.map((browser) => {
-    const map = new Map();
-    return async function getPage(pageId) {
-      // 如果不存在则按需创建
-      if (!map.has(pageId)) {
-        const p = await browser.newPage();
-        map.set(pageId, p);
-        return p;
-      }
-      return map.get(pageId);
-    };
-  });
-
-  let pageIndex = 0;
-  const firstId = 'page-0';
-  setupMasterPageSync(initialMasterPage, firstId, slavePagesGetters);
-  pageIndex = 1;
-
-  // 主页面导航 -> 同步到从页面
-  initialMasterPage.on('framenavigated', async (frame) => {
-    if (frame === initialMasterPage.mainFrame()) {
-      const navEvt = { type: 'navigate', pageId: firstId, url: initialMasterPage.url() };
-      for (const getPage of slavePagesGetters) {
-        const sp = await getPage(firstId);
-        if (sp) await replicateEventToSlave(sp, navEvt);
-      }
-    }
-  });
-
-  // 监听 Master 新标签页，分配 pageId，并在各 Slave 创建对应标签页
-  masterBrowser.on('targetcreated', async (target) => {
-    if (target.type() === 'page') {
-      const newPage = await target.page();
-      const pageId = `page-${pageIndex++}`;
-      setupMasterPageSync(newPage, pageId, slavePagesGetters);
-      // 初始导航同步
-      try {
-        const navEvt = { type: 'navigate', pageId, url: newPage.url() };
-        for (const getPage of slavePagesGetters) {
-          const sp = await getPage(pageId);
-          if (sp && navEvt.url) await replicateEventToSlave(sp, navEvt);
-        }
-      } catch {}
-      // 新标签页后续导航同步（例如地址栏输入后按回车）
-      newPage.on('framenavigated', async (frame) => {
-        if (frame === newPage.mainFrame()) {
-          const navEvt2 = { type: 'navigate', pageId, url: newPage.url() };
-          for (const getPage of slavePagesGetters) {
-            const sp = await getPage(pageId);
-            if (sp && navEvt2.url) await replicateEventToSlave(sp, navEvt2);
+          const evt = JSON.parse(e.payload || '{}');
+          evt.pageId = pageId;
+          if (!evt.url) { try { evt.url = await page.url(); } catch {} }
+          if (evt.type === 'activate') {
+            if (lastActivePageId !== pageId) {
+              lastActivePageId = pageId;
+              sendTaskLog(`[sync] Page activated (cdp): ${pageId}`);
+              broadcastToSlaves({ type: 'activate', pageId });
+            }
+            return;
           }
-        }
+          if (evt.type === 'deactivate') { broadcastToSlaves({ type: 'deactivate', pageId }); return; }
+          console.log('CDP Event received for pageId:', pageId, evt);
+          broadcastToSlaves(evt);
+        } catch {}
       });
     }
+
+    // 帮助函数：获取顶层 Frame URL
+    const getTopUrl = async () => {
+      try {
+        const { frameTree } = await client.send('Page.getFrameTree');
+        return (frameTree && frameTree.frame && frameTree.frame.url) || '';
+      } catch { return ''; }
+    };
+
+    // 两套注入脚本：
+    // 1) 普通网页（http/https）：主世界监听 + 自定义事件桥（shadow 支持，含 attachShadow 钩子）
+    const mainWorldSource = `(() => {
+        const send = (evt) => { try { document.dispatchEvent(new CustomEvent('__tbxEvt', { detail: evt, bubbles: true, composed: true })); } catch {} };
+        const now = () => { try { return performance.now(); } catch { return Date.now(); } };
+        let lastKey = '';
+        let lastTs = 0;
+        const dedupe = (evt) => {
+          try {
+            const key = [evt.type, evt.selector || '', evt.tag || '', evt.x || 0, evt.y || 0].join('|');
+            const t = now();
+            if (key === lastKey && (t - lastTs) < 120) return true;
+            lastKey = key; lastTs = t; return false;
+          } catch { return false; }
+        };
+        const isElem = (n) => !!(n && n.nodeType === 1);
+        const buildSelector = (el) => {
+          try {
+            if (!isElem(el)) return null;
+            if (el.id) return '#' + el.id;
+            const cls = (el.classList && el.classList.length) ? ('.' + Array.from(el.classList).join('.')) : '';
+            const tag = (el.tagName ? el.tagName.toLowerCase() : '');
+            return tag ? (tag + cls) : null;
+          } catch { return null; }
+        };
+        const enrichCommon = (e, t) => {
+          const m = e; // Mouse/Poi
+          const tag = (t && t.tagName) ? t.tagName.toLowerCase() : '';
+          let inputType = ''; try { inputType = (t && t.type) ? String(t.type).toLowerCase() : ''; } catch {}
+          const x = (m && Number.isFinite(m.clientX)) ? m.clientX : 0;
+          const y = (m && Number.isFinite(m.clientY)) ? m.clientY : 0;
+          const sel = buildSelector(t);
+          const out = { selector: sel, tag, inputType, x, y };
+          try { if (tag === 'input' && (inputType === 'checkbox' || inputType === 'radio')) out.checked = !!t.checked; } catch {}
+          try { out.vw = window.innerWidth || 0; out.vh = window.innerHeight || 0; out.dpr = window.devicePixelRatio || 1; } catch {}
+          return out;
+        };
+        const handleClickish = (type) => (e) => {
+          try {
+            const t = (e && e.composedPath && e.composedPath()[0]) || e.target || null;
+            if (!t) return;
+            const payload = Object.assign({ type: 'click' }, enrichCommon(e, t));
+            if (dedupe(payload)) return;
+            send(payload);
+          } catch {}
+        };
+        const handleInput = (e) => {
+          try {
+            const t = (e && e.composedPath && e.composedPath()[0]) || e.target || null; if (!t) return;
+            const sel = buildSelector(t);
+            let value = '';
+            try {
+              if (t && 'value' in t) value = t.value || '';
+              else if (t && t.isContentEditable) value = t.textContent || '';
+            } catch {}
+            const tag = (t && t.tagName) ? t.tagName.toLowerCase() : '';
+            let inputType = ''; try { inputType = (t && t.type) ? String(t.type).toLowerCase() : ''; } catch {}
+            const payload = { type: (e.type === 'change') ? 'change' : 'input', selector: sel, value, tag, inputType };
+            try { if (tag === 'input' && (inputType === 'checkbox' || inputType === 'radio')) payload.checked = !!t.checked; } catch {}
+            send(payload);
+          } catch {}
+        };
+        const installOnRoot = (root) => {
+          try {
+            // pointer/mouse 事件尽量在捕获阶段提前拿到
+            root.addEventListener('pointerdown', handleClickish('pointerdown'), true);
+            root.addEventListener('mousedown', handleClickish('mousedown'), true);
+            root.addEventListener('click', handleClickish('click'), true);
+            root.addEventListener('input', handleInput, true);
+            root.addEventListener('change', handleInput, true);
+          } catch {}
+        };
+        // 装配 document 与现有 open shadowRoot
+        installOnRoot(document);
+        try {
+          const all = document.querySelectorAll('*');
+          for (let i = 0; i < all.length; i++) {
+            const el = all[i];
+            try { if (el && el.shadowRoot) installOnRoot(el.shadowRoot); } catch {}
+          }
+        } catch {}
+        // 监听后续 attachShadow
+        try {
+          const origAttach = Element.prototype.attachShadow;
+          if (origAttach && !origAttach.__tbxWrapped) {
+            Element.prototype.attachShadow = function(init) {
+              const sr = origAttach.call(this, init);
+              try { installOnRoot(sr); } catch {}
+              return sr;
+            };
+            Element.prototype.attachShadow.__tbxWrapped = true;
+          }
+        } catch {}
+        // 其他全局事件
+        try {
+          let st;
+          window.addEventListener('scroll', () => { clearTimeout(st); st = setTimeout(() => { try { document && send({ type: 'scroll', scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 }); } catch {} }, 80); }, { passive: true });
+        } catch {}
+        try {
+          const report = () => { const visible = document.visibilityState === 'visible'; send({ type: visible ? 'activate' : 'deactivate' }); };
+          document.addEventListener('DOMContentLoaded', report, { once: true });
+          document.addEventListener('visibilitychange', report, true);
+          window.addEventListener('focus', () => send({ type: 'activate' }), true);
+          window.addEventListener('blur', () => send({ type: 'deactivate' }), true);
+        } catch {}
+      })();`;
+
+    // 2) 扩展页面（chrome-extension://）：最小化注入，避免 hook attachShadow，直接通过 binding 回传
+    const extWorldSource = `(() => {
+      if (window.__tbxExtInstalled) return; window.__tbxExtInstalled = true;
+      const send = (evt) => { try { globalThis.__cdpReport(JSON.stringify(evt)); } catch {} };
+      const now = () => { try { return performance.now(); } catch { return Date.now(); } };
+      let lastKey = ''; let lastTs = 0;
+      const dedupe = (evt) => { try { const key = [evt.type, evt.selector||'', evt.tag||'', evt.x||0, evt.y||0].join('|'); const t = now(); if (key===lastKey && (t-lastTs)<120) return true; lastKey=key; lastTs=t; return false; } catch { return false; } };
+      const isElem = (n) => !!(n && n.nodeType === 1);
+      const buildSelector = (el) => { try { if (!isElem(el)) return null; if (el.id) return '#' + el.id; const cls = (el.classList && el.classList.length) ? ('.' + Array.from(el.classList).join('.')) : ''; const tag = (el.tagName ? el.tagName.toLowerCase() : ''); return tag ? (tag + cls) : null; } catch { return null; } };
+      const enrichCommon = (e,t) => { const m = e; const tag = (t && t.tagName) ? t.tagName.toLowerCase() : ''; let inputType = ''; try { inputType = (t && t.type) ? String(t.type).toLowerCase() : ''; } catch {} const x = (m && Number.isFinite(m.clientX)) ? m.clientX : 0; const y = (m && Number.isFinite(m.clientY)) ? m.clientY : 0; const sel = buildSelector(t); const out = { selector: sel, tag, inputType, x, y }; try { if (tag==='input' && (inputType==='checkbox' || inputType==='radio')) out.checked = !!t.checked; } catch {} try { out.vw = window.innerWidth || 0; out.vh = window.innerHeight || 0; out.dpr = window.devicePixelRatio || 1; } catch {} return out; };
+      const handleClickish = (type) => (e) => { try { const t = (e && e.composedPath && e.composedPath()[0]) || e.target || null; if (!t) return; const payload = Object.assign({ type: 'click' }, enrichCommon(e, t)); if (dedupe(payload)) return; send(payload); } catch {} };
+      const handleInput = (e) => { try { const t = (e && e.composedPath && e.composedPath()[0]) || e.target || null; if (!t) return; const sel = buildSelector(t); let value = ''; try { if (t && 'value' in t) value = t.value || ''; else if (t && t.isContentEditable) value = t.textContent || ''; } catch {} const tag = (t && t.tagName) ? t.tagName.toLowerCase() : ''; let inputType = ''; try { inputType = (t && t.type) ? String(t.type).toLowerCase() : ''; } catch {} const payload = { type: (e.type === 'change') ? 'change' : 'input', selector: sel, value, tag, inputType }; try { if (tag==='input' && (inputType==='checkbox' || inputType==='radio')) payload.checked = !!t.checked; } catch {} send(payload); } catch {} };
+      const installOn = (root) => { try { root.addEventListener('pointerdown', handleClickish('pointerdown'), true); root.addEventListener('mousedown', handleClickish('mousedown'), true); root.addEventListener('click', handleClickish('click'), true); root.addEventListener('input', handleInput, true); root.addEventListener('change', handleInput, true); } catch {} };
+      installOn(document);
+      try { let st; window.addEventListener('scroll', () => { clearTimeout(st); st = setTimeout(() => { send({ type: 'scroll', scrollX: window.scrollX || 0, scrollY: window.scrollY || 0 }); }, 80); }, { passive: true }); } catch {}
+      try { const report = () => { const visible = document.visibilityState === 'visible'; send({ type: visible ? 'activate' : 'deactivate' }); }; document.addEventListener('DOMContentLoaded', report, { once: true }); document.addEventListener('visibilitychange', report, true); window.addEventListener('focus', () => send({ type: 'activate' }), true); window.addEventListener('blur', () => send({ type: 'deactivate' }), true);} catch {}
+    })();`;
+
+    // 当前页是否为扩展页
+    const topUrl = await getTopUrl();
+    const isExtPage = /^chrome-extension:\/\//.test(topUrl);
+
+    // 扩展页：为所有执行上下文添加 binding；并注入最小脚本
+    if (isExtPage) {
+      try { await client.send('Runtime.addBinding', { name: '__cdpReport' }); } catch {}
+      if (!cdpMainWorldInjected.has(page)) {
+        try { await client.send('Page.addScriptToEvaluateOnNewDocument', { source: extWorldSource }); } catch {}
+        cdpMainWorldInjected.add(page);
+      }
+      // 立即在当前文档安装
+      try {
+        await client.send('Runtime.evaluate', {
+          expression: extWorldSource,
+          includeCommandLineAPI: false,
+          awaitPromise: false,
+          returnByValue: false,
+        });
+      } catch {}
+    } else {
+      // 普通网页：主世界脚本 + 隔离世界桥
+      if (!cdpMainWorldInjected.has(page)) {
+        try { await client.send('Page.addScriptToEvaluateOnNewDocument', { source: mainWorldSource }); } catch {}
+        cdpMainWorldInjected.add(page);
+      }
+      // 隔离世界桥接
+      const inject = async () => {
+        const { frameTree } = await client.send('Page.getFrameTree');
+        const frameId = frameTree && frameTree.frame && frameTree.frame.id ? frameTree.frame.id : undefined;
+        if (!frameId) return;
+        const { executionContextId } = await client.send('Page.createIsolatedWorld', {
+          frameId,
+          worldName: 'toolboxWorld',
+          grantUniversalAccess: true,
+        });
+        try { await client.send('Runtime.addBinding', { name: '__cdpReport', executionContextId }); } catch (_) {
+          try { await client.send('Runtime.addBinding', { name: '__cdpReport' }); } catch {}
+        }
+        const bridgeSource = `(() => {
+          try {
+            const forward = (e) => { try { globalThis.__cdpReport(JSON.stringify(e && e.detail ? e.detail : {})); } catch {} };
+            document.addEventListener('__tbxEvt', forward, true);
+          } catch {}
+        })();`;
+        await client.send('Runtime.evaluate', {
+          expression: bridgeSource,
+          contextId: executionContextId,
+          includeCommandLineAPI: false,
+          awaitPromise: false,
+          returnByValue: false,
+        });
+        // 确保当前文档也已安装主世界监听
+        try {
+          await client.send('Runtime.evaluate', {
+            expression: mainWorldSource,
+            includeCommandLineAPI: false,
+            awaitPromise: false,
+            returnByValue: false,
+          });
+        } catch {}
+      };
+      await inject();
+
+      // 只挂一次导航重注入钩子（区分扩展/普通页）
+      if (!cdpNavHooked.has(page)) {
+        cdpNavHooked.add(page);
+        page.on('framenavigated', async (frame) => {
+          try {
+            if (frame.parentFrame()) return;
+            const u = frame.url();
+            if (/^chrome-extension:\/\//.test(u)) {
+              try { await client.send('Runtime.addBinding', { name: '__cdpReport' }); } catch {}
+              await client.send('Runtime.evaluate', { expression: extWorldSource, includeCommandLineAPI: false, awaitPromise: false, returnByValue: false });
+            } else {
+              await inject();
+            }
+          } catch {}
+        });
+      }
+    }
+
+    // 扩展页也需要在导航后确保重新安装（仅挂一次）
+    if (!cdpNavHooked.has(page)) {
+      cdpNavHooked.add(page);
+      page.on('framenavigated', async (frame) => {
+        try {
+          if (frame.parentFrame()) return;
+          const u = frame.url();
+          if (/^chrome-extension:\/\//.test(u)) {
+            try { await client.send('Runtime.addBinding', { name: '__cdpReport' }); } catch {}
+            await client.send('Runtime.evaluate', { expression: extWorldSource, includeCommandLineAPI: false, awaitPromise: false, returnByValue: false });
+          }
+        } catch {}
+      });
+    }
+  } catch (e) {
+    sendTaskLog(`[sync] installCdpListener error: ${e && e.message ? e.message : e}`);
+  }
+}
+
+/** Add auto-injection to collect basic events and forward via exposed function */
+async function wirePage(page, pageId) {
+  pageById.set(pageId, page);
+  try { await page.setBypassCSP(true); } catch {}
+
+  // —— 暴露桥 ——：集中处理并向 slave 广播；对 activate 去重
+  await page.exposeFunction('__reportEvent', (evt) => {
+    if (!evt || typeof evt !== 'object') return;
+    evt.pageId = pageId;
+    if (!evt.url) { try { evt.url = page.url(); } catch {} }
+
+    if (evt.type === 'activate') {
+      if (lastActivePageId !== pageId) {
+        lastActivePageId = pageId;
+        sendTaskLog(`[sync] Page activated: ${pageId}`);
+        broadcastToSlaves({ type: 'activate', pageId });
+      }
+      return; // 避免重复下发
+    }
+    if (evt.type === 'deactivate') { broadcastToSlaves({ type: 'deactivate', pageId }); return; }
+    broadcastToSlaves(evt);
+  }).catch(() => {});
+
+  // 统一改为 CDP 注入（普通页与扩展页一致）
+  await installCdpListener(page, pageId).catch(() => {});
+
+  // —— 导航事件：仅负责同步导航（CDP 自身会在导航后自动重注入）——（仅 top frame）
+  page.on('framenavigated', async (frame) => {
+    if (frame.parentFrame()) return;
+    const url = frame.url();
+    try { /* CDP 注入的重载由 installCdpListener 自身挂载的钩子处理，这里仅做导航广播 */ } catch {}
+    lastUrlByPageId.set(pageId, url);
+    broadcastToSlaves({ type: 'navigate', pageId, url });
   });
 
-  // 进程保活，直到收到终止
-  sendTaskLog('[syncFunction] 已启动 Master/Slave 同步，按服务端控制结束。');
-  // 不发送 task_completed，让服务端以心跳维持任务
-})();
+  page.on('close', () => {
+    sendTaskLog(`[sync] Page closed: ${pageId}`);
+    cleanupPageMappings(pageId);
+    broadcastToSlaves({ type: 'close', pageId });
+  });
+
+  page.bringToFront().catch(() => {});
+}
+
+
+async function wireNewTargets(browser) {
+    browser.on('targetcreated', async (target) => {
+        try {
+            if (target.type() !== 'page' && target.type() !== 'background_page') return;
+            const page = await target.page();
+            if (!page) return;
+            const pageId = `p-${++pageIdSeq}`;
+            await wirePage(page, pageId);
+            // 记录 targetId 与 pageId 的映射，用于 targetchanged 事件查找
+            if (target._targetId) {
+                pageIdByTargetId.set(target._targetId, pageId);
+            }
+            const url = page.url();
+            if (url && url !== 'about:blank') {
+                lastUrlByPageId.set(pageId, url);
+                broadcastToSlaves({ type: 'navigate', pageId, url });
+            }
+        } catch (e) {
+            sendTaskLog('targetcreated wire error: ' + e.message);
+        }
+    });
+
+    // Monitor active target changes
+    browser.on('targetchanged', async (target) => {
+        try {
+            if (target.type() !== 'page') return;
+            console.log('targetchanged event for target:', target.url());
+            
+            // 1. 尝试从 targetId 映射找到 pageId（最快）
+            let pageId = pageIdByTargetId.get(target._targetId);
+            
+            // 2. 如果没找到，尝试从 page 对象查找（备选方案）
+            if (!pageId) {
+                const currentPage = await target.page();
+                if (!currentPage) return;
+                pageId = Array.from(pageById.entries()).find(([, page]) => page === currentPage)?.[0];
+                // 同时更新映射关系
+                if (pageId && target._targetId) {
+                    pageIdByTargetId.set(target._targetId, pageId);
+                }
+            }
+            
+            // 3. 去重：只在页面确实改变时才广播
+            if (pageId && pageId !== lastActivePageId) {
+                lastActivePageId = pageId;
+                sendTaskLog(`[sync] Active target changed to: ${pageId}`);
+                broadcastToSlaves({ type: 'activate', pageId });
+            }
+        } catch (e) {
+            sendTaskLog('targetchanged monitor error: ' + e.message);
+        }
+    });
+}
+
+
+function stopPageMonitor() {
+    if (monitorTimer) {
+        clearInterval(monitorTimer);
+        monitorTimer = null;
+    }
+}
+
+/** ------------ Main orchestration ------------ */
+async function startSync(payload) {
+    const {
+        masterEnv = {},
+        slaveEnvs = [],
+        chromePath,
+        savePath,
+        metamaskDir,
+        startUrl,
+        initialPosition
+    } = payload || {};
+
+    if (!slaveEnvs.length) {
+        sendTaskLog('未提供 slaveEnvs，至少需要一个 slave 环境。');
+    }
+
+    await launchMaster(masterEnv, chromePath, savePath, metamaskDir, initialPosition);
+    await wireNewTargets(masterBrowser);
+
+    // Ensure first page exists and wired
+    const pages = await masterBrowser.pages();
+    const first = pages[0] || await masterBrowser.newPage();
+    const firstId = `p-${++pageIdSeq}`;
+    await wirePage(first, firstId);
+    const currentUrl = first.url();
+    if (currentUrl && currentUrl !== 'about:blank') {
+        lastUrlByPageId.set(firstId, currentUrl);
+        broadcastToSlaves({ type: 'navigate', pageId: firstId, url: currentUrl });
+    }
+
+    // Spawn slaves
+    spawnSlaveWorkers(slaveEnvs, { chromePath, savePath, metamaskDir, positionBase: { x: (initialPosition?.x || 80) + 40, y: (initialPosition?.y || 80) + 40, width: 900, height: 700 } });
+
+    // Open start URL if provided
+    if (startUrl) {
+        try {
+            await first.goto(startUrl, { waitUntil: 'domcontentloaded' });
+        } catch (e) {
+            sendTaskLog('导航 startUrl 失败: ' + e.message);
+        }
+    }
+
+    sendTaskLog('多进程同步已就绪（Master 捕获 → 广播到 Slaves）');
+}
+
+async function shutdown() {
+    sendTaskLog('开始清理并退出...');
+    stopPageMonitor();
+    lastActivePageId = null;  // 清理激活态追踪
+    for (const w of slaveWorkers) {
+        try { w.send({ type: 'shutdown' }); } catch { }
+        try { w.disconnect(); } catch { }
+        try { w.kill('SIGKILL'); } catch { }
+    }
+    slaveWorkers = [];
+    if (masterBrowser) {
+        try { await masterBrowser.close(); } catch { }
+        masterBrowser = null;
+    }
+    sendTaskLog('已退出');
+}
+
+/** ------------ IPC & CLI ------------ */
+process.on('message', async (msg) => {
+    if (!msg || !msg.type) return;
+    if (msg.type === 'init') {
+        try { await startSync(msg.payload || {}); }
+        catch (e) { sendTaskLog('init error: ' + e.message); process.exitCode = 1; }
+        return;
+    }
+    if (msg.type === 'terminate_process') {
+        await shutdown();
+        process.exit(0);
+    }
+});
+
+process.on('SIGINT', async () => { await shutdown(); process.exit(0); });
+process.on('SIGTERM', async () => { await shutdown(); process.exit(0); });
+process.on('uncaughtException', async (e) => { sendTaskLog('uncaughtException: ' + e.message); await sleep(10); });
+process.on('unhandledRejection', async (e) => { sendTaskLog('unhandledRejection: ' + (e && e.message ? e.message : String(e))); await sleep(10); });
+
+
+// // Allow running standalone for quick manual tests:
+// if (require.main === module) {
+//     (async () => {
+//         // Minimal demo payload. Replace fields with your actual project values or send via IPC.
+//         const demoPayload = {
+//             masterEnv: { id: 'master', language_js: 'en-US' },
+//             slaveEnvs: [{ id: 'slave-1', language_js: 'en-US' }, { id: 'slave-2', language_js: 'en-US' }],
+//             chromePath: undefined, // let puppeteer pick bundled Chromium or set an explicit Chrome path
+//             savePath: path.join(__dirname, '.profiles'),
+//             metamaskDir: undefined, // absolute path if you need extension
+//             startUrl: 'https://example.org',
+///             initialPosition: { x: 40, y: 40, width: 1280, height: 900 },
+///         };
+///         await startSync(demoPayload);
+///     })();
+/// }
+
+
+function hasManifest(dir) {
+    if (!dir) return false;
+    const manifestPath = path.join(dir, 'manifest.json');
+    return fs.existsSync(manifestPath);
+}
+
+
+function resolveMetamaskDir(walletExtensionPath) {
+    // 1) 如果传入的就是扩展根目录
+    if (hasManifest(walletExtensionPath)) return walletExtensionPath;
+    // 2) 如果传入的是脚本目录，尝试其子目录 metamask-chrome-13.2.0
+    const candidate = walletExtensionPath ? path.join(walletExtensionPath, 'metamask-chrome-13.2.0') : null;
+    if (hasManifest(candidate)) return candidate;
+    // 3) 回退到当前脚本同级的默认目录
+    const local = path.resolve(__dirname, './metamask-chrome-13.2.0');
+    if (hasManifest(local)) return local;
+    return null;
+}
+
+
+// ----- 主流程 -----
+// 仅当通过命令行直接运行时执行（非 fork 子进程）
+if (!process.send) {
+    (async () => {
+        while (true) {
+            if (webSocketReady) {
+                sendRequestTaskData();
+                if (taskData) break;
+            }
+            await sleep(1000);
+        }
+
+        const currentTaskData = ensureTaskDataIsObject();
+        const { envs = [], taskDataFromFront = {}, chromePath, savePath, walletExtensionPath } = currentTaskData || {};
+        if (!chromePath || !savePath) {
+            console.error('[syncFunction] 缺少 chromePath 或 savePath');
+            return gracefulExit();
+        }
+
+        // 解析 master/slaves 对应的 env
+        const { masterId, slaveIds = [] } = taskDataFromFront || {};
+        const masterEnv = envs.find(e => e && e.bindWalletId === masterId);
+        const slaveEnvs = envs.filter(e => e && slaveIds.includes(e.bindWalletId));
+        if (!masterEnv || slaveEnvs.length === 0) {
+            console.error('[syncFunction] 未找到 master 或 slaves 的环境');
+            return gracefulExit();
+        }
+
+        const metamaskDir = resolveMetamaskDir(walletExtensionPath);
+        if (!metamaskDir) {
+            sendTaskLog('[syncFunction] 未找到有效的 MetaMask 扩展目录（缺少 manifest.json）');
+            console.error('[syncFunction] MetaMask 扩展目录无效，manifest.json 不存在');
+            return gracefulExit();
+        }
+        sendTaskLog('[syncFunction] 使用扩展目录: ' + metamaskDir);
+
+        // 启动 Master 与 Slave 浏览器
+        const MASTER_WINDOW = { x: 0, y: 0, width: 900, height: 700 };
+
+        const payload = {
+            masterEnv,
+            slaveEnvs,
+            chromePath,
+            savePath,
+            metamaskDir,
+            startUrl: taskDataFromFront.startUrl || '',
+            initialPosition: MASTER_WINDOW,
+        };
+        await startSync(payload);
+
+    })();
+}
+module.exports = { startSync };

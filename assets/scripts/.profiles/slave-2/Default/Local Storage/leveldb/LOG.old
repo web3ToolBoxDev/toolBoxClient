@@ -1,0 +1,5 @@
+2025/11/04-12:41:45.492 3494 Reusing MANIFEST C:\Users\z5866\Desktop\tool\toolBoxClient\assets\scripts\.profiles\slave-2\Default\Local Storage\leveldb/MANIFEST-000001
+2025/11/04-12:41:45.500 3494 Recovering log #3
+2025/11/04-12:41:45.500 3494 Level-0 table #3: started
+2025/11/04-12:41:45.509 3494 Level-0 table #3: 23175 bytes OK
+2025/11/04-12:41:45.518 3494 Delete type=0 #3
