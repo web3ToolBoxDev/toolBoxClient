@@ -3,7 +3,7 @@ const url = process.argv[2];
 const nodemailer = require('nodemailer');
 
 
-console.log('收到的URL参数:', url);
+console.log('Received URL params:', url);
 
 let ws = new webSocket(url);
 let webSocketReady = false;
@@ -74,10 +74,10 @@ ws.on('message', (message) => {
     let data = JSON.parse(message);
     switch (data.type) {
         case 'heart_beat':
-            console.log('收到服务端心跳包:');
+            console.log('Received heartbeat from server');
             break;
         case 'request_task_data':
-            console.log('收到任务数据:', data);
+            console.log('Received task payload:', data);
             taskData = data.data;
             break;
         case 'terminate_process':
@@ -89,7 +89,7 @@ ws.on('message', (message) => {
 });
 
 ws.on('error', (error) => {
-    console.error('WebSocket连接发生错误:', error);
+    console.error('WebSocket connection error:', error);
     // 关闭连接并退出
     ws.close();
     process.exit(1);
@@ -98,7 +98,7 @@ ws.on('error', (error) => {
 // 定时检查连接状态，如果连接断开则重连
 setInterval(() => {
     if (ws.readyState === webSocket.CLOSED) {
-        console.log('WebSocket连接断开，尝试重新连接...');
+        console.log('WebSocket disconnected; attempting to reconnect...');
         ws = new webSocket(url);
     }
 }, 5000); // 每 5 秒检查一次连接状态
@@ -106,7 +106,7 @@ setInterval(() => {
 
 // 进行任务逻辑
 async function runTask() {
-    console.log('任务开始执行');
+    console.log('Task starting');
     taskData = JSON.parse(taskData);
     const config = taskData.taskDataFromFront.config;
     console.log('config',config);
@@ -122,20 +122,20 @@ async function runTask() {
     const mailOptions = {
         from: sendMailAccount,
         to: receiveMailAccount,
-        subject: '测试邮件',
-        text: '这是一封测试邮件'
+        subject: 'Test email',
+        text: 'This is a test email.'
     };
     try {
         //增加timeout参数，如果超时则认为发送邮件失败
         const timeout = new Promise((resolve,reject) => setTimeout(reject,5000));
         //使用race方法，如果超时则reject，否则发送邮件
         await Promise.race([timeout,transporter.sendMail(mailOptions)]);
-        sendTaskCompleted(taskData.taskName,true,'发送邮件成功');
+        sendTaskCompleted(taskData.taskName,true,'Email sent successfully');
     } catch (error) {
-        console.error('发送邮件失败:',error);
-        sendTaskCompleted(taskData.taskName,false,'发送邮件失败');
+        console.error('Failed to send email:',error);
+        sendTaskCompleted(taskData.taskName,false,'Failed to send email');
     }
-    console.log('任务执行完成');
+    console.log('Task finished');
     exit();
     
 }
@@ -147,7 +147,7 @@ async function runTask() {
             sendRequestTaskData();
             
             if (taskData) {
-                sendTaskLog(`收到任务数据:${taskData}`);
+                sendTaskLog(`Received task data: ${taskData}`);
                 await runTask();
             }
         }

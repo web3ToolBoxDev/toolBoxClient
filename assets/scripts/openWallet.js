@@ -37,12 +37,12 @@ const checkIfDirectoryExists = (dirPath) => {
     try {
         return fs.existsSync(dirPath) && fs.lstatSync(dirPath).isDirectory();
     } catch (error) {
-        console.error(`检查目录 ${dirPath} 是否存在时出错:`, error);
+    console.error(`Error checking whether directory ${dirPath} exists:`, error);
         return false;
     }
 }
 
-// 心跳包定时发送
+// Heartbeat scheduler
 function sendHeartBeat() {
     setInterval(() => {
         if (ws.readyState === webSocket.OPEN) {
@@ -51,7 +51,7 @@ function sendHeartBeat() {
             });
             ws.send(heartBeatMessage);
         }
-    }, 5000); // 每 5 秒发送一次心跳包
+    }, 5000); // Send heartbeat every 5 seconds
 }
 
 function sendRequestTaskData() {
@@ -109,10 +109,10 @@ ws.on('message', (message) => {
     let data = JSON.parse(message);
     switch (data.type) {
         case 'heart_beat':
-            // console.log('收到服务端心跳包:');
+            // console.log('Received server heartbeat');
             break;
         case 'request_task_data':
-            // console.log('收到任务数据:', data);
+            // console.log('Received task data:', data);
             taskData = data.data;
             break;
         case 'terminate_process':
@@ -124,25 +124,25 @@ ws.on('message', (message) => {
 });
 
 ws.on('error', (error) => {
-    console.error('WebSocket连接发生错误:', error);
-    // 关闭连接并退出
+    console.error('WebSocket connection error:', error);
+    // Close connection and exit
     ws.close();
     process.exit(1);
 });
 
-// 定时检查连接状态，如果连接断开则重连
+// Reconnect if WebSocket closes
 setInterval(() => {
     if (ws.readyState === webSocket.CLOSED) {
-        console.log('WebSocket连接断开，尝试重新连接...');
+    console.log('WebSocket disconnected, attempting to reconnect...');
         ws = new webSocket(url);
     }
-}, 5000); // 每 5 秒检查一次连接状态
+}, 5000); // Check connection state every 5 seconds
 
-// 进行任务时，需要发送心跳包，接收任务数据，发送任务日志，完成任务
+// During task execution we send heartbeats, request data, log updates, and finalize results
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let closeSignal = false;
 
-// 检测浏览器是否关闭
+// Detect browser closure
 async function checkBrowserClosed(browser) {
     while (!closeSignal) {
         await sleep(5000);
@@ -151,7 +151,7 @@ async function checkBrowserClosed(browser) {
     exit();
 }
 
-// 确保taskData是对象类型
+// Ensure taskData is parsed as an object
 function ensureTaskDataIsObject() {
     if (typeof taskData === 'string') {
         taskData = JSON.parse(taskData);
@@ -159,11 +159,11 @@ function ensureTaskDataIsObject() {
     return taskData;
 }
 
-// 解锁钱包
+// Unlock the wallet
 async function unlockWallet(page) {
     await page.bringToFront();
     try {
-        console.log('开始解锁钱包');
+    console.log('Starting wallet unlock');
 
         // 等待密码输入框出现
         const passwordInput = await page.waitForSelector('input[data-testid="unlock-password"]', {
@@ -180,33 +180,33 @@ async function unlockWallet(page) {
 
         return true;
     } catch (error) {
-        console.error('解锁钱包失败:', error);
+    console.error('Failed to unlock wallet:', error);
         throw error;
     }
 }
 
 
 
-// 进行任务逻辑
+// Task logic
 async function runTask() {
-    console.log('任务开始执行');
-    // console.log('任务数据:', taskData);
+    console.log('Task execution started');
+    // console.log('Task data:', taskData);
 
     const currentTaskData = ensureTaskDataIsObject();
 
     // 检查是否有 Chrome 路径
     if (!currentTaskData || !currentTaskData.chromePath) {
         console.log(Object.keys(currentTaskData));
-        console.error('任务数据中缺少 Chrome 路径');
-        sendTaskCompleted('openWallet', false, '任务执行失败: 缺少 Chrome 路径');
+        console.error('Chrome path missing in task data');
+        sendTaskCompleted('openWallet', false, 'Task failed: Chrome path is missing');
         exit();
     }
 
     // 检查是否有 userDataDir目录
     const userDataDir = path.join(currentTaskData.savePath, currentTaskData.env.id);
     if (!checkIfDirectoryExists(userDataDir)) {
-        console.error(`用户数据目录不存在: ${userDataDir}`);
-        sendTaskCompleted('openWallet', false, `任务执行失败: 用户数据目录不存在`);
+        console.error(`User data directory does not exist: ${userDataDir}`);
+        sendTaskCompleted('openWallet', false, 'Task failed: User data directory is missing');
         exit();
     }
 
@@ -251,7 +251,7 @@ async function runTask() {
 
     args.push(`--toolbox=${fingerprints}`);
 
-    // console.log('指纹数据:', fingerprints);
+    // console.log('Fingerprint payload:', fingerprints);
 
     const browser = await puppeteer.launch({
         headless: false,
@@ -283,16 +283,16 @@ async function runTask() {
                     await page.goto(`chrome-extension://${extensionId}/home.html#unlock`);
                     const success = await unlockWallet(page);
                     if (success) {
-                        sendTaskCompleted('openWallet', true, '钱包打开成功');
-                        sendTaskLog('钱包已成功打开并解锁');
+                        sendTaskCompleted('openWallet', true, 'Wallet opened successfully');
+                        sendTaskLog('Wallet opened and unlocked successfully');
                         breaked = true;
                         break;
                     } else {
-                        sendTaskCompleted('openWallet', false, '钱包打开失败');
+                        sendTaskCompleted('openWallet', false, 'Wallet failed to open');
                         exit();
                     }
                 } catch (error) {
-                    console.log('打开钱包失败:', error);
+                    console.log('Failed to open wallet:', error);
                     cnt++;
                 }
             }   
@@ -307,15 +307,15 @@ async function runTask() {
 
         // try {
         //     const success = await openWallet(page);
-        //     if (success) {
-        //         sendTaskCompleted('openWallet', true, '钱包打开成功');
-        //         sendTaskLog('钱包已成功打开并解锁');
-        //     } else {
-        //         sendTaskCompleted('openWallet', false, '钱包打开失败');
+    //     if (success) {
+    //         sendTaskCompleted('openWallet', true, 'Wallet opened successfully');
+    //         sendTaskLog('Wallet opened and unlocked successfully');
+    //     } else {
+    //         sendTaskCompleted('openWallet', false, 'Wallet failed to open');
         //     }
         // } catch (error) {
-        //     console.log('打开钱包失败:', error);
-        //     sendTaskCompleted('openWallet', false, '钱包打开失败: ' + error.message);
+    //     console.log('Failed to open wallet:', error);
+    //     sendTaskCompleted('openWallet', false, 'Wallet failed to open: ' + error.message);
         // }
 
         // 保持浏览器打开，等待用户操作或外部信号关闭

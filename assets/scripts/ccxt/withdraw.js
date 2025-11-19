@@ -4,13 +4,13 @@ const ccxt = require('ccxt');
 const { send } = require('process');
 
 
-console.log('收到的URL参数:', url);
+console.log('Received URL parameter:', url);
 
 let ws = new webSocket(url);
 let webSocketReady = false;
 let taskData = null;
 
-// 心跳包定时发送
+// Heartbeat scheduler
 function sendHeartBeat() {
     setInterval(() => {
         if (ws.readyState === webSocket.OPEN) {
@@ -19,7 +19,7 @@ function sendHeartBeat() {
             });
             ws.send(heartBeatMessage);
         }
-    }, 5000); // 每 5 秒发送一次心跳包
+    }, 5000); // Send heartbeat every 5 seconds
 }
 
 function sendRequestTaskData() {
@@ -75,10 +75,10 @@ ws.on('message', (message) => {
     let data = JSON.parse(message);
     switch (data.type) {
         case 'heart_beat':
-            console.log('收到服务端心跳包:');
+            console.log('Received server heartbeat');
             break;
         case 'request_task_data':
-            console.log('收到任务数据:', data);
+            console.log('Received task data:', data);
             taskData = data.data;
             break;
         case 'terminate_process':
@@ -92,24 +92,24 @@ ws.on('message', (message) => {
 });
 
 ws.on('error', (error) => {
-    console.error('WebSocket连接发生错误:', error);
-    // 关闭连接并退出
+    console.error('WebSocket connection error:', error);
+    // Close connection and exit
     ws.close();
     process.exit(1);
 });
 
-// 定时检查连接状态，如果连接断开则重连
+// Reconnect if WebSocket closes
 setInterval(() => {
     if (ws.readyState === webSocket.CLOSED) {
-        console.log('WebSocket连接断开，尝试重新连接...');
+        console.log('WebSocket disconnected, attempting to reconnect...');
         ws = new webSocket(url);
     }
-}, 5000); // 每 5 秒检查一次连接状态
+}, 5000); // Check connection state every 5 seconds
 // 进行任务时，需要发送心跳包，接收任务数据，发送任务日志，完成任务
 
-// 进行任务逻辑
+// Task logic
 async function runTask() {
-    console.log('任务开始执行');
+    console.log('Task execution started');
     console.log('taskData:', taskData);
     let taskDataFromFront = taskData.taskDataFromFront;
     let binanceInfo = taskDataFromFront.binance;
@@ -135,23 +135,23 @@ async function runTask() {
         let exchangeName = wallet.exchange;
         let exchangeInstance = exchange[exchangeName];
         if (!exchangeInstance) {
-            sendTaskLog(`未找到${exchangeName}交易所`);
+            sendTaskLog(`Exchange ${exchangeName} not configured`);
             continue;
         }
         let amount = wallet.amount;
         let currency = wallet.currency;
         let network = wallet.network;
         if(!address||!amount||!currency||!network){
-            sendTaskLog(`${address}提币缺少参数`);
+            sendTaskLog(`${address} withdrawal missing parameters`);
             continue;
         }
         exchangeInstance.timeout = 60000;
         try {
             let withdrawResult = await exchangeInstance.withdraw(currency, amount, address, {network,timeout:60000});
-            sendTaskLog(`${address}提币发起成功:${JSON.stringify(withdrawResult)}`);
+            sendTaskLog(`${address} withdrawal initiated successfully: ${JSON.stringify(withdrawResult)}`);
             successInfo.success.push(address);
         } catch (error) {
-            sendTaskLog(`${address}提币失败:${error.message}`);
+            sendTaskLog(`${address} withdrawal failed: ${error.message}`);
             successInfo.fail.push(address);
         }
     }
@@ -169,7 +169,7 @@ async function runTask() {
             
             if (taskData) {
                 taskData = JSON.parse(taskData);
-                sendTaskLog(`开始查询${taskData.taskDataFromFront.exchange}余额`);
+                sendTaskLog(`Starting ${taskData.taskDataFromFront.exchange} withdrawal run`);
                 await runTask();
             }
         }

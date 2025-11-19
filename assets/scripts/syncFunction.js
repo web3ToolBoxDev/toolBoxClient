@@ -9,6 +9,7 @@ const { fork } = require('child_process');
 let ws = new WebSocket(url);
 let webSocketReady = false;
 let taskData = null;
+const ENABLE_DEBUG_LOGS = /^1|true$/i.test(String(process.env.TOOLBOX_DEBUG_LOGS || process.env.TOOLBOX_SLAVE_DEBUG || ''));
 
 function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
 
@@ -23,6 +24,10 @@ function sendRequestTaskData() {
 }
 function sendTaskLog(message) {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'task_log', message }));
+}
+function sendDebugLog(message) {
+  if (!ENABLE_DEBUG_LOGS) return;
+  sendTaskLog(`[debug] ${message}`);
 }
 function sendTerminateProcess() {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'terminate_process' }));
@@ -119,6 +124,11 @@ const pageStateSnapshot = new Map(); // pageId -> { url, exists: true/false }
 let monitorTimer = null;
 let lastActivePageId = null;        // 追踪上次激活的页面，防止重复激活
 
+const WINDOW_LAYOUT = Object.freeze({
+  master: { x: 0, y: 0, width: 900, height: 700 },
+  slave: { x: 120, y: 120, width: 900, height: 700, gapX: 20, gapY: 0 }
+});
+
 // 新增：记录每个 Page 的 CDP 客户端与注入状态
 const cdpClientByPage = new WeakMap();
 const cdpNavHooked = new WeakSet();
@@ -126,31 +136,140 @@ const eondInstalled = new WeakSet();
 // 新增：标记是否已为该 Page 注入主世界脚本
 const cdpMainWorldInjected = new WeakSet();
 
-function spawnSlaveWorkers(slaveEnvs, options) {
-    const { chromePath, savePath, metamaskDir, positionBase } = options;
-    const SLAVE_WINDOW = Object.assign({ x: 80, y: 80, width: 900, height: 700 }, positionBase || {});
-    sendTaskLog(`[syncFunction] 启动 ${slaveEnvs.length} 个 Slave 进程...`);
+// 全局事件整流，防止同一 Payload 被重复广播
+const EVENT_HASH_TTL_MS = 300;
+const MAX_EVENT_HASH_CACHE = 2048;
+const recentEventHashes = new Map();
 
-    slaveWorkers = slaveEnvs.map((env, i) => {
-        const worker = fork(path.resolve(__dirname, 'replicatorWorker.js'));
-        const position = {
-            x: SLAVE_WINDOW.x + i * (SLAVE_WINDOW.width + 20),
-            y: SLAVE_WINDOW.y,
-            width: SLAVE_WINDOW.width,
-            height: SLAVE_WINDOW.height,
-        };
-        worker.send({
-            type: 'init',
-            payload: { env, chromePath, savePath, metamaskDir, position }
-        });
-        worker.on('message', (m) => {
-            if (m && m.type === 'log') sendTaskLog('[slave] ' + (m.message || ''));
-        });
-        worker.on('exit', (code, signal) => {
-            sendTaskLog(`[slave] 退出 code=${code} signal=${signal}`);
-        });
-        return worker;
+function resolveSlaveLabel(env = {}, ordinal) {
+  return env.alias || env.name || env.remark || env.tag || env.bindWalletId || env.id || `slave-${ordinal}`;
+}
+
+function formatSlaveTag(ordinal, label) {
+  if (!Number.isFinite(ordinal) || ordinal <= 0) return '[slave]';
+  return label && label !== `slave-${ordinal}` ? `[slave${ordinal}:${label}]` : `[slave${ordinal}]`;
+}
+
+function normalizeEventForHash(evt = {}) {
+  try {
+    const normalized = { type: evt.type || '' };
+    if (evt.pageId) normalized.pageId = evt.pageId;
+    switch (normalized.type) {
+      case 'click':
+        normalized.selector = (evt.selector || '').toLowerCase();
+        normalized.button = typeof evt.button === 'number' ? evt.button : 0;
+        normalized.x = Number.isFinite(evt.x) ? Math.round(evt.x) : 0;
+        normalized.y = Number.isFinite(evt.y) ? Math.round(evt.y) : 0;
+        break;
+      case 'input':
+      case 'change':
+        normalized.selector = (evt.selector || '').toLowerCase();
+        normalized.value = evt.value ?? '';
+        if (typeof evt.checked === 'boolean') normalized.checked = evt.checked;
+        break;
+      case 'scroll':
+        normalized.selector = (evt.selector || '').toLowerCase();
+        normalized.scrollTop = Number.isFinite(evt.scrollTop) ? Math.round(evt.scrollTop) : Number.isFinite(evt.scrollY) ? Math.round(evt.scrollY) : 0;
+        normalized.scrollLeft = Number.isFinite(evt.scrollLeft) ? Math.round(evt.scrollLeft) : Number.isFinite(evt.scrollX) ? Math.round(evt.scrollX) : 0;
+        break;
+      case 'keydown':
+        normalized.key = evt.key || '';
+        break;
+      case 'navigate':
+        normalized.url = evt.url || '';
+        break;
+      default:
+        if (evt.selector) normalized.selector = (evt.selector || '').toLowerCase();
+        break;
+    }
+    return normalized;
+  } catch {
+    return { type: evt?.type || '' };
+  }
+}
+
+function hashEventPayload(evt = {}) {
+  try {
+    const normalized = normalizeEventForHash(evt);
+    return JSON.stringify(normalized);
+  } catch {
+    return null;
+  }
+}
+
+function shouldDropEventHash(hash) {
+  if (!hash) return false;
+  const now = Date.now();
+  const prev = recentEventHashes.get(hash);
+  if (prev && (now - prev) <= EVENT_HASH_TTL_MS) {
+    return true;
+  }
+  recentEventHashes.set(hash, now);
+  if (recentEventHashes.size > MAX_EVENT_HASH_CACHE) {
+    for (const [key, ts] of recentEventHashes.entries()) {
+      if ((now - ts) > EVENT_HASH_TTL_MS) {
+        recentEventHashes.delete(key);
+      }
+      if (recentEventHashes.size <= MAX_EVENT_HASH_CACHE) break;
+    }
+  }
+  return false;
+}
+
+function spawnSlaveWorkers(slaveEnvs, options) {
+  const { chromePath, savePath, metamaskDir, positionBase } = options;
+  const defaultSlaveWindow = WINDOW_LAYOUT.slave || {};
+  const SLAVE_WINDOW = Object.assign({}, defaultSlaveWindow, positionBase || {});
+  const gapX = Number.isFinite(SLAVE_WINDOW.gapX) ? SLAVE_WINDOW.gapX : (defaultSlaveWindow.gapX ?? 20);
+  const gapY = Number.isFinite(SLAVE_WINDOW.gapY) ? SLAVE_WINDOW.gapY : (defaultSlaveWindow.gapY ?? 0);
+  sendTaskLog(`[syncFunction] Launching ${slaveEnvs.length} slave processes...`);
+
+  slaveWorkers = slaveEnvs.map((env, i) => {
+    const worker = fork(path.resolve(__dirname, 'replicatorWorker.js'));
+    const ordinal = i + 1;
+    const label = resolveSlaveLabel(env, ordinal);
+    const tag = formatSlaveTag(ordinal, label);
+    const position = {
+      x: SLAVE_WINDOW.x + i * (SLAVE_WINDOW.width + gapX),
+      y: SLAVE_WINDOW.y + i * gapY,
+      width: SLAVE_WINDOW.width,
+      height: SLAVE_WINDOW.height,
+    };
+  sendTaskLog(`${tag} starting up...`);
+    worker.send({
+      type: 'init',
+      payload: {
+        env,
+        chromePath,
+        savePath,
+        metamaskDir,
+        position,
+        slaveIndex: ordinal,
+        slaveLabel: label,
+        enableDebugLogs: ENABLE_DEBUG_LOGS,
+      }
     });
+    worker.on('message', (m) => {
+      if (!m || !m.type) return;
+      const msg = m.message || '';
+      if (m.type === 'task-log' || m.type === 'log') {
+        const formatted = msg ? `${tag} ${msg}` : tag;
+        sendTaskLog(formatted);
+        return;
+      }
+      if (m.type === 'debug-log') {
+        if (ENABLE_DEBUG_LOGS) {
+          const formatted = msg ? `${tag} [debug] ${msg}` : `${tag} [debug]`;
+          sendTaskLog(formatted);
+        }
+        return;
+      }
+    });
+    worker.on('exit', (code, signal) => {
+      sendTaskLog(`${tag} 退出 code=${code} signal=${signal}`);
+    });
+    return worker;
+  });
 }
 
 function broadcastToSlaves(evt) {
@@ -172,10 +291,11 @@ async function launchMaster(masterEnv, chromePath, savePath, metamaskDir, positi
         executablePath: chromePath,
         userDataDir: userDataDir,
         ignoreDefaultArgs: ['--enable-automation'],
+    defaultViewport: null,
         args,
     });
     browsers.push(masterBrowser);
-    sendTaskLog('[syncFunction] Master \u6d4f\u89c8\u5668\u5df2\u542f\u52a8');
+  sendTaskLog('[syncFunction] Master browser launched');
     return masterBrowser;
 }
 
@@ -217,7 +337,10 @@ async function installCdpListener(page, pageId) {
             return;
           }
           if (evt.type === 'deactivate') { broadcastToSlaves({ type: 'deactivate', pageId }); return; }
-          console.log('CDP Event received for pageId:', pageId, evt);
+          const evtHash = hashEventPayload(evt);
+          if (evtHash && shouldDropEventHash(evtHash)) {
+            return;
+          }
           broadcastToSlaves(evt);
         } catch {}
       });
@@ -528,7 +651,7 @@ async function wireNewTargets(browser) {
     browser.on('targetchanged', async (target) => {
         try {
             if (target.type() !== 'page') return;
-            console.log('targetchanged event for target:', target.url());
+            sendDebugLog(`[syncFunction] targetchanged event for target: ${target.url()}`);
             
             // 1. 尝试从 targetId 映射找到 pageId（最快）
             let pageId = pageIdByTargetId.get(target._targetId);
@@ -573,14 +696,17 @@ async function startSync(payload) {
         savePath,
         metamaskDir,
         startUrl,
-        initialPosition
+    initialPosition,
+    slaveInitialPosition
     } = payload || {};
 
     if (!slaveEnvs.length) {
-        sendTaskLog('未提供 slaveEnvs，至少需要一个 slave 环境。');
+      sendTaskLog('slaveEnvs missing; at least one slave environment is required.');
     }
 
-    await launchMaster(masterEnv, chromePath, savePath, metamaskDir, initialPosition);
+  const masterWindow = Object.assign({}, WINDOW_LAYOUT.master, initialPosition || {});
+
+  await launchMaster(masterEnv, chromePath, savePath, metamaskDir, masterWindow);
     await wireNewTargets(masterBrowser);
 
     // Ensure first page exists and wired
@@ -595,22 +721,23 @@ async function startSync(payload) {
     }
 
     // Spawn slaves
-    spawnSlaveWorkers(slaveEnvs, { chromePath, savePath, metamaskDir, positionBase: { x: (initialPosition?.x || 80) + 40, y: (initialPosition?.y || 80) + 40, width: 900, height: 700 } });
+  const slaveWindowBase = Object.assign({}, WINDOW_LAYOUT.slave, slaveInitialPosition || {});
+  spawnSlaveWorkers(slaveEnvs, { chromePath, savePath, metamaskDir, positionBase: slaveWindowBase });
 
     // Open start URL if provided
     if (startUrl) {
         try {
             await first.goto(startUrl, { waitUntil: 'domcontentloaded' });
         } catch (e) {
-            sendTaskLog('导航 startUrl 失败: ' + e.message);
+            sendTaskLog('Failed to navigate to startUrl: ' + e.message);
         }
     }
 
-    sendTaskLog('多进程同步已就绪（Master 捕获 → 广播到 Slaves）');
+  sendTaskLog('Multi-process sync ready (Master captures → broadcasts to slaves)');
 }
 
 async function shutdown() {
-    sendTaskLog('开始清理并退出...');
+  sendTaskLog('Starting cleanup and shutdown...');
     stopPageMonitor();
     lastActivePageId = null;  // 清理激活态追踪
     for (const w of slaveWorkers) {
@@ -623,7 +750,7 @@ async function shutdown() {
         try { await masterBrowser.close(); } catch { }
         masterBrowser = null;
     }
-    sendTaskLog('已退出');
+  sendTaskLog('Shutdown complete');
 }
 
 /** ------------ IPC & CLI ------------ */
@@ -699,7 +826,7 @@ if (!process.send) {
         const currentTaskData = ensureTaskDataIsObject();
         const { envs = [], taskDataFromFront = {}, chromePath, savePath, walletExtensionPath } = currentTaskData || {};
         if (!chromePath || !savePath) {
-            console.error('[syncFunction] 缺少 chromePath 或 savePath');
+            console.error('[syncFunction] Missing chromePath or savePath');
             return gracefulExit();
         }
 
@@ -708,20 +835,17 @@ if (!process.send) {
         const masterEnv = envs.find(e => e && e.bindWalletId === masterId);
         const slaveEnvs = envs.filter(e => e && slaveIds.includes(e.bindWalletId));
         if (!masterEnv || slaveEnvs.length === 0) {
-            console.error('[syncFunction] 未找到 master 或 slaves 的环境');
+            console.error('[syncFunction] Master or slave environments not found');
             return gracefulExit();
         }
 
         const metamaskDir = resolveMetamaskDir(walletExtensionPath);
         if (!metamaskDir) {
-            sendTaskLog('[syncFunction] 未找到有效的 MetaMask 扩展目录（缺少 manifest.json）');
-            console.error('[syncFunction] MetaMask 扩展目录无效，manifest.json 不存在');
+            sendTaskLog('[syncFunction] No valid MetaMask extension directory (manifest.json missing)');
+            console.error('[syncFunction] MetaMask extension directory invalid; manifest.json missing');
             return gracefulExit();
         }
-        sendTaskLog('[syncFunction] 使用扩展目录: ' + metamaskDir);
-
-        // 启动 Master 与 Slave 浏览器
-        const MASTER_WINDOW = { x: 0, y: 0, width: 900, height: 700 };
+  sendTaskLog('[syncFunction] Using extension directory: ' + metamaskDir);
 
         const payload = {
             masterEnv,
@@ -730,7 +854,8 @@ if (!process.send) {
             savePath,
             metamaskDir,
             startUrl: taskDataFromFront.startUrl || '',
-            initialPosition: MASTER_WINDOW,
+      initialPosition: WINDOW_LAYOUT.master,
+      slaveInitialPosition: WINDOW_LAYOUT.slave,
         };
         await startSync(payload);
 

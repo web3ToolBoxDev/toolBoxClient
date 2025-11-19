@@ -14,7 +14,7 @@ const checkIfDirectoryExists = (dirPath) => {
     try {
         return fs.existsSync(dirPath) && fs.lstatSync(dirPath).isDirectory();
     } catch (error) {
-        console.error(`检查目录 ${dirPath} 是否存在时出错:`, error);
+    console.error(`Error checking whether directory ${dirPath} exists:`, error);
         return false;
     }
 }
@@ -99,7 +99,7 @@ ws.on('message', (message) => {
 });
 
 ws.on('error', (error) => {
-    console.error('WebSocket连接发生错误:', error);
+    console.error('WebSocket connection error:', error);
     // 关闭连接并退出
     ws.close();
     process.exit(1);
@@ -108,7 +108,7 @@ ws.on('error', (error) => {
 // 定时检查连接状态，如果连接断开则重连
 setInterval(() => {
     if (ws.readyState === webSocket.CLOSED) {
-        console.log('WebSocket连接断开，尝试重新连接...');
+    console.log('WebSocket disconnected, attempting to reconnect...');
         ws = new webSocket(url);
     }
 }, 5000); // 每 5 秒检查一次连接状态
@@ -125,16 +125,16 @@ async function checkBrowserClosed(browser) {
 }
 // 进行任务逻辑
 async function runTask() {
-    console.log('任务开始执行');
-    console.log('任务数据:', taskData);
+    console.log('Task execution started');
+    console.log('Task data:', taskData);
     if (typeof taskData === 'string') {
         taskData = JSON.parse(taskData);
     }
     // 检查是否有 Chrome 路径
     if (!taskData || !taskData.chromePath) {
         console.log(Object.keys(taskData));
-        console.error('任务数据中缺少 Chrome 路径');
-        sendTaskCompleted('例子任务', false, '任务执行失败: 缺少 Chrome 路径');
+    console.error('Chrome path missing in task data');
+    sendTaskCompleted('Example Task', false, 'Task failed: Chrome path is missing');
         exit();
     }
     // 检查是否有 userDataDir目录
@@ -143,10 +143,10 @@ async function runTask() {
         // 如果目录不存在，尝试创建
         try {
             fs.mkdirSync(userDataDir, { recursive: true });
-            console.log(`创建目录成功: ${userDataDir}`);
+            console.log(`Created directory: ${userDataDir}`);
         } catch (error) {
-            console.error(`创建目录失败: ${userDataDir}`, error);
-            sendTaskCompleted('例子任务', false, `任务执行失败: 创建目录失败 - ${error.message}`);
+            console.error(`Failed to create directory: ${userDataDir}`, error);
+            sendTaskCompleted('Example Task', false, `Task failed: Could not create directory - ${error.message}`);
             exit();
         }
     }
@@ -193,7 +193,7 @@ async function runTask() {
 
 
 
-    console.log('指纹数据:', fingerprints);
+    console.log('Fingerprint payload:', fingerprints);
     const browser = await puppeteer.launch({
         headless: false,
         executablePath: taskData.chromePath,
@@ -220,7 +220,7 @@ async function runTask() {
     }
 
 
-    sendTaskCompleted('例子任务', true, '任务执行成功');
+    sendTaskCompleted('Example Task', true, 'Task completed successfully');
     exit();
 }
 

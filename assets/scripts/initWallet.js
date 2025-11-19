@@ -38,7 +38,7 @@ const checkIfDirectoryExists = (dirPath) => {
     try {
         return fs.existsSync(dirPath) && fs.lstatSync(dirPath).isDirectory();
     } catch (error) {
-        console.error(`检查目录 ${dirPath} 是否存在时出错:`, error);
+    console.error(`Error checking whether directory ${dirPath} exists:`, error);
         return false;
     }
 }
@@ -123,7 +123,7 @@ ws.on('message', (message) => {
 });
 
 ws.on('error', (error) => {
-    console.error('WebSocket连接发生错误:', error);
+    console.error('WebSocket connection error:', error);
     // 关闭连接并退出
     ws.close();
     process.exit(1);
@@ -132,7 +132,7 @@ ws.on('error', (error) => {
 // 定时检查连接状态，如果连接断开则重连
 setInterval(() => {
     if (ws.readyState === webSocket.CLOSED) {
-        console.log('WebSocket连接断开，尝试重新连接...');
+    console.log('WebSocket disconnected; attempting to reconnect...');
         ws = new webSocket(url);
     }
 }, 5000); // 每 5 秒检查一次连接状态
@@ -150,10 +150,10 @@ async function checkBrowserClosed(browser) {
 async function getStartedPhase(page) {
     // page active
     await page.bringToFront();
-    console.log('开始初始化设置');
+    console.log('Starting initial setup');
     // 点击 "Get Started" 按钮,等待页面加载
     const startButton = await page.waitForSelector('[data-testid="onboarding-get-started-button"]', { visible: true });
-    console.log('点击 "Get Started" 按钮');
+    console.log('Clicking "Get Started" button');
     console.log('startButton', startButton);
     await startButton.click();
 
@@ -237,16 +237,16 @@ async function startInitialSetup(page) {
 
 // 进行任务逻辑
 async function runTask() {
-    console.log('任务开始执行');
-    console.log('任务数据:', taskData);
+    console.log('Task starting');
+    console.log('Task data:', taskData);
     if (typeof taskData === 'string') {
         taskData = JSON.parse(taskData);
     }
     // 检查是否有 Chrome 路径
     if (!taskData || !taskData.chromePath) {
         console.log(Object.keys(taskData));
-        console.error('任务数据中缺少 Chrome 路径');
-        sendTaskCompleted('例子任务', false, '任务执行失败: 缺少 Chrome 路径');
+    console.error('Chrome path missing in task data');
+    sendTaskCompleted('example task', false, 'Task failed: missing Chrome path');
         exit();
     }
     // 检查是否有 userDataDir目录
@@ -255,10 +255,10 @@ async function runTask() {
         // 如果目录不存在，尝试创建
         try {
             fs.mkdirSync(userDataDir, { recursive: true });
-            console.log(`创建目录成功: ${userDataDir}`);
+            console.log(`Created directory successfully: ${userDataDir}`);
         } catch (error) {
-            console.error(`创建目录失败: ${userDataDir}`, error);
-            sendTaskCompleted('例子任务', false, `任务执行失败: 创建目录失败 - ${error.message}`);
+            console.error(`Failed to create directory: ${userDataDir}`, error);
+            sendTaskCompleted('example task', false, `Task failed: directory creation error - ${error.message}`);
             exit();
         }
     }
@@ -307,7 +307,7 @@ async function runTask() {
 
 
 
-    console.log('指纹数据:', fingerprints);
+    console.log('Fingerprint data:', fingerprints);
     const browser = await puppeteer.launch({
         headless: false,
         executablePath: taskData.chromePath,
@@ -336,7 +336,7 @@ async function runTask() {
     try {
         await startInitialSetup(page);
     } catch (error) {
-        console.log('初始化设置失败:', error);
+    console.log('Initial setup failed:', error);
         sendTaskCompleted('initWallet', false, 'initial setup failed: ' + error.message);
     }
     sendTaskCompleted('initWallet', true, 'initial setup success');

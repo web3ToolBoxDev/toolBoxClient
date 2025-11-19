@@ -23,10 +23,44 @@ let browser = null;
 const pageMap = new Map();      // pageId -> Page
 const lastUrl = new Map();      // pageId -> last navigated url
 
-function log(msg) {
-  // Relay logs back to the master process (TaskService UI)
-  if (process && process.send) process.send({ type: 'log', message: msg });
-  else console.log('[replicatorWorker] ' + msg);
+const NON_TYPABLE_INPUT_TYPES = new Set([
+  'checkbox','radio','range','color','file','button','submit','reset','image',
+  'date','datetime-local','month','time','week'
+]);
+const SELECT_ALL_MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
+const EVENT_READY_TIMEOUT_MS = 5000;
+const EVENT_READY_POLL_INTERVAL_MS = 120;
+const WAITABLE_EVENT_TYPES = new Set(['click', 'input', 'change']);
+let debugLogsEnabled = /^1|true$/i.test(String(process.env.TOOLBOX_DEBUG_LOGS || process.env.TOOLBOX_SLAVE_DEBUG || ''));
+
+let slaveIndex = 0;
+let slaveLabel = '';
+
+function formatSlaveTag() {
+  const ordinal = slaveIndex || 0;
+  const readable = slaveLabel && slaveLabel !== `slave-${ordinal}` ? slaveLabel : '';
+  if (ordinal) {
+    return readable ? `slave${ordinal}(${readable})` : `slave${ordinal}`;
+  }
+  return readable || 'slave';
+}
+
+function log(msg, { debug = true } = {}) {
+  const payload = {
+    type: debug ? 'debug-log' : 'task-log',
+    message: msg,
+    slaveIndex,
+    slaveLabel,
+  };
+
+  if (process && process.send) {
+    if (!debug || debugLogsEnabled) {
+      process.send(payload);
+    }
+  } else {
+    const prefix = `[replicatorWorker][${formatSlaveTag()}${debug ? '|debug' : ''}]`;
+    console.log(`${prefix} ${msg}`);
+  }
 }
 
 function buildFingerprints(env) {
@@ -72,6 +106,149 @@ function isGenericSelector(sel = '') {
     const low = s.toLowerCase();
     return ['div','span','path','svg','p','li','g','use'].includes(low);
   } catch { return true; }
+}
+
+async function selectorIsUniqueOnPage(page, selector) {
+  if (!selector) return false;
+  const sel = escapeCssSelector(selector);
+  try {
+    const count = await page.evaluate((css) => {
+      try {
+        return document.querySelectorAll(css).length;
+      } catch {
+        return 0;
+      }
+    }, sel);
+    return count === 1;
+  } catch {
+    return false;
+  }
+}
+
+function shouldWaitForSelector(evt = {}) {
+  if (!evt || !WAITABLE_EVENT_TYPES.has(evt.type)) return false;
+  if (!evt.selector) return false;
+  if (evt.type === 'click' && isGenericSelector(evt.selector)) return false;
+  return true;
+}
+
+async function waitForSelectorReady(page, evt) {
+  if (!shouldWaitForSelector(evt)) return true;
+  const sel = escapeCssSelector(evt.selector);
+  const deadline = evt.__readyDeadline || (evt.__readyDeadline = Date.now() + EVENT_READY_TIMEOUT_MS);
+  while (Date.now() <= deadline) {
+    try {
+      await page.waitForSelector(sel, { timeout: Math.min(EVENT_READY_POLL_INTERVAL_MS, EVENT_READY_TIMEOUT_MS) });
+      return true;
+    } catch {}
+    try { await page.waitForTimeout(EVENT_READY_POLL_INTERVAL_MS); } catch {}
+  }
+  return false;
+}
+
+function isTextLikeInputEvent(evt = {}) {
+  try {
+    const tag = (evt.tag || '').toLowerCase();
+    if (tag === 'textarea') return true;
+    if (tag === 'input') {
+      const inputType = (evt.inputType || '').toLowerCase();
+      if (!inputType) return true;
+      return !NON_TYPABLE_INPUT_TYPES.has(inputType);
+    }
+    if (evt.isContentEditable) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function focusElementForInput(page, selector) {
+  const sel = selector ? escapeCssSelector(selector) : null;
+  if (sel) {
+    try {
+      await page.waitForSelector(sel, { timeout: 2500 });
+      await page.focus(sel);
+      return true;
+    } catch {}
+  }
+  try {
+    await page.evaluate(() => {
+      try {
+        if (document && document.activeElement && typeof document.activeElement.focus === 'function') {
+          document.activeElement.focus();
+        }
+      } catch {}
+    });
+    return true;
+  } catch {}
+  return false;
+}
+
+async function selectAllAndClear(page) {
+  try {
+    await page.keyboard.down(SELECT_ALL_MODIFIER);
+    await page.keyboard.press('KeyA');
+  } finally {
+    try { await page.keyboard.up(SELECT_ALL_MODIFIER); } catch {}
+  }
+  try { await page.keyboard.press('Backspace'); } catch {}
+}
+
+function computeTypeDelay(text = '') {
+  const len = Math.max(1, text.length);
+  return Math.max(8, Math.min(35, Math.round(200 / len)));
+}
+
+async function simulateTextTypingInput(page, evt, { maskLog = false } = {}) {
+  try {
+    try { await page.bringToFront(); } catch {}
+    const focused = await focusElementForInput(page, evt.selector);
+    if (!focused) {
+      return false;
+    }
+    await selectAllAndClear(page);
+    const text = evt.value === undefined || evt.value === null ? '' : String(evt.value);
+    if (text) {
+      await page.keyboard.type(text, { delay: computeTypeDelay(text) });
+    }
+    log(`Simulated typing input on ${evt.selector || '<active>'} => ${maskLog ? '***' : text}`);
+    return true;
+  } catch (e) {
+    log(`Failed to simulate typing on ${evt.selector || '<active>'}: ${e.message}`, { debug: false });
+    return false;
+  }
+}
+
+async function dispatchTextChangeEvent(page, evt) {
+  try {
+    const selector = evt.selector ? escapeCssSelector(evt.selector) : null;
+    const dispatched = await page.evaluate((payload) => {
+      let el = payload.selector ? document.querySelector(payload.selector) : null;
+      if (!el && document && document.activeElement) el = document.activeElement;
+      if (!el) return false;
+      try { el.focus && el.focus(); } catch {}
+      const win = (el.ownerDocument && el.ownerDocument.defaultView) || window;
+      const EventCtor = (win && win.Event) || Event;
+      try {
+        const evtInstance = new EventCtor('change', { bubbles: true });
+        el.dispatchEvent(evtInstance);
+        return true;
+      } catch {
+        try {
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        } catch {}
+      }
+      return false;
+    }, { selector });
+    if (dispatched) {
+      log(`Dispatched change event on ${selector || '<active>'}`);
+      return true;
+    }
+  } catch (e) {
+    log(`Failed to dispatch change on ${evt.selector || '<active>'}: ${e.message}`, { debug: false });
+  }
+  return false;
 }
 
 async function launch(env, chromePath, savePath, metamaskDir, position) {
@@ -127,7 +304,7 @@ async function launch(env, chromePath, savePath, metamaskDir, position) {
     }
   }
 
-  log(`Launched slave browser for env ${env?.id || 'unknown'}`);
+  log(`Launched slave browser for env ${env?.id || 'unknown'}`, { debug: false });
 }
 
 async function openOrAttachExtensionPage(targetUrl) {
@@ -195,6 +372,10 @@ function coalesceAndEnqueue(evt) {
     const idx = queue.findIndex(q => q.type === 'input' && q.pageId === evt.pageId && q.selector === evt.selector);
     if (idx >= 0) queue.splice(idx, 1);
   }
+  if (evt.type === 'change' && evt.selector) {
+    const idx = queue.findIndex(q => q.type === 'change' && q.pageId === evt.pageId && q.selector === evt.selector);
+    if (idx >= 0) queue.splice(idx, 1);
+  }
   // Coalesce scroll by page
   if (evt.type === 'scroll') {
     const idx = queue.findIndex(q => q.type === 'scroll' && q.pageId === evt.pageId);
@@ -217,7 +398,7 @@ async function drain() {
     try {
       await handle(evt);
     } catch (e) {
-      log(`handle error (${evt?.type}): ${e.message}`);
+      log(`handle error (${evt?.type}): ${e.message}`, { debug: false });
     }
   }
   draining = false;
@@ -313,6 +494,15 @@ async function handle(evt) {
     try { await page.waitForTimeout(350); } catch {}
   }
 
+  const needsSelectorReady = shouldWaitForSelector(evt);
+  if (needsSelectorReady) {
+    const ready = await waitForSelectorReady(page, evt);
+    if (!ready) {
+      log(`Skip ${evt.type} on ${evt.selector || '<no-selector>'} (readiness timeout)`, { debug: false });
+      return;
+    }
+  }
+
   if (evt.type === 'activate') {
     // Activate the target by bringing it to front
     try {
@@ -327,7 +517,7 @@ async function handle(evt) {
         await new Promise(r => setTimeout(r, 80));
         log(`Activated page: ${pageId} via CDP`);
       } catch (e2) {
-        log(`Failed to activate page ${pageId}: ${e2.message}`);
+        log(`Failed to activate page ${pageId}: ${e2.message}`, { debug: false });
       }
     }
     return;
@@ -343,7 +533,7 @@ async function handle(evt) {
         log(`Closed page: ${pageId}`);
       }
     } catch (e) {
-      log(`Failed to close page ${pageId}: ${e.message}`);
+      log(`Failed to close page ${pageId}: ${e.message}`, { debug: false });
     }
     return;
   }
@@ -354,17 +544,23 @@ async function handle(evt) {
     try { await page.waitForTimeout(50); } catch {}
 
     // 1) 尝试使用较为具体的选择器
-    if (evt.selector && !isGenericSelector(evt.selector)) {
+    if (evt.selector) {
       const sel = escapeCssSelector(evt.selector);
-      try {
-        await page.waitForSelector(sel, { timeout: 1800 });
-        const el = await page.$(sel);
-        if (el) {
-          await el.click({ delay: 10 });
-          log(`Clicked via selector: ${sel}`);
-          return;
-        }
-      } catch {}
+      let canUseSelector = !isGenericSelector(evt.selector);
+      if (!canUseSelector) {
+        canUseSelector = await selectorIsUniqueOnPage(page, evt.selector);
+      }
+      if (canUseSelector) {
+        try {
+          await page.waitForSelector(sel, { timeout: 1800 });
+          const el = await page.$(sel);
+          if (el) {
+            await el.click({ delay: 10 });
+            log(`Clicked via selector: ${sel}`);
+            return;
+          }
+        } catch {}
+      }
     }
 
     // 准备缩放后的坐标（master → slave）
@@ -449,36 +645,31 @@ async function handle(evt) {
   }
 
   if (evt.type === 'input' || evt.type === 'change' || evt.type === 'keydown') {
-    const isPwd = ((evt.inputType || '').toLowerCase() === 'password') || (evt.tag === 'input' && (evt.inputType || '').toLowerCase() === 'password');
+    const inputTypeLower = (evt.inputType || '').toLowerCase();
+    const isPwd = inputTypeLower === 'password' || (evt.tag === 'input' && inputTypeLower === 'password');
+    const isTextLike = isTextLikeInputEvent(evt);
 
-    // 对密码输入采用“键入式”重放，触发 beforeinput/input/keyup 等真实事件链，确保 Unlock 按钮可用
-    if (evt.type === 'input' && isPwd) {
-      try {
-        const selector = evt.selector;
-        if (selector) {
-          try { await page.waitForSelector(selector, { timeout: 2500 }); } catch {}
-          try { await page.focus(selector); } catch {}
-        } else {
-          await page.evaluate(() => { try { document && document.activeElement && document.activeElement.focus(); } catch {} });
-        }
-        // 选中并清空
-        try {
-          await page.keyboard.down('Control');
-          await page.keyboard.press('A');
-          await page.keyboard.up('Control');
-          await page.keyboard.press('Backspace');
-        } catch {}
-        // 键入目标值
-        const text = evt.value || '';
-        if (selector) await page.type(selector, text, { delay: 50 });
-        else await page.keyboard.type(text, { delay: 50 });
-      } catch {}
-      return;
+    if (evt.type === 'input') {
+      if (isPwd) {
+        const typedPwd = await simulateTextTypingInput(page, evt, { maskLog: true });
+        if (typedPwd) return;
+      } else if (isTextLike) {
+        const typed = await simulateTextTypingInput(page, evt);
+        if (typed) return;
+      }
     }
-    if (evt.type === 'change' && isPwd) {
-      // 忽略 password 的 change，避免受控组件回滚清空导致 Unlock 不可用
-      return;
+
+    if (evt.type === 'change') {
+      if (isPwd) return;
+      if (isTextLike) {
+        const dispatched = await dispatchTextChangeEvent(page, evt);
+        if (dispatched) return;
+      }
     }
+
+    const evalPayload = Object.assign({}, evt, {
+      selector: evt.selector ? escapeCssSelector(evt.selector) : null
+    });
 
     await page.evaluate((e) => {
       // 避免使用 instanceof（HTMLInputElement 等）以规避 LavaMoat scuttling 对全局构造器的屏蔽
@@ -573,7 +764,7 @@ async function handle(evt) {
           }
         } catch {}
       }
-    }, evt);
+    }, evalPayload);
     return;
   }
 }
@@ -581,12 +772,21 @@ async function handle(evt) {
 process.on('message', async (msg) => {
   if (!msg || !msg.type) return;
   if (msg.type === 'init') {
-    const { env, chromePath, savePath, metamaskDir, position } = msg.payload || {};
+    const payload = msg.payload || {};
+    const { env, chromePath, savePath, metamaskDir, position } = payload;
+    if (Number.isFinite(payload.slaveIndex)) {
+      slaveIndex = Number(payload.slaveIndex);
+    }
+    const derivedLabel = payload.slaveLabel || env?.alias || env?.name || env?.bindWalletId || env?.id;
+    if (derivedLabel) slaveLabel = derivedLabel;
+    if (typeof payload.enableDebugLogs === 'boolean') {
+      debugLogsEnabled = payload.enableDebugLogs;
+    }
     try {
       await launch(env || {}, chromePath, savePath, metamaskDir, position);
-      log('slave ready');
+      log('slave ready', { debug: false });
     } catch (e) {
-      log('failed to launch: ' + e.message);
+      log('failed to launch: ' + e.message, { debug: false });
       process.exitCode = 1;
     }
     return;
@@ -603,5 +803,5 @@ process.on('message', async (msg) => {
   }
 });
 
-process.on('uncaughtException', (e) => log('uncaughtException: ' + e.message));
-process.on('unhandledRejection', (e) => log('unhandledRejection: ' + (e && e.message ? e.message : String(e))));
+process.on('uncaughtException', (e) => log('uncaughtException: ' + e.message, { debug: false }));
+process.on('unhandledRejection', (e) => log('unhandledRejection: ' + (e && e.message ? e.message : String(e)), { debug: false }));
