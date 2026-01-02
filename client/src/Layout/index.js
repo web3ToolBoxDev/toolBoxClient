@@ -4,6 +4,7 @@ import './index.scss';
 import TaskOffcanvas from '../components/taskOffcanvas';
 import { useTranslation } from 'react-i18next';
 import useFingerPrintStore from '../store/fingerPrintStore';
+import { eventEmitter } from '../utils/eventEmitter';
 
 
 const menuItems = [
@@ -34,7 +35,15 @@ const Layout = ({ Child }) => {
 
   useEffect(() => {
     fetchFingerPrints();
-  }, []);
+
+    const handleTaskExecuted = () => {
+      setShowTasksOffcanvas(true);
+    };
+    eventEmitter.on('taskExecuted', handleTaskExecuted);
+    return () => {
+      eventEmitter.off('taskExecuted', handleTaskExecuted);
+    };
+  }, [fetchFingerPrints]);
 
   return (
     <Container fluid className="p-0" style={{ height: '100vh' }}>

@@ -49,13 +49,25 @@ class WebSocketService {
                 const message = JSON.parse(msg);
                 console.log('Received message:', message);
                 if (message.type === 'terminate_process') {
-                    for (let key in this.wsTaskServer) {
-                        console.log('Send to task:', key);
-                        this.wsTaskServer[key].send(JSON.stringify({
-                            type: 'terminate_process',
-                            code: 0,
-                            message: 'Terminate process command received from frontend'
-                        }));
+                    if (message.taskName) {
+                        const target = this.getTaskSocket(message.taskName);
+                        if (target) {
+                            console.log('Send terminate to task:', message.taskName);
+                            target.send(JSON.stringify({
+                                type: 'terminate_process',
+                                code: 0,
+                                message: 'Terminate process command received from frontend'
+                            }));
+                        }
+                    } else {
+                        for (let key in this.wsTaskServer) {
+                            console.log('Broadcast terminate to task:', key);
+                            this.wsTaskServer[key].send(JSON.stringify({
+                                type: 'terminate_process',
+                                code: 0,
+                                message: 'Terminate process command received from frontend'
+                            }));
+                        }
                     }
                 }
             });
@@ -108,24 +120,30 @@ class WebSocketService {
             ws.on('message', (msg) => {
                 messageCallback(msg);
             });
+            // Store socket by both numeric key and taskName for targeted operations
             this.wsTaskServer[this.taskKey[taskName]] = ws;
+            this.wsTaskServer[taskName] = ws;
         });
         return 'ws://localhost:30001' + taskUrl
     }
     closeTaskWebSocket(taskName) {
+        const socket = this.getTaskSocket(taskName);
+        if (socket) {
+            socket.close();
+        }
+        const key = this.taskKey[taskName];
+        if (key && this.wsTaskServer[key]) {
+            delete this.wsTaskServer[key];
+        }
         if (this.wsTaskServer[taskName]) {
-            this.wsTaskServer[taskName].close();
             delete this.wsTaskServer[taskName];
         }
     }
     // Send message to task process
     sendToTask(taskName, message, code = 0) {
-        if (!this.taskKey[taskName]) {
-            console.log('Task not initialized');
-            return;
-        }
-        if (!this.wsTaskServer[this.taskKey[taskName]]) {
-            console.log('WebSocket not initialized');
+        const socket = this.getTaskSocket(taskName);
+        if (!socket) {
+            console.log('Task socket not initialized:', taskName);
             return;
         }
         let msgObj;
@@ -135,7 +153,43 @@ class WebSocketService {
             msgObj = { message };
         }
         if (msgObj.code === undefined) msgObj.code = code;
-        this.wsTaskServer[this.taskKey[taskName]].send(JSON.stringify(msgObj));
+        socket.send(JSON.stringify(msgObj));
+    }
+
+    shortTaskName(taskName = '') {
+        if (typeof taskName !== 'string' || !taskName.includes('_')) return taskName;
+        const [address, rest] = taskName.split('_');
+        if (!address || !rest || address.length < 10) return taskName;
+        const shortAddress = `${address.slice(0, 5)}...${address.slice(-5)}`;
+        return `${shortAddress}_${rest}`;
+    }
+
+    // Helper: retrieve socket by taskName or numeric key (supports short id matching)
+    getTaskSocket(taskName) {
+        if (this.wsTaskServer[taskName]) {
+            return this.wsTaskServer[taskName];
+        }
+        const key = this.taskKey[taskName];
+        if (key && this.wsTaskServer[key]) {
+            return this.wsTaskServer[key];
+        }
+        // Try match by short task name (e.g., ea115...679c9_openWallet)
+        const shortIncoming = this.shortTaskName(taskName);
+        if (shortIncoming) {
+            const fullMatch = Object.keys(this.taskKey || {}).find((fullName) => {
+                return this.shortTaskName(fullName) === shortIncoming;
+            });
+            if (fullMatch) {
+                const resolvedKey = this.taskKey[fullMatch];
+                if (resolvedKey && this.wsTaskServer[resolvedKey]) {
+                    return this.wsTaskServer[resolvedKey];
+                }
+                if (this.wsTaskServer[fullMatch]) {
+                    return this.wsTaskServer[fullMatch];
+                }
+            }
+        }
+        return null;
     }
     checkWebSocket() {
         console.log('Checking WebSocket connection');

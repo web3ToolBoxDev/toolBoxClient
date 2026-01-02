@@ -14,6 +14,7 @@ const usePathStore = create((set) => ({
   fetchSavePath: async () => {
     try {
       const res = await api.getSavePath();
+      console.log('Fetched savePath:', res);
       if (res && res.path) {
         set({ savePath: res.path });
       } else {

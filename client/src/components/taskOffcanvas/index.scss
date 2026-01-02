@@ -1,7 +1,6 @@
 // filepath: [index.scss](http://_vscodecontentref_/0)
 @import '../../index.scss';
 
-// 仅保留 taskOffcanvas 特有样式
 .task-offcanvas {
   &.offcanvas-bottom {
     height: 50% !important;
@@ -11,75 +10,201 @@
     .offcanvas-header {
       border-bottom: 1px solid $clr-sidebar-border;
       padding: 0.5rem 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
 
       .btn-close { filter: invert(1); }
     }
 
+    .header-actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+
+      .btn-terminate,
+      .btn-delete,
+      .btn-clear-all {
+        height: 36px;
+        padding: 0 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.9rem;
+        border-radius: 4px;
+        border: none;
+        color: $clr-brand-text;
+        white-space: nowrap;
+      }
+    }
+
     .offcanvas-title {
-      font-size: 1rem; // 调小标题尺寸
+      font-size: 1rem;
       color: $clr-brand-text;
       font-weight: 600;
+      flex: 1;
+    }
+
+    .btn-clear-all {
+      background-color: $clr-btn-secondary;
+      &:hover { background-color: $clr-btn-secondary-hover; }
+      &:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+    }
+
+    .btn-terminate {
+      background-color: $clr-btn-warning;
+      &:hover { background-color: $clr-btn-warning-hover; }
+    }
+
+    .btn-delete {
+      background-color: $clr-btn-primary;
+      &:hover { background-color: $clr-btn-primary-hover; }
+      &:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
     }
 
     .offcanvas-body {
-      display: flex !important;
-      flex-direction: column;
-      padding: 0.75rem 1rem 1rem 1rem;
+      padding: 0.75rem 1rem 1rem;
 
-      .actions {
-        flex: 0 0 auto;
-        width: 100%;
-        display: flex;
-        gap: 0.5rem;
-        margin-bottom: 0.75rem;
+      .task-layout {
+        height: 100%;
 
-        .btn-terminate,
-        .btn-clear {
-          flex: 1;
-          height: 40px; // 强制高度一致
+        .task-list-panel {
+          border: 1px solid $clr-sidebar-border;
+          background-color: rgba(255, 255, 255, 0.03);
+          border-radius: 4px;
+          padding: 0.75rem;
           display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 1rem;
-          padding: 0 0.75rem; // 左右内边距
-          line-height: 1.2;
-          box-sizing: border-box;
+          flex-direction: column;
+          gap: 0.75rem;
+          height: 100%;
+          min-height: 0;
+
+          @media (max-width: 992px) {
+            flex: unset;
+          }
+
+          .task-list {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            overflow-y: auto;
+
+            .task-tab {
+              border: 1px solid transparent;
+              background-color: rgba(255, 255, 255, 0.05);
+              color: $clr-brand-text;
+              padding: 0.5rem 0.6rem;
+              border-radius: 4px;
+              display: flex;
+              flex-direction: column;
+              gap: 0.35rem;
+              text-align: left;
+              cursor: pointer;
+              transition: background-color 0.2s ease, border-color 0.2s ease;
+
+              &.active {
+                background-color: rgba(255, 255, 255, 0.12);
+                border-color: $clr-btn-primary;
+              }
+
+              .task-name {
+                font-weight: 600;
+                word-break: break-all;
+              }
+
+              .status-chip {
+                align-self: flex-start;
+                font-size: 0.75rem;
+                padding: 0.1rem 0.5rem;
+                border-radius: 999px;
+                text-transform: capitalize;
+
+                &.running {
+                  background-color: rgba(255, 193, 7, 0.2);
+                  color: #ffd369;
+                }
+
+                &.completed {
+                  background-color: rgba(40, 167, 69, 0.2);
+                  color: #6ce7a2;
+                }
+              }
+            }
+
+            &__empty {
+              color: #9393b4;
+              font-size: 0.95rem;
+              text-align: center;
+            }
+          }
         }
 
-        .btn-terminate {
-          background-color: $clr-btn-warning;
-          border: none;
-          color: $clr-brand-text;
-          &:hover { background-color: $clr-btn-warning-hover; }
-        }
+        .task-log-panel {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
+          height: 100%;
 
-        .btn-clear {
-          background-color: $clr-btn-primary;
-          border: none;
-          color: $clr-brand-text;
-          &:hover { background-color: $clr-btn-primary-hover; }
-        }
-      }
+          .logs {
+            flex: 1;
+            min-height: 0;
+            border: 1px solid $clr-sidebar-border;
+            background-color: #232146;
+            border-radius: 4px;
+            padding: 0.75rem;
+            overflow-y: auto;
 
-      .logs {
-        flex: 1;
-        overflow-y: auto;
-        border: 1px solid $clr-sidebar-border;
-        background-color: #232146; // 更深的协调色
-        padding: 0.75rem;
-        border-radius: 4px;
+            .log-list {
+              list-style: none;
+              margin: 0;
+              padding: 0;
+              display: flex;
+              flex-direction: column;
+              gap: 0.4rem;
 
-        ul {
-          list-style: none;
-          margin: 0;
-          padding: 0;
+              .log-entry {
+                display: flex;
+                flex-direction: column;
+                background-color: rgba(0, 0, 0, 0.15);
+                padding: 0.35rem 0.5rem;
+                border-radius: 4px;
+                font-family: monospace;
+                font-size: 0.9rem;
+                color: #f5f5f5;
 
-          li {
-            margin-bottom: 0.5rem;
-            color: #e0e0e0;
-            font-family: monospace;
-            font-size: 0.95em;
-            word-break: break-all;
+                &.error {
+                  border-left: 3px solid #ff6b6b;
+                  background-color: rgba(255, 107, 107, 0.08);
+                }
+
+                .log-time {
+                  font-size: 0.75rem;
+                  color: #9da0c3;
+                  margin-bottom: 0.2rem;
+                }
+
+                .log-text {
+                  word-break: break-all;
+                }
+              }
+            }
+
+            .placeholder {
+              color: #9da0c3;
+              font-size: 0.95rem;
+              text-align: center;
+              margin-top: 1rem;
+            }
           }
         }
       }

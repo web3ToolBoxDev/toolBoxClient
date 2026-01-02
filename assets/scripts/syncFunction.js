@@ -4,6 +4,7 @@ const puppeteer = require('puppeteer-extra');
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
+const { set } = require('../../server/server');
 
 
 let ws = new WebSocket(url);
@@ -118,6 +119,9 @@ const lastUrlByPageId = new Map();   // pageId -> url
 const pageStateSnapshot = new Map(); // pageId -> { url, exists: true/false }
 let monitorTimer = null;
 let lastActivePageId = null;        // 追踪上次激活的页面，防止重复激活
+const recentHashes = new Set();     // 去重窗口
+const lastClickTsByPageId = new Map(); // 记录最近 click 发生时间，用于抑制 click -> navigate 的重复广播
+
 
 // 新增：记录每个 Page 的 CDP 客户端与注入状态
 const cdpClientByPage = new WeakMap();
@@ -153,10 +157,45 @@ function spawnSlaveWorkers(slaveEnvs, options) {
     });
 }
 
+function hashEvent(evt = {}) {
+  try {
+    const sx = Number.isFinite(evt.x) ? Math.round(evt.x) : undefined;
+    const sy = Number.isFinite(evt.y) ? Math.round(evt.y) : undefined;
+    // bucket similar clicks within a small radius to the same hash
+    const bx = Number.isFinite(sx) ? Math.round(sx / 8) : undefined;
+    const by = Number.isFinite(sy) ? Math.round(sy / 8) : undefined;
+    const normalized = {
+      t: evt.type || '',
+      p: evt.pageId || '',
+      u: evt.url || '',
+      s: evt.selector || '',
+      g: evt.tag || '',
+      i: evt.inputType || '',
+      x: bx,
+      y: by,
+      v: evt.value || '',
+      c: typeof evt.checked === 'boolean' ? evt.checked : undefined,
+      k: evt.key || '',
+    };
+    return JSON.stringify(normalized);
+  } catch {
+    return null;
+  }
+}
+
 function broadcastToSlaves(evt) {
-    for (const w of slaveWorkers) {
-        try { w.send({ type: 'event', payload: evt }); } catch { }
+  if (!evt) return;
+  const h = hashEvent(evt);
+  if (h) {
+    if (recentHashes.has(h)) {
+      return; // drop duplicate
     }
+    recentHashes.add(h);
+    setTimeout(() => { recentHashes.delete(h); }, 1000);
+  }
+  for (const w of slaveWorkers) {
+    try { w.send({ type: 'event', payload: evt }); } catch { }
+  }
 }
 
 /** ------------ Master browser ------------ */
@@ -171,10 +210,11 @@ async function launchMaster(masterEnv, chromePath, savePath, metamaskDir, positi
         headless: false,
         executablePath: chromePath,
         userDataDir: userDataDir,
+        defaultViewport: null,
         ignoreDefaultArgs: ['--enable-automation'],
         args,
     });
-    browsers.push(masterBrowser);
+    browsers.push(masterBrowser);                                                              
     sendTaskLog('[syncFunction] Master \u6d4f\u89c8\u5668\u5df2\u542f\u52a8');
     return masterBrowser;
 }
@@ -208,6 +248,7 @@ async function installCdpListener(page, pageId) {
           const evt = JSON.parse(e.payload || '{}');
           evt.pageId = pageId;
           if (!evt.url) { try { evt.url = await page.url(); } catch {} }
+          if (evt.type === 'click') { lastClickTsByPageId.set(pageId, Date.now()); }
           if (evt.type === 'activate') {
             if (lastActivePageId !== pageId) {
               lastActivePageId = pageId;
@@ -295,12 +336,13 @@ async function installCdpListener(page, pageId) {
         };
         const installOnRoot = (root) => {
           try {
-            // pointer/mouse 事件尽量在捕获阶段提前拿到
-            root.addEventListener('pointerdown', handleClickish('pointerdown'), true);
-            root.addEventListener('mousedown', handleClickish('mousedown'), true);
-            root.addEventListener('click', handleClickish('click'), true);
-            root.addEventListener('input', handleInput, true);
-            root.addEventListener('change', handleInput, true);
+            // 使用冒泡阶段并标记 passive，避免阻断页面原有监听
+            const opts = { capture: false, passive: true };
+            root.addEventListener('pointerdown', handleClickish('pointerdown'), opts);
+            root.addEventListener('mousedown', handleClickish('mousedown'), opts);
+            root.addEventListener('click', handleClickish('click'), opts);
+            root.addEventListener('input', handleInput, opts);
+            root.addEventListener('change', handleInput, opts);
           } catch {}
         };
         // 装配 document 与现有 open shadowRoot
@@ -468,6 +510,8 @@ async function wirePage(page, pageId) {
     evt.pageId = pageId;
     if (!evt.url) { try { evt.url = page.url(); } catch {} }
 
+    if (evt.type === 'click') { lastClickTsByPageId.set(pageId, Date.now()); }
+
     if (evt.type === 'activate') {
       if (lastActivePageId !== pageId) {
         lastActivePageId = pageId;
@@ -489,6 +533,13 @@ async function wirePage(page, pageId) {
     const url = frame.url();
     try { /* CDP 注入的重载由 installCdpListener 自身挂载的钩子处理，这里仅做导航广播 */ } catch {}
     lastUrlByPageId.set(pageId, url);
+    // 若导航紧随 click 发生，则认为是 click 触发的导航，不再重复广播 navigate
+    const lastClickTs = lastClickTsByPageId.get(pageId) || 0;
+    const now = Date.now();
+    if (lastClickTs && (now - lastClickTs) <= 1200) {
+      lastClickTsByPageId.set(pageId, 0);
+      return;
+    }
     broadcastToSlaves({ type: 'navigate', pageId, url });
   });
 

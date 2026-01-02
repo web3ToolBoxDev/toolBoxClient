@@ -261,6 +261,19 @@ class TaskService {
             return { success: false, code: 1002, message: 'Task does not exist' };
         }
 
+        // syncFunction 全局限流：仅允许单实例运行，提示先结束现有任务
+        if (taskName === 'syncFunction') {
+            
+            const hasRunningSync = Object.entries(this.isRunning || {}).some(([name, running]) => {
+                console.log('check running syncFunction:', name, running);
+                return running && (name === 'syncFunction' || String(name || '').endsWith('_syncFunction'));
+            });
+            console.log('hasRunningSync:', hasRunningSync);
+            if (hasRunningSync) {
+                return { success: false, code: 1003, message: 'syncFunction task is running, please terminate the existing task first' };
+            }
+        }
+
         let ids = [];
         if (taskDataFromFront && taskDataFromFront.envIds) {
             ids = taskDataFromFront.envIds;

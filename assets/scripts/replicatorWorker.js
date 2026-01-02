@@ -22,6 +22,7 @@ try {
 let browser = null;
 const pageMap = new Map();      // pageId -> Page
 const lastUrl = new Map();      // pageId -> last navigated url
+const navBlockUntil = new Map(); // pageId -> timestamp until which actions are paused (during nav)
 
 function log(msg) {
   // Relay logs back to the master process (TaskService UI)
@@ -238,6 +239,7 @@ async function handle(evt) {
 
     const existing = pageMap.get(pageId) || null;
     lastUrl.set(pageId, url);
+    navBlockUntil.set(pageId, Date.now() + 2000); // block clicks shortly after navigate
 
     if (isExtensionUrl(url)) {
       const p = await openOrAttachExtensionPage(url);
@@ -266,6 +268,12 @@ async function handle(evt) {
   // 非导航事件：若还没有记录 URL，但事件提供了 url，则补充
   if (!lastUrl.has(pageId) && evt.url && evt.url !== 'about:blank') {
     lastUrl.set(pageId, evt.url);
+  }
+
+  // 如果刚处理过导航，短时间内忽略点击/输入，防止与导航事件互相触发循环
+  const blockUntil = navBlockUntil.get(pageId) || 0;
+  if (['click', 'input', 'change', 'keydown', 'scroll'].includes(evt.type) && Date.now() < blockUntil) {
+    return;
   }
 
   const firstBind = !pageMap.has(pageId);
@@ -451,116 +459,37 @@ async function handle(evt) {
   if (evt.type === 'input' || evt.type === 'change' || evt.type === 'keydown') {
     const isPwd = ((evt.inputType || '').toLowerCase() === 'password') || (evt.tag === 'input' && (evt.inputType || '').toLowerCase() === 'password');
 
-    // 对密码输入采用“键入式”重放，触发 beforeinput/input/keyup 等真实事件链，确保 Unlock 按钮可用
-    if (evt.type === 'input' && isPwd) {
+    // 尽量模拟真人输入：聚焦、全选、退格、逐字符键入
+    const selector = evt.selector;
+    const text = evt.value || '';
+
+    // 复选框/单选框改为点击式切换，再触发 change
+    const toggleCheckboxLike = async () => {
       try {
-        const selector = evt.selector;
         if (selector) {
-          try { await page.waitForSelector(selector, { timeout: 2500 }); } catch {}
-          try { await page.focus(selector); } catch {}
-        } else {
-          await page.evaluate(() => { try { document && document.activeElement && document.activeElement.focus(); } catch {} });
+          await page.waitForSelector(selector, { timeout: 2500 });
+          const el = await page.$(selector);
+          if (el) {
+            await el.click({ delay: 30 });
+            return true;
+          }
         }
-        // 选中并清空
-        try {
-          await page.keyboard.down('Control');
-          await page.keyboard.press('A');
-          await page.keyboard.up('Control');
-          await page.keyboard.press('Backspace');
-        } catch {}
-        // 键入目标值
-        const text = evt.value || '';
-        if (selector) await page.type(selector, text, { delay: 50 });
-        else await page.keyboard.type(text, { delay: 50 });
+        // fallback: click active element
+        await page.evaluate(() => { try { document && document.activeElement && document.activeElement.click && document.activeElement.click(); } catch {} });
+        return true;
       } catch {}
-      return;
-    }
-    if (evt.type === 'change' && isPwd) {
-      // 忽略 password 的 change，避免受控组件回滚清空导致 Unlock 不可用
-      return;
-    }
+      return false;
+    };
 
-    await page.evaluate((e) => {
-      // 避免使用 instanceof（HTMLInputElement 等）以规避 LavaMoat scuttling 对全局构造器的屏蔽
-      let el = e.selector ? document.querySelector(e.selector) : null;
-      if (!el && document && document.activeElement) el = document.activeElement;
-      if (!el) return;
-
-      const tag = el.tagName ? el.tagName.toLowerCase() : '';
-      const inputType = (() => { try { return (el.type || '').toLowerCase(); } catch { return ''; } })();
-      const isInput = tag === 'input';
-      const isTextarea = tag === 'textarea';
-      const isCheckboxLike = isInput && ['checkbox', 'radio'].includes(inputType);
-
-      const getCtor = (name, fallback) => {
-        try {
-          return (el.ownerDocument && el.ownerDocument.defaultView && el.ownerDocument.defaultView[name]) || fallback;
-        } catch { return fallback; }
-      };
-      const dispatch = (type, init = { bubbles: true }) => {
-        try {
-          const Ev = getCtor('Event', undefined) || Event;
-          el.dispatchEvent(new Ev(type, Object.assign({ bubbles: true }, init)));
-        } catch {}
-      };
-      const dispatchBeforeInput = () => {
-        try {
-          const IEv = getCtor('InputEvent', undefined);
-          if (IEv) el.dispatchEvent(new IEv('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: e.value || '' }));
-        } catch {}
-      };
-      const dispatchInput = () => {
-        try {
-          const IEv = getCtor('InputEvent', undefined);
-          if (IEv) el.dispatchEvent(new IEv('input', { bubbles: true }));
-          else el.dispatchEvent(new (getCtor('Event', undefined) || Event)('input', { bubbles: true }));
-        } catch { dispatch('input'); }
-      };
-      const focusEl = () => { try { el.focus && el.focus(); } catch {} };
-      const setByNativeSetter = (val) => {
-        try {
-          let proto = el;
-          let desc;
-          while (proto && !(desc = Object.getOwnPropertyDescriptor(proto, 'value'))) {
-            proto = Object.getPrototypeOf(proto);
-          }
-          if (desc && typeof desc.set === 'function') {
-            desc.set.call(el, val);
-          } else {
-            // fallback
-            // @ts-ignore
-            el.value = val;
-          }
-        } catch {
-          // @ts-ignore
-          el.value = val;
-        }
-      };
-
-      if (e.type === 'input') {
-        focusEl();
-        if (isCheckboxLike) {
-          if (typeof e.checked === 'boolean') el.checked = e.checked;
-          dispatchInput();
-        } else if (isInput || isTextarea || ('value' in el)) {
-          setByNativeSetter(e.value ?? '');
-          if (inputType === 'password') dispatchBeforeInput();
-          dispatchInput();
-        } else if (el.isContentEditable) {
-          el.textContent = e.value ?? '';
-          dispatchInput();
-        }
-      } else if (e.type === 'change') {
-        focusEl();
-        if (isCheckboxLike) {
-          if (typeof e.checked === 'boolean') el.checked = e.checked;
-        } else if ('value' in el || isInput || isTextarea) {
-          setByNativeSetter(e.value ?? '');
-        } else if (el.isContentEditable) {
-          el.textContent = e.value ?? '';
-        }
-        dispatch('change');
-      } else if (e.type === 'keydown') {
+    if (evt.type === 'keydown') {
+      // 保持原有 keydown 触发链
+      await page.evaluate((e) => {
+        let el = e.selector ? document.querySelector(e.selector) : null;
+        if (!el && document && document.activeElement) el = document.activeElement;
+        if (!el) return;
+        const getCtor = (name, fallback) => {
+          try { return (el.ownerDocument && el.ownerDocument.defaultView && el.ownerDocument.defaultView[name]) || fallback; } catch { return fallback; }
+        };
         try {
           const KD = getCtor('KeyboardEvent', undefined);
           const init = { bubbles: true, cancelable: true, key: e.key || 'Enter' };
@@ -572,8 +501,61 @@ async function handle(evt) {
             el.dispatchEvent(new Event('keyup', init));
           }
         } catch {}
+      }, evt);
+      return;
+    }
+
+    // checkbox/radio: 用点击模拟
+    const isCheckboxLike = ((evt.tag || '').toLowerCase() === 'input' && ['checkbox', 'radio'].includes((evt.inputType || '').toLowerCase()));
+    if (isCheckboxLike) {
+      const done = await toggleCheckboxLike();
+      if (!done) return;
+      // 触发 change 以匹配用户交互
+      await page.evaluate((sel) => {
+        try {
+          const el = sel ? document.querySelector(sel) : (document && document.activeElement);
+          if (!el) return;
+          const Ev = (el.ownerDocument && el.ownerDocument.defaultView && el.ownerDocument.defaultView.Event) || Event;
+          el.dispatchEvent(new Ev('change', { bubbles: true }));
+        } catch {}
+      }, selector);
+      return;
+    }
+
+    // 文本类输入（含密码、contenteditable）：聚焦后用键盘输入
+    try {
+      if (selector) {
+        await page.waitForSelector(selector, { timeout: 2500 });
+        await page.focus(selector);
+      } else {
+        await page.evaluate(() => { try { document && document.activeElement && document.activeElement.focus && document.activeElement.focus(); } catch {} });
       }
-    }, evt);
+
+      // 清空现有内容
+      try {
+        await page.keyboard.down('Control');
+        await page.keyboard.press('A');
+        await page.keyboard.up('Control');
+        await page.keyboard.press('Backspace');
+      } catch {}
+
+      if (text) {
+        if (selector) await page.type(selector, text, { delay: isPwd ? 60 : 35 });
+        else await page.keyboard.type(text, { delay: isPwd ? 60 : 35 });
+      }
+
+      // change 事件需要明确触发（原生输入通常在失焦时触发）
+      if (evt.type === 'change') {
+        await page.evaluate(() => {
+          try {
+            const el = document && document.activeElement;
+            if (!el) return;
+            const Ev = (el.ownerDocument && el.ownerDocument.defaultView && el.ownerDocument.defaultView.Event) || Event;
+            el.dispatchEvent(new Ev('change', { bubbles: true }));
+          } catch {}
+        });
+      }
+    } catch {}
     return;
   }
 }

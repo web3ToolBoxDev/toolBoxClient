@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { eventEmitter } from './eventEmitter';
 
 class APIManager {
     static instance = null;
@@ -36,6 +37,7 @@ class APIManager {
     }
     async openWallets(ids) {
         const res = await axios.post(`${this.baseUrl}/openWallets`, { ids: ids });
+        eventEmitter.emit('taskExecuted');
         return res.data;
     }
     async deleteWallets(ids) {
@@ -53,6 +55,7 @@ class APIManager {
     }
     async initWallets(ids) {
         const res = await axios.post(`${this.baseUrl}/initWallets`, { ids: ids });
+        eventEmitter.emit('taskExecuted');
         return res.data;
     }
     async importTask(taskObj) {
@@ -65,6 +68,7 @@ class APIManager {
     }
     async execTask(taskName,taskData = null) {
         const res = await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,taskData:taskData });
+        eventEmitter.emit('taskExecuted');
         return res.data;
     }
     async getConfigInfo(taskName) {

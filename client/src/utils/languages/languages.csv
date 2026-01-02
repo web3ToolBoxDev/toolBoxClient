@@ -84,6 +84,16 @@ selectLang,Select Language,选择语言
 taskInfo,Task Info,任务信息
 connectionFailedAlert,"onnection Failed, Please reboot!",连接失败，请尝试重启程序!
 taskLog,Task Log,任务日志
+taskLog.taskListTitle,Task List,任务列表
+taskLog.systemTab,System,系统
+taskLog.noTasks,No tasks,暂无任务
+taskLog.deleteLogs,Delete Logs,删除日志
+taskLog.clearAllLogs,Clear All Logs,清空所有日志
+taskLog.cannotClearRunning,Cannot clear logs while tasks are running,任务运行时无法清空日志
+taskLog.status.running,Running,运行中
+taskLog.status.completed,Completed,已完成
+taskLog.emptyLogs,No logs yet,暂无日志
+taskLog.switchHint,Select a task to view logs,请选择任务查看日志
 terminateTask,Terminate,结束任务
 clearMessages,Clear,清空消息
 currentChromePath,Current Chrome Launch Path,当前浏览器路径

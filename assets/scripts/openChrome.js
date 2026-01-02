@@ -220,7 +220,7 @@ async function runTask() {
     }
 
 
-    sendTaskCompleted('例子任务', true, '任务执行成功');
+    // sendTaskCompleted('例子任务', true, '任务执行成功');
     exit();
 }
 

@@ -283,7 +283,7 @@ async function runTask() {
                     await page.goto(`chrome-extension://${extensionId}/home.html#unlock`);
                     const success = await unlockWallet(page);
                     if (success) {
-                        sendTaskCompleted('openWallet', true, '钱包打开成功');
+                        // sendTaskCompleted('openWallet', true, '钱包打开成功');
                         sendTaskLog('钱包已成功打开并解锁');
                         breaked = true;
                         break;

@@ -136,7 +136,7 @@ router.post('/checkProxy',async(req,res)=>{
 //获取指纹信息数量
 router.get('/getFingerPrintCount',async(req,res)=>{
   const count = await fingerPrintService.getFingerPrintCount();
-  res.send(count);
+  res.send({...count,testError:'testError' });
 })
 //导入指纹信息
 router.post('/loadFingerPrints',async(req,res)=>{

@@ -3,6 +3,7 @@ const path = require('path');
 const shell = require('electron').shell;
 const config = require('./config').getInstance();
 const isBuild = config.getIsBuild();
+// const isBuild = true;
 
 console.log('isBuild:', isBuild);
 

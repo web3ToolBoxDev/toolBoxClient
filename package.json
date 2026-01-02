@@ -132,7 +132,7 @@
     "crypto-browserify": "^3.12.0",
     "customize-cra": "^1.0.0",
     "dotenv": "^16.4.5",
-    "electron": "^29.0.1",
+    "electron": "29.0.1",
     "electron-builder": "^24.12.0",
     "electron-is-dev": "^3.0.1",
     "https-browserify": "^1.0.0",

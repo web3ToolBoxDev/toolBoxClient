@@ -89,7 +89,9 @@ const SyncFunction = () => {
                 // alert(t('sync.groupStarted'));
                 return true;
             }
-            // alert(t('sync.startFailed'));
+            const errMsg = (result && result.message) ? result.message : (t('sync.startFailed') || 'Start failed');
+            console.error('startSyncForCurrentSelection failed:', errMsg);
+            alert(errMsg);
             return false;
         } catch (error) {
             console.error('startSyncForCurrentSelection error:', error);
