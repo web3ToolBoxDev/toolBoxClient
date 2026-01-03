@@ -101,7 +101,7 @@ function buildLaunchArgs(env, metamaskDir) {
 async function launchChromeForEnv(env, chromePath, savePath, metamaskDir, position) {
   const userDataDir = path.join(savePath, env.id);
   if (!fs.existsSync(userDataDir)) {
-    throw new Error(`用户数据目录不存在: ${userDataDir}`);
+  throw new Error(`User data directory not found: ${userDataDir}`);
   }
   const browser = await puppeteer.launch({
     headless: false,
@@ -352,7 +352,7 @@ async function attachExistingExtensionPages(browser, slavePagesGetters) {
           if (page) {
             const pid = `ext-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
             lastUrlByPageId.set(pid, u);
-            sendTaskLog('[syncFunction] 发现扩展页面，绑定同步: ' + (u || '<unknown>'));
+            sendTaskLog('[syncFunction] Found extension page, binding for sync: ' + (u || '<unknown>'));
             setupMasterPageSync(page, pid, slavePagesGetters);
             page.on('framenavigated', async (frame) => {
               if (frame === page.mainFrame()) {
@@ -383,7 +383,7 @@ async function handleTargetCreated(target, slavePagesGetters) {
       if (!page) return;
       const pageId = `ext-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
       lastUrlByPageId.set(pageId, u || '');
-      sendTaskLog('[syncFunction] 捕获到扩展页面 target: ' + (u || '<unknown>'));
+  sendTaskLog('[syncFunction] Captured extension target: ' + (u || '<unknown>'));
       setupMasterPageSync(page, pageId, slavePagesGetters);
 
       try {
@@ -423,7 +423,7 @@ async function handleTargetCreated(target, slavePagesGetters) {
   const currentTaskData = ensureTaskDataIsObject();
   const { envs = [], taskDataFromFront = {}, chromePath, savePath, walletExtensionPath } = currentTaskData || {};
   if (!chromePath || !savePath) {
-    console.error('[syncFunction] 缺少 chromePath 或 savePath');
+    console.error('[syncFunction] Missing chromePath or savePath');
     return gracefulExit();
   }
 
@@ -432,26 +432,26 @@ async function handleTargetCreated(target, slavePagesGetters) {
   const masterEnv = envs.find(e => e && e.bindWalletId === masterId);
   const slaveEnvs = envs.filter(e => e && slaveIds.includes(e.bindWalletId));
   if (!masterEnv || slaveEnvs.length === 0) {
-    console.error('[syncFunction] 未找到 master 或 slaves 的环境');
+    console.error('[syncFunction] Master or slave environments not found');
     return gracefulExit();
   }
 
   const metamaskDir = resolveMetamaskDir(walletExtensionPath);
   if (!metamaskDir) {
-    sendTaskLog('[syncFunction] 未找到有效的 MetaMask 扩展目录（缺少 manifest.json）');
-    console.error('[syncFunction] MetaMask 扩展目录无效，manifest.json 不存在');
+    sendTaskLog('[syncFunction] No valid MetaMask extension directory (manifest.json missing)');
+    console.error('[syncFunction] MetaMask extension directory invalid; manifest.json missing');
     return gracefulExit();
   }
-  sendTaskLog('[syncFunction] 使用扩展目录: ' + metamaskDir);
+  sendTaskLog('[syncFunction] Using extension directory: ' + metamaskDir);
 
   // 启动 Master 与 Slave 浏览器
   const MASTER_WINDOW = { x: 0, y: 0, width: 900, height: 700 };
   const SLAVE_WINDOW = { x: 920, y: 0, width: 900, height: 700 };
 
-  sendTaskLog('[syncFunction] 启动 Master 浏览器...');
+  sendTaskLog('[syncFunction] Launching Master browser...');
   const masterBrowser = await launchChromeForEnv(masterEnv, chromePath, savePath, metamaskDir, MASTER_WINDOW);
 
-  sendTaskLog('[syncFunction] 启动 Slave 浏览器...');
+  sendTaskLog('[syncFunction] Launching Slave browser...');
   const slaveBrowsers = [];
   for (let i = 0; i < slaveEnvs.length; i++) {
     const pos = { ...SLAVE_WINDOW, x: SLAVE_WINDOW.x + i * (SLAVE_WINDOW.width + 20) };
@@ -488,7 +488,7 @@ async function handleTargetCreated(target, slavePagesGetters) {
         }
         await sleep(120);
       }
-      if (url) sendTaskLog('[syncFunction] 未找到扩展页面，最后看到: ' + (lastSeen || 'null'));
+  if (url) sendTaskLog('[syncFunction] Extension page not found; last seen: ' + (lastSeen || 'null'));
       return null;
     }
 
@@ -579,7 +579,7 @@ async function handleTargetCreated(target, slavePagesGetters) {
   await attachExistingExtensionPages(masterBrowser, slavePagesGetters);
 
   // 进程保活，直到收到终止
-  sendTaskLog('[syncFunction] 已启动 Master/Slave 同步，按服务端控制结束。');
-  sendTaskLog('[syncFunction] 调试提示：普通页使用 page.goto，同步扩展页改为“附着/创建”策略；若 Slave 未见扩展窗口，CDP 会尝试创建。');
+  sendTaskLog('[syncFunction] Master/Slave synchronization running; awaiting server instructions to exit.');
+  sendTaskLog('[syncFunction] Debug tip: regular pages use page.goto, extension sync attaches/creates windows; CDP will create one if the slave cannot see it.');
   // 不发送 task_completed，让服务端以心跳维持任务
 })();

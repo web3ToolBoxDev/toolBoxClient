@@ -31,13 +31,13 @@ async function loadMetaMaskId(browser) {
         return getMetaMaskId(browser);
     }
 }
-console.log('收到的URL参数:', url);
+console.log('Received URL parameter:', url);
 
 let ws = new webSocket(url);
 let webSocketReady = false;
 let taskData = null;
 
-// 心跳包定时发送
+// Heartbeat scheduler
 function sendHeartBeat() {
     setInterval(() => {
         if (ws.readyState === webSocket.OPEN) {
@@ -46,7 +46,7 @@ function sendHeartBeat() {
             });
             ws.send(heartBeatMessage);
         }
-    }, 5000); // 每 5 秒发送一次心跳包
+    }, 5000); // Send heartbeat every 5 seconds
 }
 
 function sendRequestTaskData() {
@@ -104,7 +104,7 @@ ws.on('message', (message) => {
         case 'heart_beat':
             break;
         case 'request_task_data':
-            console.log('收到任务数据:', data);
+            console.log('Received task data:', data);
             taskData = JSON.parse(data.data);
             break;
         case 'terminate_process':
@@ -116,19 +116,19 @@ ws.on('message', (message) => {
 });
 
 ws.on('error', (error) => {
-    console.error('WebSocket连接发生错误:', error);
-    // 关闭连接并退出
+    console.error('WebSocket connection error:', error);
+    // Close connection and exit
     ws.close();
     process.exit(1);
 });
 
-// 定时检查连接状态，如果连接断开则重连
+// Reconnect if WebSocket closes
 setInterval(() => {
     if (ws.readyState === webSocket.CLOSED) {
-        console.log('WebSocket连接断开，尝试重新连接...');
+        console.log('WebSocket disconnected, attempting to reconnect...');
         ws = new webSocket(url);
     }
-}, 5000); // 每 5 秒检查一次连接状态
+}, 5000); // Check connection state every 5 seconds
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -222,10 +222,10 @@ async function autoFaucet(browser){
             );
             await sendEth.click();
         } else {
-            console.error('元素被遮挡');
+            console.error('Element is blocked');
         }
     } else {
-        console.error('元素不可见');
+        console.error('Element is not visible');
     }
     //check success
     const successSign = await page.waitForSelector('.text-lg.text-white.elipsis',{timeout:20000});
@@ -236,9 +236,9 @@ async function autoFaucet(browser){
     return false;
 }
 
-// 进行任务逻辑
+// Task logic
 async function runTask() {
-    console.log('任务开始执行');
+    console.log('Task execution started');
     const chromePath = ChromeLauncher.Launcher.getInstallations();
     let wallet = taskData;
     console.log(wallet)
@@ -283,7 +283,7 @@ async function runTask() {
      browser.on('disconnected', () => {
         console.log('Browser disconnected.');
         // 在这里执行您希望在浏览器关闭时进行的操作
-        sendTaskLog('浏览器关闭,退出任务');
+        sendTaskLog('Browser closed, exiting task');
         sendTerminateProcess();
         exit();
 
@@ -303,12 +303,12 @@ async function runTask() {
         success = await autoFaucet(browser);
     }catch(error){
         console.log('error:',error);
-        sendTaskLog(`任务执行出错:${error}`);
+        sendTaskLog(`Task execution error: ${error}`);
     }
     if(success){
-        sendTaskLog('领取成功，等待quickNode发送ETH到您的地址');
+        sendTaskLog('Claim succeeded, waiting for QuickNode to send ETH to your address');
     }else{  
-        sendTaskLog('领取失败，请检查当前地址主网上是否有0.001ETH或者IP是否有效');
+        sendTaskLog('Claim failed, check that the address has 0.001 ETH on mainnet and the IP is valid');
     }
     browser.close();
     
@@ -323,8 +323,8 @@ async function runTask() {
             // console.log('发送任务日志');
             sendRequestTaskData();
             if (taskData) {
-                console.log('任务数据:', taskData);
-                sendTaskLog('收到任务数据，完成初始化，开始执行任务');
+                console.log('Task data:', taskData);
+                sendTaskLog('Task data received, initialization complete, starting execution');
                 await runTask();
             }
         }

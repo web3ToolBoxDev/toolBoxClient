@@ -13,8 +13,7 @@ app.use(express.json());
 app.use(cors());
 app.use('/api', router);
 
-
-app.listen(port, () => {
+app.listen(port, async () => {
   console.log(`服务器已启动，监听端口 ${port}`);
   webService.initialize(app);
 });

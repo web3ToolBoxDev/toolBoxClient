@@ -9,7 +9,7 @@ const path = require('path');
 
 
 
-console.log('收到的URL参数:', url);
+console.log('Received URL parameter:', url);
 
 let ws = new webSocket(url);
 let webSocketReady = false;
@@ -91,7 +91,7 @@ ws.on('message', (message) => {
             // console.log('收到服务端心跳包:');
             break;
         case 'request_task_data':
-            console.log('收到任务数据:', data);
+            console.log('Received task data:', data);
             taskData = data.data;
             break;
         case 'terminate_process':
@@ -103,19 +103,19 @@ ws.on('message', (message) => {
 });
 
 ws.on('error', (error) => {
-    console.error('WebSocket连接发生错误:', error);
-    // 关闭连接并退出
+    console.error('WebSocket connection error:', error);
+    // Close connection and exit
     ws.close();
     process.exit(1);
 });
 
-// 定时检查连接状态，如果连接断开则重连
+// Reconnect if WebSocket closes
 setInterval(() => {
     if (ws.readyState === webSocket.CLOSED) {
-        console.log('WebSocket连接断开，尝试重新连接...');
+        console.log('WebSocket disconnected, attempting to reconnect...');
         ws = new webSocket(url);
     }
-}, 5000); // 每 5 秒检查一次连接状态
+}, 5000); // Check connection state every 5 seconds
 // 进行任务时，需要发送心跳包，接收任务数据，发送任务日志，完成任务
 
 async function openBrowser(config) {
@@ -174,7 +174,7 @@ async function openTwitter(config) {
         }
     });
     if (update) {
-        console.log('更新cookie');
+    console.log('Updating cookies');
         try {
             await twitterPage.evaluate((token) => {
 
@@ -188,7 +188,7 @@ async function openTwitter(config) {
 
             }, token);
         } catch (e) {
-            console.log('登录失败:', e);
+            console.log('Login failed:', e);
         }
     }
 }
@@ -229,7 +229,7 @@ async function processSendEmail() {
                 text: message.text
             }, async (error, info) => {
                 if (error) {
-                    console.error('发送邮件失败:', error);
+                    console.error('Failed to send email:', error);
                     setTimeout(() => {
                         emailClient = nodemailer.createTransport({
                             host: config.smtpServer,
@@ -244,7 +244,7 @@ async function processSendEmail() {
                     }, 2000);
 
                 } else {
-                    console.log('发送邮件成功:', info.response);
+                    console.log('Email sent successfully:', info.response);
                 }
             }
             );
@@ -376,8 +376,8 @@ function startListening(page) {
              //如果返回报错码
 
             if (response.status() === 429) {
-                console.log('请求次数过多:', response.status());
-                sendTaskLog('请求次数过多，等待中...');
+                console.log('Too many requests:', response.status());
+                sendTaskLog('Rate limit hit, waiting...');
                 rateLimit = true;
                 return;
             }
@@ -398,9 +398,9 @@ function startListening(page) {
         }
     });
 }
-// 进行任务逻辑
+// Task logic
 async function runTask() {
-    console.log('任务开始执行');
+    console.log('Task execution started');
 
     taskData = JSON.parse(taskData);
     config = taskData.taskDataFromFront.config;
@@ -440,7 +440,7 @@ async function runTask() {
         if (rateLimit) {
             await sleep(60000);
             rateLimit = false;
-            console.log('请求次数过多，等待结束');
+            console.log('Rate limit wait finished');
         }
         await sleep(1000);
     }
@@ -454,7 +454,7 @@ async function runTask() {
             sendRequestTaskData();
 
             if (taskData) {
-                sendTaskLog(`收到任务数据:${taskData}`);
+                sendTaskLog(`Received task data: ${taskData}`);
                 await runTask();
             }
         }

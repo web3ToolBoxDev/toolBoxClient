@@ -585,7 +585,7 @@ const WalletManage = () => {
               const scriptDirectory = await window.electronAPI.chooseDirectory({});
               if (scriptDirectory) {
                 childRef.current.updateValueObj('scriptDirectory', scriptDirectory);
-                setModalProp((prev) => ({ ...prev })); // 强制刷新弹窗内容
+                setModalProp((prev) => ({ ...prev })); 
               }
             }
           },
