@@ -4,14 +4,17 @@ const puppeteer = require('puppeteer-extra');
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
-const { set } = require('../../server/server');
+
 
 
 let ws = new WebSocket(url);
 let webSocketReady = false;
 let taskData = null;
 const ENABLE_DEBUG_LOGS = /^1|true$/i.test(String(process.env.TOOLBOX_DEBUG_LOGS || process.env.TOOLBOX_SLAVE_DEBUG || ''));
-
+const WINDOW_LAYOUT = {
+  master: { x: 100, y: 100, width: 600, height: 800 },
+  slave: { x: 720, y: 100, width: 600, height: 800},
+};
 function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
 
 // 统一消息
@@ -877,21 +880,31 @@ if (!process.send) {
         }
 
         // 解析 master/slaves 对应的 env
-        const { masterId, slaveIds = [] } = taskDataFromFront || {};
-        const masterEnv = envs.find(e => e && e.bindWalletId === masterId);
-        const slaveEnvs = envs.filter(e => e && slaveIds.includes(e.bindWalletId));
+        const { masterId, slaveIds = [], mode } = taskDataFromFront || {};
+        const isEnvMode = mode === 'env';
+
+        // Resolve master/slaves: env mode uses env.id, wallet mode uses bindWalletId
+        const masterEnv = envs.find((e) => e && (isEnvMode ? (e.id === masterId || e._id === masterId) : e.bindWalletId === masterId));
+        const slaveIdSet = new Set(slaveIds || []);
+        const slaveEnvs = envs.filter((e) => {
+          if (!e) return false;
+          return isEnvMode ? slaveIdSet.has(e.id) || slaveIdSet.has(e._id) : slaveIdSet.has(e.bindWalletId);
+        });
         if (!masterEnv || slaveEnvs.length === 0) {
-            console.error('[syncFunction] Master or slave environments not found');
-            return gracefulExit();
+          console.error('[syncFunction] Master or slave environments not found');
+          return gracefulExit();
         }
 
-        const metamaskDir = resolveMetamaskDir(walletExtensionPath);
-        if (!metamaskDir) {
+        // Only resolve MetaMask when wallet mode; env mode should skip extension loading
+        const metamaskDir = isEnvMode ? null : resolveMetamaskDir(walletExtensionPath);
+        if (!isEnvMode) {
+          if (!metamaskDir) {
             sendTaskLog('[syncFunction] No valid MetaMask extension directory (manifest.json missing)');
             console.error('[syncFunction] MetaMask extension directory invalid; manifest.json missing');
             return gracefulExit();
+          }
+          sendTaskLog('[syncFunction] Using extension directory: ' + metamaskDir);
         }
-  sendTaskLog('[syncFunction] Using extension directory: ' + metamaskDir);
 
         const payload = {
             masterEnv,

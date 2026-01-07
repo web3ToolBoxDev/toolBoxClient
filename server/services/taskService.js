@@ -337,7 +337,11 @@ class TaskService {
 
                     // 获取钱包扩展路径
                     const walletScriptDirResult = config.getWalletScriptDirectory();
-                    const walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
+                    let walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
+                    // env sync mode should not load metamask extension
+                    if (task.taskName === 'syncFunction' && taskDataFromFront?.mode === 'env') {
+                        walletExtensionPath = null;
+                    }
 
 
                     const taskData = { 
@@ -367,7 +371,11 @@ class TaskService {
 
                     // 获取钱包扩展路径
                     const walletScriptDirResult = config.getWalletScriptDirectory();
-                    const walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
+                    let walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
+                    // env sync mode should not load metamask extension
+                    if (task.taskName === 'syncFunction' && taskDataFromFront?.mode === 'env') {
+                        walletExtensionPath = null;
+                    }
 
                     const taskData = { 
                         env, 
@@ -402,7 +410,11 @@ class TaskService {
                 
                 // 获取钱包扩展路径
                 const walletScriptDirResult = config.getWalletScriptDirectory();
-                const walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
+                let walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
+                // env sync mode should not load metamask extension
+                if (task.taskName === 'syncFunction' && taskDataFromFront?.mode === 'env') {
+                    walletExtensionPath = null;
+                }
 
                 const taskDataAll = { 
                     envs, 

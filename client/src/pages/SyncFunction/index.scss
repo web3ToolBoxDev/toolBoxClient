@@ -17,16 +17,24 @@
     border: 1px solid $clr-sidebar-border;
     border-radius: 8px;
     box-shadow: 0 2px 8px 0 rgba(0,0,0,0.03);
-    height: 80px; // 固定高度
+    min-height: 110px; // 给开关+按钮留空间
+    height: auto;
     
     .card-body {
-      padding: 0.8rem 1rem 0.6rem 1rem;
+      padding: 0.8rem 1rem 0.8rem 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.4rem;
       
       .btn-row {
         display: flex;
         justify-content: center;
-        gap: 1.5rem;
-        margin-top: 0.5rem;
+        gap: 1rem;
+        row-gap: 0.6rem;
+        flex-wrap: wrap;
+        width: 100%;
+        margin-top: 0.2rem;
         
         .btn {
           font-size: 0.9rem;

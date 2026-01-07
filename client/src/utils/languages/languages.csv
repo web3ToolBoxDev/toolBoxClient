@@ -231,19 +231,21 @@ wallet.status.notBound,Not bound to environment,未绑定环境
 syncFunction,Sync Function,同步功能
 customModal.selected,Selected,已选择
 syncFunction.title,Sync Function,同步功能
-sync.chooseMaster,Choose Master,选择主钱包
-sync.chooseSlaves,Choose Slaves,选择从钱包
-sync.selectedMaster,Selected Master,已选主钱包
-sync.selectedSlaves,Selected Slaves,已选从钱包
-sync.noMaster,No Master,未选择主钱包
-sync.noSlaves,No Slaves,未选择从钱包
-sync.unit,wallets,个钱包
+sync.chooseMaster,Choose Master,选择主环境
+sync.chooseSlaves,Choose Slaves,选择从环境
+sync.selectedMaster,Selected Master,已选主环境
+sync.selectedSlaves,Selected Slaves,已选从环境
+sync.noMaster,No Master,未选择主环境
+sync.noSlaves,No Slaves,未选择从环境
+sync.unit,Env,个环境
 sync.addGroup,Add Group,添加组合
 sync.groupList,Group List,组合列表
 sync.noGroups,No groups,暂无组合
 sync.selectMasterAndSlaves,Please select master and slaves,请选择主钱包和从钱包
 sync.groupExists,Group already exists,组合已存在
 sync.groupStarted,Group started,组合已启动
+sync.useWalletSync,Sync with wallet,使用钱包同步
+sync.useEnvSync,Sync with browser environment,使用浏览器环境同步
 sync.status.running,Running,运行中
 sync.status.stopped,Stopped,已停止
 sync.startGroup,Start,启动

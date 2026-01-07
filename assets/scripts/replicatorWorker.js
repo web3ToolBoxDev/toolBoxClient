@@ -24,6 +24,13 @@ const pageMap = new Map();      // pageId -> Page
 const lastUrl = new Map();      // pageId -> last navigated url
 const navBlockUntil = new Map(); // pageId -> timestamp until which actions are paused (during nav)
 
+// Event handling constants
+const WAITABLE_EVENT_TYPES = new Set(['click', 'input', 'change', 'keydown']);
+const EVENT_READY_TIMEOUT_MS = 4500;
+const EVENT_READY_POLL_INTERVAL_MS = 200;
+const NON_TYPABLE_INPUT_TYPES = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file', 'hidden', 'image', 'range', 'date', 'datetime-local', 'month', 'time', 'week']);
+const SELECT_ALL_MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
+
 function log(msg) {
   // Relay logs back to the master process (TaskService UI)
   if (process && process.send) process.send({ type: 'log', message: msg });
