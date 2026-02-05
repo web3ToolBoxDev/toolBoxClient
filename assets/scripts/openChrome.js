@@ -6,9 +6,10 @@ const fs = require('fs');
 
 
 
-let ws = new webSocket(url);
+let ws = null;
 let webSocketReady = false;
 let taskData = null;
+let heartBeatTimer = null;
 
 const checkIfDirectoryExists = (dirPath) => {
     try {
@@ -19,10 +20,57 @@ const checkIfDirectoryExists = (dirPath) => {
     }
 }
 
+const SENSITIVE_KEYS = new Set([
+    'mnemonic',
+    'privateKey',
+    'ethPrivateKey',
+    'solPrivateKey',
+    'seed',
+    'password'
+]);
+
+const maskString = (value = '') => {
+    const str = String(value);
+    if (str.length <= 8) return '***';
+    return `${str.slice(0, 4)}****${str.slice(-4)}`;
+};
+
+const sanitize = (value) => {
+    if (!value || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value.map(sanitize);
+    const out = {};
+    Object.entries(value).forEach(([key, val]) => {
+        if (SENSITIVE_KEYS.has(key)) {
+            out[key] = '***';
+            return;
+        }
+        if (key.toLowerCase().includes('private') || key.toLowerCase().includes('mnemonic')) {
+            out[key] = '***';
+            return;
+        }
+        if (typeof val === 'string' && (key.toLowerCase().includes('address') || key.toLowerCase().includes('id'))) {
+            out[key] = maskString(val);
+            return;
+        }
+        out[key] = sanitize(val);
+    });
+    return out;
+};
+
+function sendSafeLog(log) {
+    if (ws && ws.readyState === webSocket.OPEN) {
+        const message = typeof log === 'string' ? log : JSON.stringify(sanitize(log));
+        ws.send(JSON.stringify({ type: 'task_log', message }));
+    }
+}
+
 // 心跳包定时发送
 function sendHeartBeat() {
-    setInterval(() => {
-        if (ws.readyState === webSocket.OPEN) {
+    if (heartBeatTimer) {
+        clearInterval(heartBeatTimer);
+    }
+    heartBeatTimer = setInterval(() => {
+        if (ws && ws.readyState === webSocket.OPEN) {
             const heartBeatMessage = JSON.stringify({
                 type: 'heart_beat'
             });
@@ -42,13 +90,7 @@ function sendRequestTaskData() {
 }
 
 function sendTaskLog(log) {
-    if (ws.readyState === webSocket.OPEN) {
-        const taskLogMessage = JSON.stringify({
-            type: 'task_log',
-            message: log
-        });
-        ws.send(taskLogMessage);
-    }
+    sendSafeLog(log);
 }
 
 function sendTaskCompleted(taskName, success, message) {
@@ -75,41 +117,57 @@ function exit() {
     process.exit(0);
 }
 
-ws.on('open', () => {
-    webSocketReady = true;
-    sendHeartBeat();
-});
+function initWebSocket() {
+    try {
+        if (ws) {
+            ws.removeAllListeners();
+            ws.close();
+        }
+    } catch {}
+    ws = new webSocket(url);
 
-ws.on('message', (message) => {
-    let data = JSON.parse(message);
-    switch (data.type) {
-        case 'heart_beat':
-            // console.log('收到服务端心跳包:');
-            break;
-        case 'request_task_data':
-            // console.log('收到任务数据:', data);
-            taskData = data.data;
-            break;
-        case 'terminate_process':
-            sendTerminateProcess();
-            exit();
-        default:
-            break;
-    }
-});
+    ws.on('open', () => {
+        webSocketReady = true;
+        sendHeartBeat();
+        sendRequestTaskData();
+    });
 
-ws.on('error', (error) => {
-    console.error('WebSocket connection error:', error);
-    // 关闭连接并退出
-    ws.close();
-    process.exit(1);
-});
+    ws.on('message', (message) => {
+        let data = JSON.parse(message);
+        switch (data.type) {
+            case 'heart_beat':
+                // console.log('收到服务端心跳包:');
+                break;
+            case 'request_task_data':
+                // console.log('收到任务数据:', data);
+                taskData = data.data;
+                break;
+            case 'terminate_process':
+                sendTerminateProcess();
+                exit();
+            default:
+                break;
+        }
+    });
+
+    ws.on('close', () => {
+        webSocketReady = false;
+    });
+
+    ws.on('error', (error) => {
+        console.error('WebSocket connection error:', error);
+        webSocketReady = false;
+        try { ws.close(); } catch {}
+    });
+}
+
+initWebSocket();
 
 // 定时检查连接状态，如果连接断开则重连
 setInterval(() => {
-    if (ws.readyState === webSocket.CLOSED) {
-    console.log('WebSocket disconnected, attempting to reconnect...');
-        ws = new webSocket(url);
+    if (!ws || ws.readyState === webSocket.CLOSED) {
+        console.log('WebSocket disconnected, attempting to reconnect...');
+        initWebSocket();
     }
 }, 5000); // 每 5 秒检查一次连接状态
 // 进行任务时，需要发送心跳包，接收任务数据，发送任务日志，完成任务
@@ -126,7 +184,7 @@ async function checkBrowserClosed(browser) {
 // 进行任务逻辑
 async function runTask() {
     console.log('Task execution started');
-    console.log('Task data:', taskData);
+    // avoid logging raw task data to frontend
     if (typeof taskData === 'string') {
         taskData = JSON.parse(taskData);
     }
@@ -161,13 +219,16 @@ async function runTask() {
     ];
     if (taskData.env.useProxy) {
         fingerprints = JSON.stringify({
+            audio: taskData.env.audio,
+            clientRect: taskData.env.clientRect,
+            webgl: taskData.env.webgl,
             canvas: taskData.env.canvas,
             hardware: taskData.env.hardware,
             screen: taskData.env.screen,
             clientHint: taskData.env.clientHint,
             languages_js: taskData.env.language_js,
             languages_http: taskData.env.language_http,
-            fonts_remove: taskData.env.fonts_remove + ',Tahoma',
+            fonts_remove: taskData.env.fonts_remove,
             position: taskData.env.position,
             timeZone: taskData.env.timeZone,
             webrtc_public: taskData.env.webrtc_public,
@@ -178,17 +239,21 @@ async function runTask() {
 
     } else {
         fingerprints = JSON.stringify({
+            audio: taskData.env.audio,
+            clientRect: taskData.env.clientRect,
+            webgl: taskData.env.webgl,
             canvas: taskData.env.canvas,
             hardware: taskData.env.hardware,
             screen: taskData.env.screen,
             clientHint: taskData.env.clientHint,
             languages_js: taskData.env.language_js,
             languages_http: taskData.env.language_http,
-            fonts_remove: taskData.env.fonts_remove + ',Tahoma'
+            fonts_remove: taskData.env.fonts_remove
         });
     }
 
     args.push(`--toolbox=${fingerprints}`);
+    console.log('toolbox args:', `--toolbox=${fingerprints}`);
 
 
 

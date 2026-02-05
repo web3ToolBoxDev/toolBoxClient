@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Container, Row, Col, Button, Card } from 'react-bootstrap';
 import CustomModal from '../../components/customModal';
 import APIManager from '../../utils/api';
@@ -53,8 +53,9 @@ const WalletManage = () => {
   const wallets = useWalletStore((state) => state.wallets);
 
   const childRef = useRef();
+  const selectAllRef = useRef(null);
 
-  const updateWalletList = async () => {
+  const updateWalletList = useCallback(async () => {
     try {
       await fetchWallets();
       // wallets 的变化会通过 useEffect 自动同步到 walletList
@@ -82,7 +83,7 @@ const WalletManage = () => {
         console.error('Fallback wallet fetch also failed:', fallbackError);
       }
     }
-  };
+  }, [fetchWallets]);
 
 
   useEffect(() => {
@@ -118,7 +119,7 @@ const WalletManage = () => {
         eventEmitter.removeListener('taskCompleted', onTaskCompleted);
       }
     };
-  }, []);
+  }, [fetchPaths, updateWalletList]);
 
   // 监听 wallets store 的变化，同步到本地 walletList
   useEffect(() => {
@@ -127,6 +128,13 @@ const WalletManage = () => {
       setWalletList(updatedWalletList);
     }
   }, [wallets]);
+
+  useEffect(() => {
+    if (!selectAllRef.current) return;
+    const total = Array.isArray(walletList) ? walletList.length : 0;
+    const selected = Array.isArray(selectedIds) ? selectedIds.length : 0;
+    selectAllRef.current.indeterminate = selected > 0 && selected < total;
+  }, [selectedIds, walletList]);
 
   // 选中/取消选中单个钱包
   const toggleSelect = (id) => {
@@ -315,6 +323,27 @@ const WalletManage = () => {
     apiManager.deleteWallets(selectedIds).then((res) => {
       setDeleting(false);
       if (res && res.success) {
+        try {
+          const storedGroups = localStorage.getItem('syncGroups');
+          if (storedGroups) {
+            const parsed = JSON.parse(storedGroups);
+            if (Array.isArray(parsed)) {
+              const removedWallets = new Set(selectedIds);
+              const filtered = parsed.filter((group) => {
+                const mode = group.mode || 'wallet';
+                if (mode !== 'wallet') {
+                  return true;
+                }
+                if (removedWallets.has(group.master)) return false;
+                const slaves = Array.isArray(group.slaves) ? group.slaves : [];
+                return !slaves.some((id) => removedWallets.has(id));
+              });
+              localStorage.setItem('syncGroups', JSON.stringify(filtered));
+            }
+          }
+        } catch (error) {
+          console.error('Failed to update syncGroups:', error);
+        }
         // 从本地状态中移除已删除的钱包
         setWalletList(walletList.filter(w => !selectedIds.includes(w.id)));
         setSelectedIds([]);
@@ -551,8 +580,15 @@ const WalletManage = () => {
 
   // setInitWallet = () => {
   const setWalletScriptDirectory = async () => {
-    const currentScriptDirectory = usePathStore.getState().walletScriptDirectory;
-    console.log('current script directory:', currentScriptDirectory);
+    let currentDirectory = 'default';
+    try {
+      const result = await apiManager.getWalletScriptDirectory();
+      if (result && result.success && result.directory) {
+        currentDirectory = result.directory;
+      }
+    } catch (error) {
+      console.error('获取当前脚本目录失败:', error);
+    }
     setModalProp({
       show: true,
       handleClose: handleModalClose,
@@ -561,16 +597,37 @@ const WalletManage = () => {
         [
           {
             type: 'label',
-            text: t('chooseScriptDirectory'),
+            text: t('syncScriptDirectory.current'),
             colWidth: 4,
             style: { textAlign: 'center', fontWeight: 'bold' },
           },
           {
             type: 'text',
             key: 'scriptDirectory',
-            text: currentScriptDirectory || '',
+            text: currentDirectory,
             colWidth: 4,
             style: { textAlign: 'left', fontStyle: 'italic', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+          },
+          {
+            type: 'label',
+            text: '',
+            colWidth: 4,
+          },
+        ],
+        [
+          {
+            type: 'label',
+            text: t('syncScriptDirectory.selectNew'),
+            colWidth: 4,
+            style: { textAlign: 'center', fontWeight: 'bold' },
+          },
+          {
+            type: 'input',
+            key: 'scriptDirectoryInput',
+            inputType: 'text',
+            colWidth: 4,
+            placeholder: t('syncScriptDirectory.placeholder'),
+            defaultValue: ''
           },
           {
             type: 'button',
@@ -584,7 +641,7 @@ const WalletManage = () => {
               }
               const scriptDirectory = await window.electronAPI.chooseDirectory({});
               if (scriptDirectory) {
-                childRef.current.updateValueObj('scriptDirectory', scriptDirectory);
+                childRef.current.updateValueObj('scriptDirectoryInput', scriptDirectory);
                 setModalProp((prev) => ({ ...prev })); 
               }
             }
@@ -597,7 +654,7 @@ const WalletManage = () => {
             colWidth: 4,
             style: { marginLeft: 'auto' },
             click: () => {
-              const scriptDirectory = childRef.current.getValue('scriptDirectory');
+              const scriptDirectory = childRef.current.getValue('scriptDirectoryInput');
               if (scriptDirectory) {
                 apiManager.setWalletScriptDirectory(scriptDirectory).then((res) => {
                   if (res.success) {
@@ -612,6 +669,24 @@ const WalletManage = () => {
               } else {
                 alert(t('invalidScriptPath'));
               }
+            },
+          },
+          {
+            type: 'button',
+            text: t('reset'),
+            colWidth: 4,
+            click: () => {
+              apiManager.resetWalletScriptDirectory().then((res) => {
+                if (res && res.success) {
+                  alert(t('setSuccess'));
+                  usePathStore.getState().fetchWalletScriptDirectory();
+                  handleModalClose();
+                } else {
+                  alert(t('setFailed') + ': ' + (res?.message || t('unknownError')));
+                }
+              }).catch((err) => {
+                alert(t('setFailed') + ': ' + (err?.message || t('unknownError')));
+              });
             },
           },
         ],
@@ -637,7 +712,7 @@ const WalletManage = () => {
       console.log('initWallets res:', res);
       if (res.success) {
         await updateWalletList();
-        alert(t('initSuccess'));
+        // 成功提示移除，避免阻塞后续任务状态更新
       } else {
         console.warn('initWallets failed:', res);
         // 显示具体的错误信息
@@ -691,9 +766,9 @@ const WalletManage = () => {
         <Card.Header className="d-flex justify-content-between align-items-center">
           <div className="header-checkbox-align">
             <input
+              ref={selectAllRef}
               type="checkbox"
               checked={walletList.length > 0 && selectedIds.length === walletList.length}
-              indeterminate={selectedIds.length > 0 && selectedIds.length < walletList.length}
               onChange={toggleSelectAll}
               style={{ marginRight: 8 }}
             />

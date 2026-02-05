@@ -1,13 +1,13 @@
 {
   "name": "web3toolbox",
   "author": "Aming",
-  "version": "0.1.8",
+  "version": "1.0.0",
   "private": true,
   "main": "electron.js",
   "license": "MIT",
   "homepage": ".",
   "build": {
-    "appId": "com.example.myapp",
+    "appId": "com.aming.web3toolbox",
     "productName": "web3toolbox",
     "extends": null,
     "directories": {
@@ -23,12 +23,20 @@
       "resources/**/*",
       "package.json",
       "config.js",
-      "!assets/savePath.json"
+      "!assets/savePath.json",
+      "!assets/chromePath.json",
+      "!assets/extensionInfo.json"    
     ],
     "extraResources": [
       {
         "from": "./assets",
-        "to": "./assets"
+        "to": "./assets",
+        "filter": [
+          "**/*",
+          "!savePath.json",
+          "!chromePath.json",
+          "!extensionInfo.json"
+        ]
       }
     ],
     "mac": {
@@ -45,7 +53,7 @@
           ]
         }
       ],
-      "icon": "client/build/logo_266x256.png"
+      "icon": "client/build/logo.ico"
     }
   },
   "dependencies": {
@@ -103,6 +111,8 @@
     "start": "react-app-rewired start",
     "build": "react-app-rewired build --port 30001",
     "test": "react-scripts test",
+    "test:e2e": "playwright test -c test/playwright.config.js",
+    "test:e2e:ui": "playwright test -c test/playwright.config.js --ui",
     "eject": "react-scripts eject",
     "pack": "electron-builder --dir"
   },
@@ -132,6 +142,7 @@
     "crypto-browserify": "^3.12.0",
     "customize-cra": "^1.0.0",
     "dotenv": "^16.4.5",
+    "@playwright/test": "^1.49.1",
     "electron": "29.0.1",
     "electron-builder": "^24.12.0",
     "electron-is-dev": "^3.0.1",
@@ -139,6 +150,7 @@
     "os-browserify": "^0.3.0",
     "stream-browserify": "^3.0.0",
     "stream-http": "^3.2.0",
+    "wait-on": "^7.2.0",
     "webpack": "^5.92.1",
     "webpack-cli": "^5.1.4",
     "webpack-dev-server": "^5.0.4",

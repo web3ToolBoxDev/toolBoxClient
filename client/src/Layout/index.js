@@ -28,6 +28,9 @@ const Layout = ({ Child }) => {
 
   const handleLangSelect = (lang) => {
     i18n.changeLanguage(lang);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('appLanguage', lang);
+    }
     setShowLangOffcanvas(false);
   };
 
@@ -86,6 +89,7 @@ const Layout = ({ Child }) => {
             <Button
               variant="primary"
               className="btn-task-info"
+              data-testid="task-info-button"
               onClick={() => setShowTasksOffcanvas(true)}
             >
               {t('taskInfo')}

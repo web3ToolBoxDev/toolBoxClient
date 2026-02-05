@@ -6,8 +6,11 @@ class WebSocketService {
             WebSocketService.instance = this;
             this.wsTaskServer = {};
             this.taskKey = {};
-            this.wsFrontServer = null;
+            this.wsFrontServers = [];
             this.frontReady = false;
+            this.frontMessageBuffer = [];
+            this.frontMessageBufferLimit = 200;
+            this.frontRouteRegistered = false;
         }
         return WebSocketService.instance;
     }
@@ -23,14 +26,8 @@ class WebSocketService {
     async initialize(expressApp) {
         this.app = expressApp;
         this.createFrontWebSocket();
-
-        while (!this.wsFrontServer) {
-            await new Promise((resolve) => {
-                setTimeout(() => {
-                    resolve();
-                }, 1000);
-            });
-            console.log('Waiting for WebSocket initialization');
+        if ((!this.wsFrontServers || this.wsFrontServers.length === 0) && process.env.NODE_ENV !== 'production') {
+            console.log('Frontend WebSocket will be ready after the client connects.');
         }
     }
     // Create websocket for frontend communication
@@ -39,14 +36,67 @@ class WebSocketService {
             console.log('Express app not initialized');
             return false;
         }
-        if (this.wsFrontServer) {
-            this.wsFrontServer.close();
-            this.wsFrontServer = null;
+        if (this.frontRouteRegistered) {
+            return 'ws://localhost:30001/ws';
         }
         console.log('Creating frontend WebSocket');
         this.app.ws('/ws', (ws, req) => {
+            const connId = crypto.randomUUID?.() || crypto.randomBytes(8).toString('hex');
+
+            const origin = req.headers.origin;
+            const ua = req.headers['user-agent'];
+            const key = req.headers['sec-websocket-key'];
+            const host = req.headers.host;
+            const url = req.url; // ✅ 能看到 querystring（后面我们会用它）
+
+            const isElectronUA = typeof ua === 'string' && (ua.includes('Electron') || ua.includes('Web3toolbox'));
+            const hasRendererTag = typeof url === 'string' && url.includes('clientTag=');
+            const isAllowedFrontend = isElectronUA || hasRendererTag;
+
+            if (!isAllowedFrontend) {
+                console.warn('[WS][REJECT_NON_ELECTRON]', {
+                    connId,
+                    origin,
+                    host,
+                    url,
+                    ua,
+                    time: new Date().toISOString(),
+                });
+                try { ws.close(1008, 'frontend only accepts electron client'); } catch {}
+                return;
+            }
+
+            ws._connId = connId;
+
+            console.log('[WS][OPEN]', {
+                connId,
+                origin,
+                host,
+                url,
+                key,
+                ua,
+                time: new Date().toISOString(),
+            });
+            // Prefer the first open connection; if none or closed, promote the new one
+            this.wsFrontServers = this.wsFrontServers || [];
+            this.wsFrontServers.push(ws);
+            this.frontReady = this._getOpenFrontSockets().length > 0;
+            this.flushFrontBuffer();
             ws.on('message', (msg) => {
-                const message = JSON.parse(msg);
+                let message;
+                try {
+                    const raw = typeof msg === 'string' ? msg : (msg?.toString ? msg.toString() : '');
+                    message = raw ? JSON.parse(raw) : null;
+                } catch (error) {
+                    console.warn('Frontend WebSocket message parse failed:', error);
+                    return;
+                }
+                if (!message || !message.type) {
+                    return;
+                }
+                if (message.type === 'heart_beat') {
+                    return;
+                }
                 console.log('Received message:', message);
                 if (message.type === 'terminate_process') {
                     if (message.taskName) {
@@ -75,25 +125,73 @@ class WebSocketService {
                 console.error('WebSocket connection error:', error);
                 ws.close();
             });
-            this.wsFrontServer = ws;
+            ws.on('close', (code, reason) => {
+                console.log('[WS][CLOSE]', {
+                    connId: ws?._connId,
+                    code,
+                    reason: reason ? reason.toString() : '',
+                    time: new Date().toISOString(),
+                });
+                this.wsFrontServers = (this.wsFrontServers || []).filter((s) => s !== ws);
+                this.frontReady = this._getOpenFrontSockets().length > 0;
+            });
         });
-        // Dummy WebSocket client to establish connection
-        const WebSocket = require('ws');
-        const ws = new WebSocket('ws://localhost:30001/ws');
-        ws.on('open', () => {
-            this.frontReady = true;
-            ws.close();
-        })
+        this.frontRouteRegistered = true;
         return 'ws://localhost:30001/ws'
+    }
+
+    enqueueFrontMessage(message, code = 0) {
+        if (!this.frontMessageBuffer) {
+            this.frontMessageBuffer = [];
+        }
+        this.frontMessageBuffer.push({ message, code });
+        if (this.frontMessageBuffer.length > this.frontMessageBufferLimit) {
+            this.frontMessageBuffer.splice(0, this.frontMessageBuffer.length - this.frontMessageBufferLimit);
+        }
+    }
+
+    _getOpenFrontSockets() {
+        return (this.wsFrontServers || []).filter((s) => s && s.readyState === 1);
+    }
+
+    flushFrontBuffer() {
+        const targets = this._getOpenFrontSockets();
+        if (targets.length === 0 || !this.frontReady || !Array.isArray(this.frontMessageBuffer)) {
+            return;
+        }
+        const buffer = this.frontMessageBuffer.slice();
+        this.frontMessageBuffer = [];
+        buffer.forEach(({ message, code }) => {
+            try {
+                this._sendToFrontNow(message, code, targets);
+            } catch (e) {
+                console.warn('Failed to flush front message:', e);
+            }
+        });
     }
 
     // Send message to frontend
     async sendToFront(message, code = 0) {
-        if (!this.wsFrontServer || !this.frontReady) {
+        const targets = this._getOpenFrontSockets();
+        if (targets.length === 0) {
+            this.frontReady = false;
+            this.enqueueFrontMessage(message, code);
+            return;
+        }
+        if (!this.frontReady) {
+            this.enqueueFrontMessage(message, code);
             console.log('WebSocket not initialized');
             return;
         }
-        // Wrap message with code if it's a string
+        try {
+            this._sendToFrontNow(message, code, targets);
+        } catch (e) {
+            console.error('sendToFront failed, enqueueing:', e?.message || e);
+            this.enqueueFrontMessage(message, code);
+        }
+    }
+
+    _sendToFrontNow(message, code = 0, targets = this._getOpenFrontSockets()) {
         let msgObj;
         try {
             msgObj = typeof message === 'string' ? JSON.parse(message) : message;
@@ -101,7 +199,13 @@ class WebSocketService {
             msgObj = { message };
         }
         if (msgObj.code === undefined) msgObj.code = code;
-        this.wsFrontServer.send(JSON.stringify(msgObj));
+        targets.forEach((socket) => {
+            try {
+                socket.send(JSON.stringify(msgObj));
+            } catch (e) {
+                console.error('wsFrontServer.send failed:', e?.message || e);
+            }
+        });
     }
     // Create websocket for task process communication
     createTaskWebSocket(taskName, messageCallback) {
@@ -193,10 +297,14 @@ class WebSocketService {
     }
     checkWebSocket() {
         console.log('Checking WebSocket connection');
-        if (!this.wsFrontServer) {
+        if (!this.frontRouteRegistered) {
             this.createFrontWebSocket();
         }
-        return true;
+        return {
+            success: true,
+            routeRegistered: this.frontRouteRegistered,
+            frontReady: this.frontReady,
+        };
     }
 }
 

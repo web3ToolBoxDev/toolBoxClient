@@ -58,11 +58,12 @@ proxyUsername,Proxy Username,代理用户名
 inputProxyUsername,Please input proxy username,请输入代理用户名
 proxyPassword,Proxy Password,代理密码
 inputProxyPassword,Please input proxy password,请输入代理密码
-testProxy,Test Proxy,测试
-saveConfig,Save Config,保存
+testProxy,Test,测试
+saveConfig,Save,保存
 updateSuccess,Update successful,更新成功
 updateFailed,Update failed,更新失败
 updateError,Update error,更新出错
+deleteProxy,Delete,删除
 fingerprintEnvs,Fingerprint Environments,指纹环境
 deleteSelected,Delete Selected,删除选中
 noFingerprints,No fingerprint environments,暂无指纹环境
@@ -78,6 +79,11 @@ introduction,Introduction,工具箱介绍
 chromeManage,Chrome Manage,浏览器管理
 walletManage,Wallet Manage,钱包管理
 taskManage,Task Manage,任务管理
+taskManage.taskDirPlaceholder,Select a task folder,请选择任务目录
+common.select,Select,选择
+common.submit,Submit,提交
+common.cancel,Cancel,取消
+common.confirm,Confirm,确认
 defaultTask,Default Task,默认任务
 changeLang,Languages,Languages
 selectLang,Select Language,选择语言
@@ -270,3 +276,61 @@ syncScriptDirectory.resetSuccess,Sync script directory reset to default successf
 syncScriptDirectory.resetFailed,Failed to reset sync script directory,重置同步脚本目录失败
 syncScriptDirectory.resetError,Error resetting sync script directory,重置同步脚本目录出错
 resetToDefault,Reset to Default,重置为默认
+taskManage,Task Management,任务管理
+taskManage.importTitle,Import Task,导入任务
+taskManage.taskDir,Task Directory,任务目录
+taskManage.taskDirPlaceholder,Select a directory containing taskConfig.json,请选择包含 taskConfig.json 的目录
+taskManage.desktopOnly,Please use the desktop app,请在桌面端使用
+taskManage.taskDirRequired,Please choose a task directory,请选择任务目录
+taskManage.importSuccess,Import succeeded,导入成功
+taskManage.importFailed,Import failed,导入失败
+taskManage.selectEnv,Select environments,请选择环境
+taskManage.selectWallet,Select wallets,请选择钱包
+taskManage.walletNoEnv,Selected wallets have no bound environments,所选钱包未绑定环境
+taskManage.startSuccess,Task started,任务启动成功
+taskManage.startFailed,Start failed,启动失败
+taskManage.selectToDelete,Select tasks to delete,请选择要删除的任务
+taskManage.deleteSuccess,Deleted successfully,删除成功
+taskManage.title,Task Management,任务管理
+taskManage.importBtn,Import Task,导入任务
+taskManage.deleteBtn,Delete Task,删除任务
+taskManage.listTitle,Task List,任务列表
+taskManage.total,Total {{count}},共 {{count}} 个
+taskManage.configBtn,Config,配置
+taskManage.noConfig,No config,无配置
+taskManage.startBtn,Start,启动
+taskManage.empty,No tasks,暂无任务
+taskManage.startTask,Start Task,启动任务
+taskManage.runByEnv,By Environment,按环境
+taskManage.runByWallet,By Wallet,按钱包
+taskManage.envList,Select Environments,请选择环境
+taskManage.walletList,Select Wallets,请选择钱包
+taskManage.unbound,Unbound,未绑定
+taskManage.editDefaultConfig,Edit Default Config,修改通用配置
+taskManage.editTargetConfig,Edit {{target}} Config,修改{{target}}的配置
+taskManage.inputPlaceholder,Please enter {{field}},请输入{{field}}
+taskManage.configTask,Configure Task,配置任务
+taskManage.configHint,Targets without specific config will use the default,未配置的目标将采用通用配置
+taskManage.configByWallet,Configure by Wallet,按钱包配置
+taskManage.configByEnv,Configure by Environment,按环境配置
+taskManage.clearEnvConfig,Clear Env Config,清除环境配置
+taskManage.clearWalletConfig,Clear Wallet Config,清除钱包配置
+taskManage.envName,Env Name,环境名称
+taskManage.envId,Env ID,环境ID
+taskManage.walletName,Wallet Name,钱包名称
+taskManage.walletAddress,Wallet Address,钱包地址
+taskManage.actions,Actions,操作
+taskManage.editConfig,Edit Config,修改配置
+taskManage.configSuccess,Config saved,配置成功
+introduction.heading,Web3ToolBox,Web3ToolBox
+introduction.description,"Hi everyone, I'm Aming. GitHub docs and videos are here; updates will be posted on Twitter; follow to stay informed.",大家好，我是阿明，GitHub文档和视频在此，大家可以点击前往，后续工具有任何更新会发布在Twitter上，各位老板可以关注Twitter，关注更新内容
+introduction.guideButton,Guide,使用说明
+introduction.githubButton,GitHub,GitHub链接
+introduction.twitterButton,Twitter,Twitter
+web3.emptyTaskList,Task list is empty,任务列表为空
+web3.txHashCreated,"Created transaction hash: {{hash}}","创建交易hash:{{hash}}"
+web3.approvalInsufficient,"Allowance {{allowance}} is less than trade amount {{amount}}, approving","授权额度为{{allowance}}，小于交易额度{{amount}}，开始授权"
+web3.approvalTxHash,"Created approval transaction hash: {{hash}}","创建授权交易hash:{{hash}}"
+web3.swapSuccess,Transaction succeeded,交易成功
+web3.swapFailedGas,"Transaction failed, please increase the gas multiplier and retry",交易失败，请提高gas倍数重试
+web3.swapFailedTaxHint,"Transaction {{hash}} failed; token may have tax, increase slippage and retry","交易hash：{{hash}}失败，请检查币种是否含税，含税请调高滑点"

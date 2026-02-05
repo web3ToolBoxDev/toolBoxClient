@@ -87,15 +87,22 @@ let wallets = {};
          createdAt: Date.now(),
        };
        walletsToInsert.push(curWallet);
-       wallets[walletId] = curWallet; // update in-memory cache
      }
 
      // Bulk insert and await result
-     await new Promise((resolve, reject) => {
+     const insertedDocs = await new Promise((resolve, reject) => {
        config.getWalletDb().insert(walletsToInsert, (err, newDocs) => {
          if (err) reject(err);
          else resolve(newDocs);
        });
+     });
+
+     // update in-memory cache after DB insert success
+     const insertedList = Array.isArray(insertedDocs) ? insertedDocs : walletsToInsert;
+     insertedList.forEach((doc) => {
+       if (doc && doc.id) {
+         wallets[doc.id] = doc;
+       }
      });
 
      return { success: true, code: 0, message: `Created ${count} wallets`, wallets };
@@ -226,6 +233,29 @@ async function getWalletCount() {
   } catch (error) {
     console.error('getWalletCount error:', error);
     throw error;
+  }
+}
+
+async function resetAllWalletsInitialized() {
+  try {
+    if (!isWalletDbAvailable()) {
+      return { success: false, code: 3019, message: 'Wallet database not available. Please set save path first.' };
+    }
+    const numAffected = await new Promise((resolve, reject) => {
+      config.getWalletDb().update({}, { $set: { walletInitialized: false } }, { multi: true }, (err, num) => {
+        if (err) reject(err);
+        else resolve(num);
+      });
+    });
+    Object.keys(wallets).forEach((id) => {
+      if (wallets[id]) {
+        wallets[id].walletInitialized = false;
+      }
+    });
+    return { success: true, code: 0, message: 'Wallet initialization state reset', numAffected };
+  } catch (error) {
+    console.error('resetAllWalletsInitialized error:', error);
+    return { success: false, code: 3020, message: error.message || 'Reset wallet state failed' };
   }
 }
 async function updateWallet(id,wallet) {
@@ -561,6 +591,7 @@ async function openWallets(ids) {
   try {
     const envsData = {};
     const envIds = [];
+    const walletIdsByEnvId = {};
     const setIds = new Set(ids);
     const uninitialized = [];
     for (const id of setIds) {
@@ -577,6 +608,7 @@ async function openWallets(ids) {
         continue;
       }
       envIds.push(wallet.bindEnvId);
+      walletIdsByEnvId[wallet.bindEnvId] = wallet.id;
       // envsData[wallet.bindEnvId] = wallet;
     }
 
@@ -587,7 +619,7 @@ async function openWallets(ids) {
 
     // execute open-wallet task
     const taskName = 'openWallet';
-    const taskData = { envIds, envsData };
+    const taskData = { envIds, envsData, walletIdsByEnvId };
     // 在调用前按需获取 taskService 实例，避免循环依赖问题
     const taskServiceManager = require('./taskService').getInstance();
     // execTask is blocking and will throw on error; no additional validation needed here
@@ -646,6 +678,7 @@ async function reinitializeWalletDatabase() {
   bindWalletEnv,
   reinitializeWalletDatabase,
   isWalletDbAvailable,
+  resetAllWalletsInitialized,
 };
 
 

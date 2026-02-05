@@ -1,0 +1,7 @@
+[
+  {
+    "taskName": "syncFunction",
+    "scriptPath": "syncFunction.js",
+    "taskType": "execAll"
+  }
+]

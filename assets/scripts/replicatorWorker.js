@@ -38,21 +38,36 @@ function log(msg) {
 }
 
 function buildFingerprints(env) {
-  const base = {
-    canvas: env?.canvas,
-    hardware: env?.hardware,
-    screen: env?.screen,
-    clientHint: env?.clientHint,
-    languages_js: env?.language_js,
-    languages_http: env?.language_http,
-    fonts_remove: (env?.fonts_remove || '') + ',Tahoma'
-  };
-  if (env?.useProxy) {
-    base.position = env.position;
-    base.timeZone = env.timeZone;
-    base.webrtc_public = env.webrtc_public;
+  if (!env) return '';
+  if (env.useProxy) {
+    return JSON.stringify({
+      audio: env.audio,
+      clientRect: env.clientRect,
+      webgl: env.webgl,
+      canvas: env.canvas,
+      hardware: env.hardware,
+      screen: env.screen,
+      clientHint: env.clientHint,
+      languages_js: env.language_js,
+      languages_http: env.language_http,
+      fonts_remove: env.fonts_remove,
+      position: env.position,
+      timeZone: env.timeZone,
+      webrtc_public: env.webrtc_public,
+    });
   }
-  return JSON.stringify(base);
+  return JSON.stringify({
+    audio: env.audio * 10,
+    clientRect: env.clientRect,
+    webgl: env.webgl,
+    canvas: env.canvas ? { toDataUrl: env.canvas.toDataUrl * 10 } : undefined,
+    hardware: env.hardware,
+    screen: env.screen,
+    clientHint: env.clientHint,
+    languages_js: env.language_js,
+    languages_http: env.language_http,
+    fonts_remove: env.fonts_remove,
+  });
 }
 
 function isExtensionUrl(u) {
@@ -185,7 +200,8 @@ async function simulateTextTypingInput(page, evt, { maskLog = false } = {}) {
     if (text) {
       await page.keyboard.type(text, { delay: computeTypeDelay(text) });
     }
-    log(`Simulated typing input on ${evt.selector || '<active>'} => ${maskLog ? '***' : text}`);
+    const isSensitive = maskLog || String(evt.inputType || '').toLowerCase() === 'password' || String(evt.selector || '').toLowerCase().includes('password');
+    log(`Simulated typing input on ${evt.selector || '<active>'} => ${isSensitive ? '***' : text}`);
     return true;
   } catch (e) {
     log(`Failed to simulate typing on ${evt.selector || '<active>'}: ${e.message}`, { debug: false });

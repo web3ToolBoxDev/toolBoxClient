@@ -9,6 +9,7 @@ const { getEnvById } = require('./fingerPrintService');
 // const { getWalletById } = require('./walletService');
 
 const fs = require('fs');
+const path = require('path');
 
 
 
@@ -80,6 +81,7 @@ class TaskService {
             this.heartBeatTimeoutId = {};
             this.lastHeartBeatTime = {};
             this.isCompleted = {};
+            this.taskProcesses = {};
             this.defaultExecPath = config.getDefaultExecPath();
             this.initWalletScriptPath = config.getInitWalletScriptPath();
             this.openWalletScriptPath = config.getOpenWalletScriptPath();
@@ -116,14 +118,18 @@ class TaskService {
         });
     }
 
-    taskLogMessage(log, code = 0) {
+    taskLogMessage(log, code = 0, taskName = undefined) {
         const dateTime = new Date().toLocaleString();
-        return JSON.stringify({
+        const payload = {
             type: 'task_log',
             message: log,
             code,
             time: dateTime
-        });
+        };
+        if (taskName) {
+            payload.taskName = taskName;
+        }
+        return JSON.stringify(payload);
     }
 
     terminateProcessMessage() {
@@ -166,7 +172,27 @@ class TaskService {
      * 
      */
     async importTask(taskObj) {
-        // Check for duplicate taskName
+        if (!taskObj || typeof taskObj !== 'object' || Array.isArray(taskObj)) {
+            return { success: false, code: 1000, message: 'Invalid task payload' };
+        }
+        // 新逻辑：按目录导入 taskConfig.json 中声明的任务
+        if (taskObj && taskObj.directory) {
+            const { directory } = taskObj;
+            try {
+                if (!fs.existsSync(directory)) {
+                    return { success: false, code: 1005, message: '目录不存在' };
+                }
+                const res = await config.loadTasksFromDirectory(directory);
+                if (res && res.success) {
+                    return { success: true, code: 0, message: res.message || '导入成功' };
+                }
+                return { success: false, code: 1006, message: res?.message || '导入失败' };
+            } catch (e) {
+                return { success: false, code: 1007, message: e.message };
+            }
+        }
+
+        // 兼容旧逻辑：单任务手动录入
         const task = await this.getTaskByName(taskObj.taskName);
         if (task) {
             return { success: false, code: 1001, message: 'Task name already exists' };
@@ -174,7 +200,6 @@ class TaskService {
 
         if (taskObj.configSchemaPath)
             taskObj.configSchema = JSON.parse(fs.readFileSync(taskObj.configSchemaPath, 'utf-8'));
-        //默认任务为false
         if (!taskObj.defaultTask) {
             taskObj.defaultTask = false;
         }
@@ -202,13 +227,14 @@ class TaskService {
         });
     }
     async getAllTasks(defaultTask) {
-
         return new Promise((resolve, reject) => {
             config.getTaskDb().find({ defaultTask }, (err, docs) => {
                 if (err) {
                     reject(err);
                 } else {
-                    resolve(docs);
+                    // 过滤掉空/无 taskName 的脏数据
+                    const clean = (docs || []).filter(d => d && d.taskName);
+                    resolve(clean);
                 }
             });
         });
@@ -220,6 +246,38 @@ class TaskService {
         const [address, splitTaskName] = taskName.split('_');
         const shortAddress = address.slice(0, 5) + '...' + address.slice(-5);
         return `${shortAddress}_${splitTaskName}`;
+    }
+
+    isProcessAlive(taskName) {
+        const proc = this.taskProcesses ? this.taskProcesses[taskName] : null;
+        if (!proc) return false;
+        if (proc.exitCode !== null) return false;
+        if (proc.killed) return false;
+        return true;
+    }
+
+    getTaskRunningStatus(taskNames = []) {
+        const names = Array.isArray(taskNames) ? taskNames : [];
+        const result = {};
+        const runningMap = this.isRunning || {};
+        const runningKeys = Object.keys(runningMap);
+
+        names.forEach((name) => {
+            if (!name) return;
+            if (typeof runningMap[name] !== 'undefined') {
+                result[name] = Boolean(runningMap[name]) || this.isProcessAlive(name);
+                return;
+            }
+            const shortName = this.shortTaskName(name);
+            const matched = runningKeys.find((key) => this.shortTaskName(key) === shortName);
+            if (matched) {
+                result[name] = Boolean(runningMap[matched]) || this.isProcessAlive(matched);
+                return;
+            }
+            result[name] = this.isProcessAlive(name);
+        });
+
+        return { success: true, data: result };
     }
 
     // 将绑定的钱包信息添加到 envData 中（若存在 bindWalletId）
@@ -261,6 +319,10 @@ class TaskService {
             return { success: false, code: 1002, message: 'Task does not exist' };
         }
 
+        // 每次执行时刷新路径，避免使用旧配置
+        this.chromePath = config.getChromePath().path;
+        this.savePath = config.getSavePath().path;
+
         // syncFunction 全局限流：仅允许单实例运行，提示先结束现有任务
         if (taskName === 'syncFunction') {
             
@@ -274,9 +336,47 @@ class TaskService {
             }
         }
 
+        if ((taskName === 'openWallet' || taskName === 'initWallet') && Array.isArray(taskDataFromFront?.walletIds)) {
+            const walletIds = Array.from(new Set(taskDataFromFront.walletIds));
+            const envIds = [];
+            const walletIdsByEnvId = {};
+            const uninitialized = [];
+            for (const walletId of walletIds) {
+                const { getWalletById } = require('./walletService');
+                const res = await getWalletById(walletId);
+                const wallet = res?.data || res;
+                if (!wallet) {
+                    return { success: false, code: 3004, message: `Wallet with ID ${walletId} not found` };
+                }
+                if (!wallet.bindEnvId) {
+                    return { success: false, code: 3003, message: `Wallet ${wallet.name || walletId} not bound to fingerprint env` };
+                }
+                if (taskName === 'openWallet' && !wallet.walletInitialized) {
+                    uninitialized.push({ id: wallet.id, name: wallet.name });
+                    continue;
+                }
+                envIds.push(wallet.bindEnvId);
+                walletIdsByEnvId[wallet.bindEnvId] = wallet.id;
+            }
+            if (taskName === 'openWallet' && uninitialized.length > 0) {
+                return { success: false, code: 3011, message: 'Some wallets are not initialized', uninitialized };
+            }
+            taskDataFromFront = {
+                ...(taskDataFromFront || {}),
+                envIds,
+                envsData: taskDataFromFront?.envsData || {},
+                walletIdsByEnvId
+            };
+        }
+
         let ids = [];
         if (taskDataFromFront && taskDataFromFront.envIds) {
             ids = taskDataFromFront.envIds;
+        }
+        // 钱包直连型任务允许无 env（只要有 walletIds）
+        const allowNoEnv = task.taskType === 'execByWallet';
+        if ((!Array.isArray(ids) || ids.length === 0) && !allowNoEnv) {
+            return { success: false, code: 1011, message: '缺少可执行的环境，请选择后重试' };
         }
         // envId:data
         let envsData = {};
@@ -288,6 +388,91 @@ class TaskService {
         if (taskDataFromFront && taskDataFromFront.successCallBack) {
             taskSuccessCallBack = taskDataFromFront.successCallBack;
         }
+
+
+        const normalizeTaskConfig = (raw = {}) => {
+            const knownKeys = ['default', 'envConfigs', 'walletConfigs', 'mode'];
+            const flatWalletConfigs = {};
+            Object.keys(raw).forEach((k) => {
+                if (knownKeys.includes(k)) return;
+                if (raw[k] && typeof raw[k] === 'object') {
+                    flatWalletConfigs[k] = raw[k];
+                }
+            });
+            return {
+                mode: raw.mode || 'wallet',
+                defaultConfig: raw.default || {},
+                envConfigs: raw.envConfigs || {},
+                walletConfigs: (raw.walletConfigs && Object.keys(raw.walletConfigs).length > 0) ? raw.walletConfigs : flatWalletConfigs,
+            };
+        };
+
+        const resolveConfigForTarget = (taskConfig, env, envData) => {
+            const cfg = normalizeTaskConfig(taskConfig || {});
+            const { mode, defaultConfig, envConfigs, walletConfigs } = cfg;
+            if (mode === 'env') {
+                const envKey = env?.id || env?._id || env?.name;
+                const override = envKey ? (envConfigs[envKey] || {}) : {};
+                return { ...defaultConfig, ...override, __mode: mode };
+            }
+            const walletKey = envData?.wallet?.address || env?.wallet?.address || env?.bindWalletId || envData?.walletAddress;
+            const override = walletKey ? (walletConfigs[walletKey] || {}) : {};
+            return { ...defaultConfig, ...override, __mode: mode };
+        };
+
+        // 计算钱包扩展路径：固定为 initWallet.js 所在目录（不做判断与校验）
+        const walletExtensionPath = (taskDataFromFront?.mode === 'env')
+            ? null
+            : path.dirname(config.getInitWalletScriptPath());
+
+        const buildTaskContext = async (id) => {
+            const envRes = await getEnvById(id);
+            const env = envRes?.data;
+            if (!env) {
+                return null;
+            }
+            let envData = envsData[id] || {};
+            envData = await this._attachWalletToEnvData(env, envData);
+            const resolvedConfig = resolveConfigForTarget(task.config, env, envData);
+            const walletIdOverride = taskDataFromFront?.walletIdsByEnvId?.[env.id || env._id || env.name];
+            const taskNameBase = (task.taskName === 'openWallet' || task.taskName === 'initWallet')
+                ? (walletIdOverride || env.bindWalletId || env.id || env.name)
+                : (env.id || env.name);
+            const taskNameForEnv = `${taskNameBase}_${task.taskName}`;
+            const taskDataPayload = {
+                env,
+                envData,
+                taskDataFromFront: { ...(taskDataFromFront || {}), config: resolvedConfig },
+                chromePath: this.chromePath,
+                savePath: this.savePath,
+                walletExtensionPath,
+            };
+            return { taskNameForEnv, taskDataPayload };
+        };
+
+        const buildWalletContext = async (walletId) => {
+            try {
+                const { getWalletById } = require('./walletService');
+                const res = await getWalletById(walletId);
+                const wallet = res?.data || res;
+                if (!wallet) return null;
+                const envData = { wallet };
+                const resolvedConfig = resolveConfigForTarget(task.config, {}, envData);
+                const taskNameForWallet = `${wallet.address || wallet.id || 'wallet'}_${task.taskName}`;
+                const taskDataPayload = {
+                    env: null,
+                    envData,
+                    taskDataFromFront: { ...(taskDataFromFront || {}), config: resolvedConfig },
+                    chromePath: this.chromePath,
+                    savePath: this.savePath,
+                    walletExtensionPath,
+                };
+                return { taskNameForWallet, taskDataPayload };
+            } catch (e) {
+                console.error('[TaskService] buildWalletContext error:', e);
+                return null;
+            }
+        };
 
 
         switch (task.taskType) {
@@ -323,71 +508,28 @@ class TaskService {
             case 'execByOrder':
                 console.log('顺序执行任务', task)
                 for (let i = 0; i < ids.length; i++) {
-                    let id = ids[i];
-                    let env = (await getEnvById(id)).data;
-                    let envData = envsData[id] || {};
-                    // enrich envData with wallet if bound
-                    envData = await this._attachWalletToEnvData(env, envData);
-                    console.log('envData after attach wallet:', envData);
-                    // 使用 env.id 保证唯一性，回退到 env.name 以兼容旧数据
-                    let taskName = `${env.id || env.name}_${task.taskName}`;
-                    if (this.isRunning[taskName]) {
+                    const id = ids[i];
+                    const ctx = await buildTaskContext(id);
+                    if (!ctx) continue;
+                    const { taskNameForEnv, taskDataPayload } = ctx;
+                    if (this.isRunning[taskNameForEnv]) {
                         continue;
                     }
-
-                    // 获取钱包扩展路径
-                    const walletScriptDirResult = config.getWalletScriptDirectory();
-                    let walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
-                    // env sync mode should not load metamask extension
-                    if (task.taskName === 'syncFunction' && taskDataFromFront?.mode === 'env') {
-                        walletExtensionPath = null;
-                    }
-
-
-                    const taskData = { 
-                        env, 
-                        envData, 
-                        taskDataFromFront, 
-                        chromePath: this.chromePath, 
-                        savePath: this.savePath,
-                        walletExtensionPath: walletExtensionPath,
-                    };
-                    this.runTask(taskName, taskData, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
-                    await this.checkCompleted(taskName);
+                    this.runTask(taskNameForEnv, taskDataPayload, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
+                    await this.checkCompleted(taskNameForEnv);
                 }
                 break;
             case 'execByAsync':
-                for (let i = 0; i < ids.length; i++) {
-                    let id = ids[i];
-                    let env = (await getEnvById(id)).data;
-                    let envData = envsData[id] || {};
-                    // enrich envData with wallet if bound
-                    envData = await this._attachWalletToEnvData(env, envData);
-                    // 使用 env.id 保证唯一性，回退到 env.name 以兼容旧数据
-                    let taskName = `${env.id || env.name}_${task.taskName}`;
-                    if (this.isRunning[taskName]) {
-                        continue;
+                await Promise.all(ids.map(async (id) => {
+                    const ctx = await buildTaskContext(id);
+                    if (!ctx) return;
+                    const { taskNameForEnv, taskDataPayload } = ctx;
+                    if (this.isRunning[taskNameForEnv]) {
+                        return;
                     }
-
-                    // 获取钱包扩展路径
-                    const walletScriptDirResult = config.getWalletScriptDirectory();
-                    let walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
-                    // env sync mode should not load metamask extension
-                    if (task.taskName === 'syncFunction' && taskDataFromFront?.mode === 'env') {
-                        walletExtensionPath = null;
-                    }
-
-                    const taskData = { 
-                        env, 
-                        envData, 
-                        taskDataFromFront, 
-                        chromePath: this.chromePath, 
-                        savePath: this.savePath,
-                        walletExtensionPath: walletExtensionPath,
-                    };
-                    this.runTask(taskName, taskData, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
-                    this.checkCompleted(taskName);
-                }
+                    this.runTask(taskNameForEnv, taskDataPayload, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
+                    this.checkCompleted(taskNameForEnv);
+                }));
                 break;
             case 'execAll':
                 let taskNameAll = `${task.taskName}`;
@@ -395,6 +537,7 @@ class TaskService {
                     return { success: false, code: 1003, message: 'Task is running' };
                 }
                 let envs = [];
+                const configsByEnv = {};
                 if (ids.length > 0) {
                     for (let i = 0; i < ids.length; i++) {
                         let id = ids[i];
@@ -404,22 +547,15 @@ class TaskService {
                             const key = env.id || env._id || env.name;
                             const base = envsData[key] || {};
                             envsData[key] = await this._attachWalletToEnvData(env, base);
+                            configsByEnv[key] = resolveConfigForTarget(task.config, env, envsData[key]);
                         }
                     }
                 }
                 
-                // 获取钱包扩展路径
-                const walletScriptDirResult = config.getWalletScriptDirectory();
-                let walletExtensionPath = walletScriptDirResult.directory !== 'default' ? walletScriptDirResult.directory : null;
-                // env sync mode should not load metamask extension
-                if (task.taskName === 'syncFunction' && taskDataFromFront?.mode === 'env') {
-                    walletExtensionPath = null;
-                }
-
                 const taskDataAll = { 
                     envs, 
                     envsData, 
-                    taskDataFromFront, 
+                    taskDataFromFront: { ...(taskDataFromFront || {}), configMode: (task.config && task.config.mode) || 'wallet', configsByEnv }, 
                     chromePath: this.chromePath, 
                     savePath: this.savePath,
                     walletExtensionPath: walletExtensionPath
@@ -427,6 +563,23 @@ class TaskService {
                 this.runTask(taskNameAll, taskDataAll, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
                 this.checkCompleted(taskNameAll);
                 break;
+            case 'execByWallet': {
+                const walletIds = Array.isArray(taskDataFromFront?.walletIds) ? taskDataFromFront.walletIds : [];
+                if (walletIds.length === 0) {
+                    return { success: false, code: 1012, message: '缺少可执行的钱包，请选择后重试' };
+                }
+                for (let i = 0; i < walletIds.length; i++) {
+                    const ctx = await buildWalletContext(walletIds[i]);
+                    if (!ctx) continue;
+                    const { taskNameForWallet, taskDataPayload } = ctx;
+                    if (this.isRunning[taskNameForWallet]) {
+                        continue;
+                    }
+                    this.runTask(taskNameForWallet, taskDataPayload, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
+                    await this.checkCompleted(taskNameForWallet);
+                }
+                break;
+            }
             default:
                 break;
 
@@ -454,6 +607,11 @@ class TaskService {
             case 'heart_beat': {
                 this.lastHeartBeatTime[taskName] = Date.now();
                 this.webSocketService.sendToTask(taskName, this.heartBeatMessage());
+                this.webSocketService.sendToFront({
+                    type: 'task_heartbeat',
+                    taskName,
+                    time: new Date().toLocaleString()
+                });
                 break;
             }
             case 'request_task_data': {
@@ -465,13 +623,13 @@ class TaskService {
             case 'task_log': {
                 console.log('task_log:', data.message);
                 this.webSocketService.sendToFront(
-                    this.taskLogMessage(`Task:${this.shortTaskName(taskName)} ${data.message}`)
+                    this.taskLogMessage(`Task:${this.shortTaskName(taskName)} ${data.message}`, 0, taskName)
                 );
                 break;
             }
             case 'terminate_process': {
                 this.webSocketService.sendToFront(
-                    this.taskLogMessage(`Task:${this.shortTaskName(taskName)} terminated`)
+                    this.taskLogMessage(`Task:${this.shortTaskName(taskName)} terminated`, 0, taskName)
                 );
                 break;
             }
@@ -482,7 +640,7 @@ class TaskService {
                     this.isSuccess[taskName] = true;
                 }
                 this.webSocketService.sendToFront(
-                    this.taskLogMessage(`Task:${this.shortTaskName(taskName)} completed`)
+                    this.taskLogMessage(`Task:${this.shortTaskName(taskName)} completed`, 0, taskName)
                 );
                 break;
             }
@@ -493,6 +651,9 @@ class TaskService {
     async runTask(taskName, taskData, execPath, scriptPath, taskSuccessCallBack = undefined, timeout = 60000) {
         try {
             console.log('runTask:', taskName, taskData, execPath, scriptPath);
+            const effectiveTimeout = String(taskName || '').includes('syncFunction')
+                ? Math.max(timeout, 5 * 60 * 1000)
+                : timeout;
             // 在任务真正开始前，重置完成通知标记，允许同名任务后续发送完成通知
             if (!this._sentCompleted) this._sentCompleted = {};
             this._sentCompleted[taskName] = false;
@@ -508,7 +669,7 @@ class TaskService {
                     taskData.env.proxyUrl = url;
                     taskData.env.useProxy = true;
                     this.isUseProxy[taskName] = true;
-                    this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} use proxy:${url}`));
+                    this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} use proxy:${url}`, 0, taskName));
                 }
             }
             this.isRunning[taskName] = true;
@@ -520,9 +681,19 @@ class TaskService {
                 this.processMsg(taskName, msg, taskDataJson)
             });
             const childProcess = spawn(execPath, [scriptPath, url]);
-            this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} started`));
+            this.taskProcesses[taskName] = childProcess;
+            this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} started`, 0, taskName));
+            this.webSocketService.sendToFront({
+                type: 'task_started',
+                taskName,
+                time: new Date().toLocaleString()
+            });
             childProcess.stdout.on('data', (data) => {
-                console.log(`stdout: ${data}`);
+                const str = String(data);
+                console.log(`stdout: ${str}`);
+                // this.webSocketService.sendToFront(
+                //     this.taskLogMessage(`Task:${this.shortTaskName(taskName)} stdout: ${str}`, 0, taskName)
+                // );
             });
 
             // 收集 stderr 信息，并标记是否发生错误；不要在此处直接 finishTask，等待 child close 后统一判断
@@ -534,16 +705,19 @@ class TaskService {
                 childHadError = true;
                 stderrBuffer += str;
                 // 也把错误日志推送到前端
-                this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} stderr: ${str}`));
+                this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} stderr: ${str}`, 0, taskName));
             });
 
             childProcess.on('close', (code) => {
                 console.log(`child process exited with code ${code}`);
+                if (this.taskProcesses && this.taskProcesses[taskName]) {
+                    delete this.taskProcesses[taskName];
+                }
                 // 优先依据子进程 stderr 判断错误；否则依据任务内部通过 websocket 上报的 isSuccess
                 try {
                     if (childHadError) {
                         const message = `Task process stderr output: ${stderrBuffer || ('exit code ' + code)}`;
-                        this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} failed: ${message}`));
+                        this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} failed: ${message}`, 0, taskName));
                         finishTask(this, taskName, false, message);
                         return;
                     }
@@ -564,7 +738,7 @@ class TaskService {
 
                     // 如果既没有 stderr，也没有内部上报成功，视为失败（可能子进程非零退出）
                     const message = `Task exited with code ${code}`;
-                    this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} exited: ${message}`));
+                    this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} exited: ${message}`, 0, taskName));
                     finishTask(this, taskName, false, message);
                 } catch (err) {
                     console.error('on close handler error:', err);
@@ -574,8 +748,16 @@ class TaskService {
 
             this.heartBeatTimeoutId[taskName] = setInterval(() => {
                 const currentTime = Date.now();
-                const heartBeatThreshold = currentTime - timeout;
+                const heartBeatThreshold = currentTime - effectiveTimeout;
                 if (this.lastHeartBeatTime[taskName] < heartBeatThreshold) {
+                    if (this.isProcessAlive(taskName)) {
+                        // 进程仍在运行，维持运行状态，避免前端误判完成
+                        this.lastHeartBeatTime[taskName] = currentTime;
+                        this.webSocketService.sendToFront(
+                            this.taskLogMessage(`Task:${this.shortTaskName(taskName)} heartbeat timeout but process still alive`, 0, taskName)
+                        );
+                        return;
+                    }
                     clearInterval(this.heartBeatTimeoutId[taskName]);
                     finishTask(this, taskName, false, { type: 'timeout', message: 'Task timeout' });
                     return;
@@ -646,7 +828,7 @@ class TaskService {
         }
     }
     async checkWebSocket() {
-        this.webSocketService.checkWebSocket()
+        return this.webSocketService.checkWebSocket();
     }
 }
 module.exports = TaskService;

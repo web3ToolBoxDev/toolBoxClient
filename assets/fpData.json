@@ -1,1 +1,1168 @@
-{"userdata":{"audioFingerprintHash":"e10bf488bfeadc903c210ef65da48c87a7da15d9ca326d23b190d488981faa39","canvasFingerprintHash":"85b2642be4d059969ffe8de5a844adcd2fa774bd69a469d3c14e8eaae2ed1a39","clientHintFingerprint":{"architecture":"arm","bitness":"64","brands":[{"brand":"Chromium","version":"136"},{"brand":"Google Chrome","version":"136"},{"brand":"Not.A/Brand","version":"99"}],"platform":"macOS","platform_version":"15.0.0","ua_full_version":"136.0.7103.114"},"clientRectFingerprintHash":"a41e785c977bbdd404706d6bcb8982b0d75cb1422426b4142184a5822b929b35","fingerPrintHash":"24c95bd5d966e478880dc31aa03305cb6012a24461115f4433053979ef0a4deb","fontsFamily":["Tahoma","Arial","Helvetica","arial","default","sans-serif","serif","cursive","monospace","fantasy","Arial Black","Arial Narrow","Bookshelf Symbol 7","Brush Script MT","Comic Sans MS","Courier","Courier 10 Pitch","Courier New","Georgia","Microsoft Sans Serif","Times","Times New Roman","Papyrus","Proxy 1","Proxy 2","Proxy 3","Proxy 4","Proxy 5","Proxy 6","Proxy 7","Proxy 8","Proxy 9","Rockwell","STSong","Shree Devanagari 714","Shree Devanagari 714 Bold","Shree Devanagari 714 Bold Italic","Shree Devanagari 714 Italic","Symbol","Trebuchet MS","Verdana","Webdings","Wingdings","Wingdings 2","Wingdings 3","BlinkMacSystemFont","Helvetica Neue","Apple Color Emoji","Arial Unicode MS","Gill Sans","Menlo","Impact","Al Nile","Al Tarikh","American Typewriter","Andale Mono","Apple Chancery","Apple SD Gothic Neo","Apple Symbols","AppleGothic","AppleMyungjo","Arial Hebrew","Arial Hebrew Scholar","Arial Rounded MT Bold","Athelas","Avenir","Avenir Black","Avenir Black Oblique","Avenir Book","Avenir Heavy","Avenir Light","Avenir Medium","Avenir Next","Avenir Next Condensed","Avenir Next Condensed Demi Bold","Avenir Next Condensed Heavy","Avenir Next Condensed Medium","Avenir Next Condensed Ultra Light","Avenir Next Demi Bold","Avenir Next Heavy","Avenir Next Medium","Avenir Next Ultra Light","Ayuthaya","Bangla MN","Bangla Sangam MN","Baskerville","Bauhaus 93","Beirut","Big Caslon","Bodoni 72","Bodoni 72 Oldstyle","Bodoni 72 Smallcaps","Bodoni Ornaments","Bradley Hand","Chalkboard","Chalkboard SE","Chalkduster","Charter","Charter Black","Cochin","Copperplate","Corsiva Hebrew","DIN Alternate","DIN Condensed","Devanagari MT","Devanagari Sangam MN","Didot","Diwan Kufi","Diwan Thuluth","Euphemia UCAS","Farah","Farisi","Futura","Galvji","Geneva","Gujarati MT","Gujarati Sangam MN","Gurmukhi MN","Gurmukhi MT","Gurmukhi Sangam MN","Heiti SC","Heiti TC","Herculanum","Hiragino Kaku Gothic Pro","Hiragino Kaku Gothic Pro W3","Hiragino Kaku Gothic Pro W6","Hiragino Kaku Gothic ProN","Hiragino Kaku Gothic ProN W3","Hiragino Kaku Gothic ProN W6","Hiragino Kaku Gothic Std","Hiragino Kaku Gothic Std W8","Hiragino Kaku Gothic StdN","Hiragino Kaku Gothic StdN W8","Hiragino Maru Gothic Pro","Hiragino Maru Gothic Pro W4","Hiragino Maru Gothic ProN","Hiragino Maru Gothic ProN W4","Hiragino Mincho Pro","Hiragino Mincho Pro W3","Hiragino Mincho Pro W6","Hiragino Mincho ProN","Hiragino Mincho ProN W3","Hiragino Mincho ProN W6","Hiragino Sans","Hiragino Sans GB","Hiragino Sans GB W3","Hiragino Sans GB W6","Hiragino Sans W0","Hiragino Sans W1","Hiragino Sans W2","Hiragino Sans W3","Hiragino Sans W4","Hiragino Sans W5","Hiragino Sans W6","Hiragino Sans W7","Hiragino Sans W8","Hiragino Sans W9","Hoefler Text","Hoefler Text Ornaments","ITF Devanagari","ITF Devanagari Marathi","InaiMathi","Iowan Old Style","Iowan Old Style Black","Kannada MN","Kannada Sangam MN","Kefa","Khmer MN","Khmer Sangam MN","Kohinoor Bangla","Kohinoor Devanagari","Kohinoor Gujarati","Kohinoor Telugu","Krungthep","Lao MN","Lao Sangam MN","Lucida Grande","Luminari","Malayalam MN","Malayalam Sangam MN","Marion","Marker Felt","Mishafi","Mishafi Gold","Modern No. 20","Monaco","Mshtakan","Muna","Myanmar MN","Myanmar Sangam MN","New Peninim MT","Noteworthy","Noto Nastaliq Urdu","Noto Sans Kannada","Noto Sans Oriya","Optima","Oriya MN","Oriya Sangam MN","PT Mono","PT Sans","PT Sans Caption","PT Sans Narrow","PT Serif","PT Serif Caption","Palatino","Phosphate","PingFang HK","PingFang SC","PingFang TC","Plantagenet Cherokee","Raanana","STIXGeneral","STIXVariants","Sana","Sathu","Savoye LET","Seravek","Seravek ExtraLight","Seravek Light","Seravek Medium","SignPainter","SignPainter-HouseScript","Silom","Sinhala MN","Sinhala Sangam MN","Skia","Snell Roundhand","Songti SC","Songti TC","Sukhumvit Set","Superclarendon","Tamil MN","Tamil Sangam MN","Telugu MN","Telugu Sangam MN","Thonburi","Trattatello","Waseem","Zapfino","Academy Engraved LET","Party LET","Apple Braille Outline 6 Dot","Apple Braille Outline 8 Dot","Apple Braille Pinpoint 6 Dot","Apple Braille Pinpoint 8 Dot","system-ui","padmaa-Bold.1.1"],"hardwareFingerprint":{"hardwareConcurrency":8,"memory":8},"languageFingerprint":{"httpLanguage":"en,zh-CN","jsLanguage":"en"},"screenFingerprint":{"availableHeight":944,"availableWidth":1512,"height":982,"pixelDepth":30,"width":1512},"timezoneFingerprint":"America/Toronto","userAgentFingerprint":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36","webglFingerprint":{"renderer":"ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)","vendor":"Google Inc. (Apple)"}},"matchedFingerprintList":[{"userAgentFingerprint":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36","clientHintFingerprint":{"architecture":"x86","bitness":"64","brands":[{"brand":"Chromium","version":"136"},{"brand":"Google Chrome","version":"136"},{"brand":"Not.A/Brand","version":"99"}],"platform":"Windows","platform_version":"10.0.0","ua_full_version":"136.0.7103.114"},"webglFingerprint":{"renderer":"ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)","vendor":"Google Inc. (NVIDIA)"}},{"userAgentFingerprint":"Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36","clientHintFingerprint":{"architecture":"x86","bitness":"64","brands":[{"brand":"Chromium","version":"135"},{"brand":"Google Chrome","version":"135"},{"brand":"Not.A/Brand","version":"99"}],"platform":"Windows","platform_version":"11.0.0","ua_full_version":"135.0.6099.110"},"webglFingerprint":{"renderer":"ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)","vendor":"Google Inc. (AMD)"}},{"userAgentFingerprint":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36","clientHintFingerprint":{"architecture":"x86","bitness":"64","brands":[{"brand":"Chromium","version":"134"},{"brand":"Google Chrome","version":"134"},{"brand":"Not.A/Brand","version":"99"}],"platform":"Windows","platform_version":"10.0.0","ua_full_version":"134.0.6000.80"},"webglFingerprint":{"renderer":"ANGLE (Intel, Intel UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)","vendor":"Google Inc. (Intel)"}},{"userAgentFingerprint":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36","clientHintFingerprint":{"architecture":"x86","bitness":"64","brands":[{"brand":"Chromium","version":"133"},{"brand":"Google Chrome","version":"133"},{"brand":"Not.A/Brand","version":"99"}],"platform":"Windows","platform_version":"10.0.0","ua_full_version":"133.0.5900.70"},"webglFingerprint":{"renderer":"ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 Direct3D11 vs_5_0 ps_5_0, D3D11)","vendor":"Google Inc. (NVIDIA)"}},{"userAgentFingerprint":"Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36","clientHintFingerprint":{"architecture":"x86","bitness":"64","brands":[{"brand":"Chromium","version":"132"},{"brand":"Google Chrome","version":"132"},{"brand":"Not.A/Brand","version":"99"}],"platform":"Windows","platform_version":"11.0.0","ua_full_version":"132.0.5800.60"},"webglFingerprint":{"renderer":"ANGLE (AMD, AMD Radeon RX 5500 XT Direct3D11 vs_5_0 ps_5_0, D3D11)","vendor":"Google Inc. (AMD)"}}],"languageFingerprintList":[{"httpLanguage":"en-US,zh-CN","jsLanguage":"en-US"},{"httpLanguage":"en-GB,zh-CN","jsLanguage":"en-GB"},{"httpLanguage":"en-AU,zh-CN","jsLanguage":"en-AU"},{"httpLanguage":"en-CA,zh-CN","jsLanguage":"en-CA"},{"httpLanguage":"en-NZ,zh-CN","jsLanguage":"en-NZ"}],"screenFingerprintList":[{"availableHeight":1040,"availableWidth":1920,"height":1080,"pixelDepth":24,"width":1920},{"availableHeight":900,"availableWidth":1600,"height":900,"pixelDepth":32,"width":1600},{"availableHeight":1440,"availableWidth":2560,"height":1440,"pixelDepth":24,"width":2560},{"availableHeight":768,"availableWidth":1366,"height":768,"pixelDepth":24,"width":1366},{"availableHeight":800,"availableWidth":1280,"height":800,"pixelDepth":32,"width":1280}]}
+{
+    "userdata": {
+        "audioFingerprintHash": "e10bf488bfeadc903c210ef65da48c87a7da15d9ca326d23b190d488981faa39",
+        "canvasFingerprintHash": "85b2642be4d059969ffe8de5a844adcd2fa774bd69a469d3c14e8eaae2ed1a39",
+        "clientHintFingerprint": {
+            "architecture": "x86",
+            "bitness": "64",
+            "brands": [
+                { "brand": "Chromium", "version": "134" },
+                { "brand": "Google Chrome", "version": "134" },
+                { "brand": "Not.A/Brand", "version": "99" }
+            ],
+            "platform": "Windows",
+            "platform_version": "10.0.0",
+            "ua_full_version": "134.0.6998.88"
+        },
+        "clientRectFingerprintHash": "a41e785c977bbdd404706d6bcb8982b0d75cb1422426b4142184a5822b929b35",
+        "fingerPrintHash": "24c95bd5d966e478880dc31aa03305cb6012a24461115f4433053979ef0a4deb",
+        "fontsFamily": [
+            "Tahoma",
+            "Arial",
+            "Helvetica",
+            "arial",
+            "default",
+            "sans-serif",
+            "serif",
+            "cursive",
+            "monospace",
+            "fantasy",
+            "Arial Black",
+            "Arial Narrow",
+            "Bookshelf Symbol 7",
+            "Brush Script MT",
+            "Comic Sans MS",
+            "Courier",
+            "Courier 10 Pitch",
+            "Courier New",
+            "Georgia",
+            "Microsoft Sans Serif",
+            "Times",
+            "Times New Roman",
+            "Papyrus",
+            "Proxy 1",
+            "Proxy 2",
+            "Proxy 3",
+            "Proxy 4",
+            "Proxy 5",
+            "Proxy 6",
+            "Proxy 7",
+            "Proxy 8",
+            "Proxy 9",
+            "Rockwell",
+            "STSong",
+            "Shree Devanagari 714",
+            "Shree Devanagari 714 Bold",
+            "Shree Devanagari 714 Bold Italic",
+            "Shree Devanagari 714 Italic",
+            "Symbol",
+            "Trebuchet MS",
+            "Verdana",
+            "Webdings",
+            "Wingdings",
+            "Wingdings 2",
+            "Wingdings 3",
+            "BlinkMacSystemFont",
+            "Helvetica Neue",
+            "Apple Color Emoji",
+            "Arial Unicode MS",
+            "Gill Sans",
+            "Menlo",
+            "Impact",
+            "Al Nile",
+            "Al Tarikh",
+            "American Typewriter",
+            "Andale Mono",
+            "Apple Chancery",
+            "Apple SD Gothic Neo",
+            "Apple Symbols",
+            "AppleGothic",
+            "AppleMyungjo",
+            "Arial Hebrew",
+            "Arial Hebrew Scholar",
+            "Arial Rounded MT Bold",
+            "Athelas",
+            "Avenir",
+            "Avenir Black",
+            "Avenir Black Oblique",
+            "Avenir Book",
+            "Avenir Heavy",
+            "Avenir Light",
+            "Avenir Medium",
+            "Avenir Next",
+            "Avenir Next Condensed",
+            "Avenir Next Condensed Demi Bold",
+            "Avenir Next Condensed Heavy",
+            "Avenir Next Condensed Medium",
+            "Avenir Next Condensed Ultra Light",
+            "Avenir Next Demi Bold",
+            "Avenir Next Heavy",
+            "Avenir Next Medium",
+            "Avenir Next Ultra Light",
+            "Ayuthaya",
+            "Bangla MN",
+            "Bangla Sangam MN",
+            "Baskerville",
+            "Bauhaus 93",
+            "Beirut",
+            "Big Caslon",
+            "Bodoni 72",
+            "Bodoni 72 Oldstyle",
+            "Bodoni 72 Smallcaps",
+            "Bodoni Ornaments",
+            "Bradley Hand",
+            "Chalkboard",
+            "Chalkboard SE",
+            "Chalkduster",
+            "Charter",
+            "Charter Black",
+            "Cochin",
+            "Copperplate",
+            "Corsiva Hebrew",
+            "DIN Alternate",
+            "DIN Condensed",
+            "Devanagari MT",
+            "Devanagari Sangam MN",
+            "Didot",
+            "Diwan Kufi",
+            "Diwan Thuluth",
+            "Euphemia UCAS",
+            "Farah",
+            "Farisi",
+            "Futura",
+            "Galvji",
+            "Geneva",
+            "Gujarati MT",
+            "Gujarati Sangam MN",
+            "Gurmukhi MN",
+            "Gurmukhi MT",
+            "Gurmukhi Sangam MN",
+            "Heiti SC",
+            "Heiti TC",
+            "Herculanum",
+            "Hiragino Kaku Gothic Pro",
+            "Hiragino Kaku Gothic Pro W3",
+            "Hiragino Kaku Gothic Pro W6",
+            "Hiragino Kaku Gothic ProN",
+            "Hiragino Kaku Gothic ProN W3",
+            "Hiragino Kaku Gothic ProN W6",
+            "Hiragino Kaku Gothic Std",
+            "Hiragino Kaku Gothic Std W8",
+            "Hiragino Kaku Gothic StdN",
+            "Hiragino Kaku Gothic StdN W8",
+            "Hiragino Maru Gothic Pro",
+            "Hiragino Maru Gothic Pro W4",
+            "Hiragino Maru Gothic ProN",
+            "Hiragino Maru Gothic ProN W4",
+            "Hiragino Mincho Pro",
+            "Hiragino Mincho Pro W3",
+            "Hiragino Mincho Pro W6",
+            "Hiragino Mincho ProN",
+            "Hiragino Mincho ProN W3",
+            "Hiragino Mincho ProN W6",
+            "Hiragino Sans",
+            "Hiragino Sans GB",
+            "Hiragino Sans GB W3",
+            "Hiragino Sans GB W6",
+            "Hiragino Sans W0",
+            "Hiragino Sans W1",
+            "Hiragino Sans W2",
+            "Hiragino Sans W3",
+            "Hiragino Sans W4",
+            "Hiragino Sans W5",
+            "Hiragino Sans W6",
+            "Hiragino Sans W7",
+            "Hiragino Sans W8",
+            "Hiragino Sans W9",
+            "Hoefler Text",
+            "Hoefler Text Ornaments",
+            "ITF Devanagari",
+            "ITF Devanagari Marathi",
+            "InaiMathi",
+            "Iowan Old Style",
+            "Iowan Old Style Black",
+            "Kannada MN",
+            "Kannada Sangam MN",
+            "Kefa",
+            "Khmer MN",
+            "Khmer Sangam MN",
+            "Kohinoor Bangla",
+            "Kohinoor Devanagari",
+            "Kohinoor Gujarati",
+            "Kohinoor Telugu",
+            "Krungthep",
+            "Lao MN",
+            "Lao Sangam MN",
+            "Lucida Grande",
+            "Luminari",
+            "Malayalam MN",
+            "Malayalam Sangam MN",
+            "Marion",
+            "Marker Felt",
+            "Mishafi",
+            "Mishafi Gold",
+            "Modern No. 20",
+            "Monaco",
+            "Mshtakan",
+            "Muna",
+            "Myanmar MN",
+            "Myanmar Sangam MN",
+            "New Peninim MT",
+            "Noteworthy",
+            "Noto Nastaliq Urdu",
+            "Noto Sans Kannada",
+            "Noto Sans Oriya",
+            "Optima",
+            "Oriya MN",
+            "Oriya Sangam MN",
+            "PT Mono",
+            "PT Sans",
+            "PT Sans Caption",
+            "PT Sans Narrow",
+            "PT Serif",
+            "PT Serif Caption",
+            "Palatino",
+            "Phosphate",
+            "PingFang HK",
+            "PingFang SC",
+            "PingFang TC",
+            "Plantagenet Cherokee",
+            "Raanana",
+            "STIXGeneral",
+            "STIXVariants",
+            "Sana",
+            "Sathu",
+            "Savoye LET",
+            "Seravek",
+            "Seravek ExtraLight",
+            "Seravek Light",
+            "Seravek Medium",
+            "SignPainter",
+            "SignPainter-HouseScript",
+            "Silom",
+            "Sinhala MN",
+            "Sinhala Sangam MN",
+            "Skia",
+            "Snell Roundhand",
+            "Songti SC",
+            "Songti TC",
+            "Sukhumvit Set",
+            "Superclarendon",
+            "Tamil MN",
+            "Tamil Sangam MN",
+            "Telugu MN",
+            "Telugu Sangam MN",
+            "Thonburi",
+            "Trattatello",
+            "Waseem",
+            "Zapfino",
+            "Academy Engraved LET",
+            "Party LET",
+            "Apple Braille Outline 6 Dot",
+            "Apple Braille Outline 8 Dot",
+            "Apple Braille Pinpoint 6 Dot",
+            "Apple Braille Pinpoint 8 Dot",
+            "system-ui",
+            "padmaa-Bold.1.1"
+        ],
+        "hardwareFingerprint": {
+            "hardwareConcurrency": 8,
+            "memory": 8
+        },
+        "languageFingerprint": {
+            "httpLanguage": "en-US,zh-CN",
+            "jsLanguage": "en-US"
+        },
+        "screenFingerprint": {
+            "availableHeight": 1040,
+            "availableWidth": 1920,
+            "height": 1080,
+            "pixelDepth": 24,
+            "width": 1920
+        },
+        "timezoneFingerprint": "America/New_York",
+        "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+        "webglFingerprint": {
+            "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+            "vendor": "Google Inc. (NVIDIA)"
+        }
+    },
+    "matchedFingerprintList": [
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.88"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.70"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (Intel, Intel UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (Intel)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.120"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.66"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.40"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 5500 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.22"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 2060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.12"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (Intel, Intel Iris Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (Intel)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.8"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.24"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (Intel, Intel HD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (Intel)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.44"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1060 6GB Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.56"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 570 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.92"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (Intel, Intel UHD Graphics 730 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (Intel)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.102"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.118"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.64"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (Intel, Intel UHD Graphics 770 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (Intel)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.76"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3050 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.130"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3090 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.14"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 2080 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.16"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 2080 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.20"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.28"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.32"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.34"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.38"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3090 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.42"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.46"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.48"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.52"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.58"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce 940MX Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.60"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (Intel, Intel UHD Graphics 610 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (Intel)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.62"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (Intel, Intel Iris Plus Graphics 640 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (Intel)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.68"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (Intel, Intel Iris Plus Graphics 655 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (Intel)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.72"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (Intel, Intel Iris Xe MAX Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (Intel)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.74"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.78"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 590 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.80"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 5600 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.84"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 5700 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.86"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 6800 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.90"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 6900 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.94"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon Vega 8 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.96"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon Vega 11 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.98"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon Pro 560 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "11.0.0",
+                "ua_full_version": "134.0.6998.104"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    { "brand": "Chromium", "version": "134" },
+                    { "brand": "Google Chrome", "version": "134" },
+                    { "brand": "Not.A/Brand", "version": "99" }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.108"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        }
+    ],
+    "languageFingerprintList": [
+        { "httpLanguage": "en-US,en", "jsLanguage": "en-US" },
+        { "httpLanguage": "en-GB,en", "jsLanguage": "en-GB" },
+        { "httpLanguage": "en-AU,en", "jsLanguage": "en-AU" },
+        { "httpLanguage": "en-CA,en", "jsLanguage": "en-CA" },
+        { "httpLanguage": "en-NZ,en", "jsLanguage": "en-NZ" },
+        { "httpLanguage": "en-IE,en", "jsLanguage": "en-IE" },
+        { "httpLanguage": "en-IN,en", "jsLanguage": "en-IN" },
+        { "httpLanguage": "en-SG,en", "jsLanguage": "en-SG" },
+        { "httpLanguage": "en-PH,en", "jsLanguage": "en-PH" },
+        { "httpLanguage": "en-ZA,en", "jsLanguage": "en-ZA" },
+        { "httpLanguage": "en-US", "jsLanguage": "en-US" },
+        { "httpLanguage": "en-GB", "jsLanguage": "en-GB" },
+        { "httpLanguage": "en-AU", "jsLanguage": "en-AU" },
+        { "httpLanguage": "en-CA", "jsLanguage": "en-CA" },
+        { "httpLanguage": "en-NZ", "jsLanguage": "en-NZ" },
+        { "httpLanguage": "en", "jsLanguage": "en" }
+    ],
+    "screenFingerprintList": [
+        { "availableHeight": 1040, "availableWidth": 1920, "height": 1080, "pixelDepth": 24, "width": 1920 },
+        { "availableHeight": 900, "availableWidth": 1600, "height": 900, "pixelDepth": 24, "width": 1600 },
+        { "availableHeight": 1400, "availableWidth": 2560, "height": 1440, "pixelDepth": 24, "width": 2560 },
+        { "availableHeight": 728, "availableWidth": 1366, "height": 768, "pixelDepth": 24, "width": 1366 },
+        { "availableHeight": 760, "availableWidth": 1280, "height": 800, "pixelDepth": 24, "width": 1280 },
+        { "availableHeight": 828, "availableWidth": 1536, "height": 864, "pixelDepth": 24, "width": 1536 },
+        { "availableHeight": 860, "availableWidth": 1440, "height": 900, "pixelDepth": 24, "width": 1440 },
+        { "availableHeight": 1000, "availableWidth": 1680, "height": 1050, "pixelDepth": 24, "width": 1680 },
+        { "availableHeight": 1040, "availableWidth": 1920, "height": 1080, "pixelDepth": 24, "width": 1920 },
+        { "availableHeight": 680, "availableWidth": 1280, "height": 720, "pixelDepth": 24, "width": 1280 },
+        { "availableHeight": 1400, "availableWidth": 2560, "height": 1440, "pixelDepth": 24, "width": 2560 },
+        { "availableHeight": 1000, "availableWidth": 1920, "height": 1080, "pixelDepth": 24, "width": 1920 },
+        { "availableHeight": 1320, "availableWidth": 2560, "height": 1440, "pixelDepth": 24, "width": 2560 },
+        { "availableHeight": 1560, "availableWidth": 2560, "height": 1600, "pixelDepth": 24, "width": 2560 },
+        { "availableHeight": 1160, "availableWidth": 1920, "height": 1200, "pixelDepth": 24, "width": 1920 },
+        { "availableHeight": 1040, "availableWidth": 1920, "height": 1080, "pixelDepth": 24, "width": 1920 },
+        { "availableHeight": 1760, "availableWidth": 2880, "height": 1800, "pixelDepth": 24, "width": 2880 },
+        { "availableHeight": 1160, "availableWidth": 2000, "height": 1200, "pixelDepth": 24, "width": 2000 },
+        { "availableHeight": 1400, "availableWidth": 2560, "height": 1440, "pixelDepth": 24, "width": 2560 },
+        { "availableHeight": 1560, "availableWidth": 2560, "height": 1600, "pixelDepth": 24, "width": 2560 }
+    ]
+}

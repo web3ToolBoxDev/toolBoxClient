@@ -4,7 +4,6 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const util = require('util');
 const { checkProxy } = require('./proxyService');
-// const { pro } = require('ccxt');
 
 
 const fpDataPath = path.join(config.getAssetsPath(), 'fpData.json');
@@ -150,6 +149,8 @@ async function generateRandomFingerPrint(counts) {
                 memory: 8,
                 concurrency: 8
             },
+            audio: random1(),
+            clientRect: random1(),
             fonts_remove: removeFonts.join(','),
             createdAt: Date.now(), // 新增创建时间戳
         };
@@ -206,6 +207,7 @@ async function clearFingerPrints() {
     fs.writeFileSync(fpDataPath, fpDataJson);
     return { success: true, code: 0, message: 'Fingerprints cleared successfully' };
 }
+
 
 async function updateFingerPrintName(id, newName) {
     if (!id || !newName) {
@@ -335,8 +337,28 @@ async function updateFingerPrintProxy(id, proxy) {
         fingerprint.timeZone = proxyCheck.data.timeZone;
     }
     fingerprint.proxy = proxyInfo; // 更新指纹环境的代理信息
+
     await setEnvById(id, fingerprint); // 同步到内存
     return { success: true, code: 0, message: 'Proxy info updated successfully', data: fingerprint };
+}
+
+async function deleteFingerPrintProxy(id) {
+    if (!id) {
+        return { success: false, code: 2018, message: 'Invalid parameters' };
+    }
+    const fingerprintRes = await getEnvById(id);
+    if (!fingerprintRes.success) {
+        return { success: false, code: 2020, message: fingerprintRes.message || 'Environment not found' };
+    }
+    const fingerprint = fingerprintRes.data;
+    fingerprint.proxy = null;
+    delete fingerprint.proxy_type;
+    delete fingerprint.proxy_ip;
+    delete fingerprint.proxy_port;
+    delete fingerprint.proxy_username;
+    delete fingerprint.proxy_password;
+    await setEnvById(id, fingerprint);
+    return { success: true, code: 0, message: 'Proxy info cleared', data: fingerprint };
 }
 
 async function bindWalletEnv(walletId, envId) {
@@ -451,6 +473,7 @@ module.exports = {
     getEnvById, 
     setEnvById,
     updateFingerPrintProxy,
+    deleteFingerPrintProxy,
     bindWalletEnv,
     unbindWalletEnv,
     reinitializeDatabase,

@@ -6,6 +6,7 @@ import axios from 'axios';
 import { Keypair } from '@solana/web3.js';
 import * as bip39 from 'bip39';
 import { derivePath } from 'ed25519-hd-key';
+import i18n from '../../i18n';
 
 const IRouter02Abi = require('@uniswap/v2-periphery/build/IUniswapV2Router02.json');
 const IPair02Abi = require('@uniswap/v2-core/build/IUniswapV2Pair.json');
@@ -14,6 +15,8 @@ const routerAddObj = {
     ETH: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
     BSC: "0x10ED43C718714eb63d5aA57B78B54704E256024E"
 }
+
+const translate = (key, defaultValue, options = {}) => i18n.t(key, { defaultValue, ...options });
 
 
 class Web3Manager {
@@ -350,7 +353,7 @@ class Web3Manager {
         if (taskList.length === 0) {
             callback({
                 type: 'error',
-                message: '任务列表为空'
+                message: translate('web3.emptyTaskList', '任务列表为空')
             });
             return false;
         }
@@ -413,7 +416,7 @@ class Web3Manager {
                     const tx_hash = ethers.keccak256(signed_tx);
                     callback({
                         type: 'log',
-                        message: `创建交易hash:${tx_hash}`
+                        message: translate('web3.txHashCreated', '创建交易hash:{{hash}}', { hash: tx_hash })
                     })
                     tx_hashes.push(tx_hash);
                 } else {
@@ -423,7 +426,7 @@ class Web3Manager {
                     if (allowance < inAmount) {
                         callback({
                             type: 'log',
-                            message: `授权额度为${allowance},小于交易额度${inAmount},开始授权`
+                            message: translate('web3.approvalInsufficient', '授权额度为{{allowance}},小于交易额度{{amount}},开始授权', { allowance: allowance.toString(), amount: inAmount.toString() })
                         });
                         const tx = await erc20.approve.populateTransaction(routerAddress, ethers.MaxUint256, {
                             gasPrice,
@@ -440,7 +443,7 @@ class Web3Manager {
                         const tx_hash = ethers.keccak256(signed_tx);
                         callback({
                             type: 'log',
-                            message: `创建授权交易hash:${tx_hash}`
+                            message: translate('web3.approvalTxHash', '创建授权交易hash:{{hash}}', { hash: tx_hash })
                         })
                         tx_hashes.push(tx_hash);
                         nonceRecord[buyer.address] += 1;
@@ -467,7 +470,7 @@ class Web3Manager {
                         const tx_hash = ethers.keccak256(signed_tx);
                         callback({
                             type: 'log',
-                            message: `创建交易hash:${tx_hash}`
+                            message: translate('web3.txHashCreated', '创建交易hash:{{hash}}', { hash: tx_hash })
                         })
                         tx_hashes.push(tx_hash);
                     } else {
@@ -492,7 +495,7 @@ class Web3Manager {
                         const tx_hash = ethers.keccak256(signed_tx);
                         callback({
                             type: 'log',
-                            message: `创建交易hash:${tx_hash}`
+                            message: translate('web3.txHashCreated', '创建交易hash:{{hash}}', { hash: tx_hash })
                         })
                         tx_hashes.push(tx_hash);
                     }
@@ -533,13 +536,13 @@ class Web3Manager {
                 if (receipt === 0) {
                     callback({
                         type: 'success',
-                        message: '交易成功'
+                        message: translate('web3.swapSuccess', '交易成功')
                     });
                     return true;
                 } else {
                     callback({
                         type: 'error',
-                        message: '交易失败,请提高gas倍数重试'
+                        message: translate('web3.swapFailedGas', '交易失败，请提高gas倍数重试')
                     });
 
                     return false;
@@ -593,7 +596,7 @@ class Web3Manager {
                         if (!receipt.status) {
                             callback({
                                 type: 'error',
-                                message: `交易hash：${tx_hash}失败，请检查币种是否含税，含税请调高滑点`
+                                message: translate('web3.swapFailedTaxHint', '交易hash：{{hash}}失败，请检查币种是否含税，含税请调高滑点', { hash: tx_hash })
                             });
                             return false;
                         }
@@ -601,13 +604,13 @@ class Web3Manager {
                 } catch (error) {
                     callback({
                         type: 'error',
-                        message: '交易失败，请提高gas倍数重试'
+                        message: translate('web3.swapFailedGas', '交易失败，请提高gas倍数重试')
                     });
                     return false;
                 }
                 callback({
                     type: 'success',
-                    message: '交易成功'
+                    message: translate('web3.swapSuccess', '交易成功')
                 });
                 return true;
             }

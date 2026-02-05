@@ -6,6 +6,7 @@ class APIManager {
     constructor() {
         if (!APIManager.instance) {
             this.baseUrl = 'http://localhost:30001/api';
+            this._lastRunningAlertAt = 0;
             APIManager.instance = this;
         }
         return APIManager.instance;
@@ -38,6 +39,7 @@ class APIManager {
     async openWallets(ids) {
         const res = await axios.post(`${this.baseUrl}/openWallets`, { ids: ids });
         eventEmitter.emit('taskExecuted');
+        eventEmitter.emit('taskStart', { taskName: 'openWallet', taskData: { envIds: ids } });
         return res.data;
     }
     async deleteWallets(ids) {
@@ -56,6 +58,7 @@ class APIManager {
     async initWallets(ids) {
         const res = await axios.post(`${this.baseUrl}/initWallets`, { ids: ids });
         eventEmitter.emit('taskExecuted');
+        eventEmitter.emit('taskStart', { taskName: 'initWallet', taskData: { envIds: ids } });
         return res.data;
     }
     async importTask(taskObj) {
@@ -67,8 +70,63 @@ class APIManager {
         return res.data;
     }
     async execTask(taskName,taskData = null) {
+        try {
+            if (typeof window !== 'undefined' && taskName) {
+                const stored = window.localStorage.getItem('taskLogsByTask');
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    const ids = Object.keys(parsed || {});
+                    const isRunning = ids.some((id) => {
+                        if (!parsed[id] || parsed[id].status !== 'running') return false;
+                        if (id === taskName || String(id).endsWith(`_${taskName}`)) return true;
+                        if (taskName === 'syncFunction' && String(id).endsWith('_syncFunction')) return true;
+                        return false;
+                    });
+                    const isIdScopedTask = ['openChrome', 'openWallet', 'initWallet'].includes(taskName);
+                    const requestedIds = Array.isArray(taskData?.envIds)
+                        ? taskData.envIds
+                        : (Array.isArray(taskData?.walletIds) ? taskData.walletIds : []);
+                    if (isIdScopedTask && requestedIds.length) {
+                        const runningIds = ids.reduce((acc, id) => {
+                            if (!parsed[id] || parsed[id].status !== 'running') return acc;
+                            const suffix = `_${taskName}`;
+                            if (String(id).endsWith(suffix)) {
+                                acc.add(String(id).slice(0, -suffix.length));
+                            }
+                            return acc;
+                        }, new Set());
+                        const overlap = requestedIds.filter((rid) => runningIds.has(String(rid)));
+                        if (overlap.length) {
+                            const now = Date.now();
+                            if (!this._lastRunningAlertAt || now - this._lastRunningAlertAt > 2000) {
+                                alert('Task is already running');
+                                this._lastRunningAlertAt = now;
+                            }
+                            return { success: false, code: 1003, message: 'Task is already running', runningIds: overlap };
+                        }
+                        // allow if different ids are running
+                        return await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,taskData:taskData }).then(res => {
+                            eventEmitter.emit('taskExecuted');
+                            eventEmitter.emit('taskStart', { taskName, taskData });
+                            return res.data;
+                        });
+                    }
+                    if (isRunning) {
+                        const now = Date.now();
+                        if (!this._lastRunningAlertAt || now - this._lastRunningAlertAt > 2000) {
+                            alert('Task is already running');
+                            this._lastRunningAlertAt = now;
+                        }
+                        return { success: false, code: 1003, message: 'Task is already running' };
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to check running tasks:', error);
+        }
         const res = await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,taskData:taskData });
         eventEmitter.emit('taskExecuted');
+        eventEmitter.emit('taskStart', { taskName, taskData });
         return res.data;
     }
     async getConfigInfo(taskName) {
@@ -100,7 +158,13 @@ class APIManager {
         return res.data;
     }
     async checkWebSocket(){
+        console.log('[api] checkWebSocket ->', this.baseUrl);
         const res = await axios.get(`${this.baseUrl}/checkWebSocket`);
+        console.log('[api] checkWebSocket response:', res?.data);
+        return res.data;
+    }
+    async getTaskStatus(taskNames = []) {
+        const res = await axios.post(`${this.baseUrl}/getTaskStatus`, { taskNames });
         return res.data;
     }
     async checkProxy(params){
@@ -129,12 +193,6 @@ class APIManager {
         const res = await axios.get(`${this.baseUrl}/getFingerPrints`);
         return res.data;
     }
-    //获取执行进度
-    async getFingerPrintProgress(){
-        const res = await axios.get(`${this.baseUrl}/getFingerPrintProgress`);
-        console.log('res:', res);
-        return res.data;
-    }
     //更新指纹环境名称
     async updateFingerPrintName(id, name) {
         const res = await axios.post(`${this.baseUrl}/updateFingerPrintName`, { id, name });
@@ -147,6 +205,10 @@ class APIManager {
     }
     async updateFingerPrintProxy(id, proxy) {
         const res = await axios.post(`${this.baseUrl}/updateFingerPrintProxy`, { id, proxy });
+        return res.data;
+    }
+    async deleteFingerPrintProxy(id) {
+        const res = await axios.post(`${this.baseUrl}/deleteFingerPrintProxy`, { id });
         return res.data;
     }
     async setChromePath(path) {
@@ -173,6 +235,11 @@ class APIManager {
 
     async setWalletScriptDirectory(directory) {
         const res = await axios.post(`${this.baseUrl}/setWalletScriptDirectory`, { directory });
+        return res.data;
+    }
+
+    async resetWalletScriptDirectory() {
+        const res = await axios.post(`${this.baseUrl}/resetWalletScriptDirectory`);
         return res.data;
     }
 

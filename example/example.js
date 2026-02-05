@@ -3,14 +3,18 @@ const url = process.argv[2];
 
 console.log('Received URL params:', url);
 
-let ws = new webSocket(url);
+let ws = null;
 let webSocketReady = false;
 let taskData = null;
+let heartBeatTimer = null;
 
 // 心跳包定时发送
 function sendHeartBeat() {
-    setInterval(() => {
-        if (ws.readyState === webSocket.OPEN) {
+    if (heartBeatTimer) {
+        clearInterval(heartBeatTimer);
+    }
+    heartBeatTimer = setInterval(() => {
+        if (ws && ws.readyState === webSocket.OPEN) {
             const heartBeatMessage = JSON.stringify({
                 type: 'heart_beat'
             });
@@ -63,41 +67,57 @@ function exit() {
     process.exit(0);
 }
 
-ws.on('open', () => {
-    webSocketReady = true;
-    sendHeartBeat();
-});
+function initWebSocket() {
+    try {
+        if (ws) {
+            ws.removeAllListeners();
+            ws.close();
+        }
+    } catch {}
+    ws = new webSocket(url);
 
-ws.on('message', (message) => {
-    let data = JSON.parse(message);
-    switch (data.type) {
-        case 'heart_beat':
-            console.log('Received heartbeat from server');
-            break;
-        case 'request_task_data':
-            console.log('Received task payload:', data);
-            taskData = data.data;
-            break;
-        case 'terminate_process':
-            sendTerminateProcess();
-            exit();
-        default:
-            break;
-    }
-});
+    ws.on('open', () => {
+        webSocketReady = true;
+        sendHeartBeat();
+        sendRequestTaskData();
+    });
 
-ws.on('error', (error) => {
-    console.error('WebSocket connection error:', error);
-    // 关闭连接并退出
-    ws.close();
-    process.exit(1);
-});
+    ws.on('message', (message) => {
+        let data = JSON.parse(message);
+        switch (data.type) {
+            case 'heart_beat':
+                console.log('Received heartbeat from server');
+                break;
+            case 'request_task_data':
+                console.log('Received task payload:', data);
+                taskData = data.data;
+                break;
+            case 'terminate_process':
+                sendTerminateProcess();
+                exit();
+            default:
+                break;
+        }
+    });
+
+    ws.on('close', () => {
+        webSocketReady = false;
+    });
+
+    ws.on('error', (error) => {
+        console.error('WebSocket connection error:', error);
+        webSocketReady = false;
+        try { ws.close(); } catch {}
+    });
+}
+
+initWebSocket();
 
 // 定时检查连接状态，如果连接断开则重连
 setInterval(() => {
-    if (ws.readyState === webSocket.CLOSED) {
+    if (!ws || ws.readyState === webSocket.CLOSED) {
         console.log('WebSocket disconnected; attempting to reconnect...');
-        ws = new webSocket(url);
+        initWebSocket();
     }
 }, 5000); // 每 5 秒检查一次连接状态
 // 进行任务时，需要发送心跳包，接收任务数据，发送任务日志，完成任务
@@ -129,7 +149,6 @@ async function runTask() {
             
             if (taskData) {
                 sendTaskLog('Task log content: test');
-                sendTaskLog(`Received task data: ${taskData}`);
                 await runTask();
             }
         }

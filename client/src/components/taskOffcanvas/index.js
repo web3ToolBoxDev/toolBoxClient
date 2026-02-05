@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Offcanvas from 'react-bootstrap/Offcanvas';
 import { Button, Row, Col } from 'react-bootstrap';
 import WebSocketManager from '../../utils/webSocket';
+import APIManager from '../../utils/api';
 import { eventEmitter } from '../../utils/eventEmitter';
 import './index.scss';
 import { useTranslation } from 'react-i18next';
@@ -43,29 +44,30 @@ const normalizeTaskId = (value) => {
     return String(value).trim();
 };
 
-const resolveTaskKey = (taskId, tasksSnapshot = {}) => {
-    const normalized = normalizeTaskId(taskId);
-    const normalizedShort = normalized ? shortTaskName(normalized) : '';
-    if (normalized && tasksSnapshot[normalized]) {
-        return normalized;
+const mapTaskIdForDisplay = (taskId = '') => {
+    if (!taskId) return taskId;
+    if (String(taskId).endsWith('_syncFunction')) {
+        return 'syncFunction';
     }
-    if (normalized) {
-        const fallback = Object.keys(tasksSnapshot).find((existingId) => {
-            const normalizedExisting = normalizeTaskId(existingId);
-            if (normalizedExisting === normalized) {
-                return true;
-            }
-            const existingShort = shortTaskName(normalizedExisting);
-            // Match when server logs use shortTaskName but completion uses full id, and vice versa
-            return existingShort === normalized || existingShort === normalizedShort;
-        });
-        if (fallback) {
-            return fallback;
-        }
-        return normalized;
-    }
-    return GENERAL_TASK_ID;
+    return taskId;
 };
+
+const resolveTaskId = (taskId, tasksSnapshot = {}) => {
+    const normalized = normalizeTaskId(taskId);
+    if (!normalized) {
+        return GENERAL_TASK_ID;
+    }
+    if (tasksSnapshot[normalized]) {
+        return normalized;
+    }
+    const normalizedShort = shortTaskName(normalized);
+    const fallback = Object.keys(tasksSnapshot).find((existingId) => {
+        const existingShort = shortTaskName(existingId);
+        return existingShort === normalized || existingShort === normalizedShort;
+    });
+    return fallback || normalized;
+};
+
 
 const extractTaskFromMessage = (message = '') => {
     const match = /Task:([^\s]+)\s?([\s\S]*)/i.exec(message);
@@ -119,10 +121,11 @@ const sanitizeStoredTasks = (stored) => {
                 return createLogEntry(text, text);
             })
             : [];
+        const normalizedStatus = TASK_STATUS.COMPLETED;
         acc[safeId] = {
             id: safeId,
             logs,
-            status: payload.status === TASK_STATUS.COMPLETED ? TASK_STATUS.COMPLETED : TASK_STATUS.RUNNING,
+            status: normalizedStatus,
             displayName: payload.displayName || getDefaultDisplayName(safeId),
             canTarget: Boolean(payload.canTarget && safeId !== GENERAL_TASK_ID),
             createdAt,
@@ -132,24 +135,41 @@ const sanitizeStoredTasks = (stored) => {
     }, {});
 };
 
+// Shared WebSocket manager to avoid duplicate connections (StrictMode/rehydrate)
+const sharedWsManager = WebSocketManager.getInstance();
+let sharedConnectPromise = null;
+const ensureSharedConnection = async (messageCallback, closeCallback) => {
+    if (sharedWsManager.wss && sharedWsManager.wss.readyState === WebSocket.OPEN) {
+        return true;
+    }
+    if (sharedConnectPromise) {
+        return sharedConnectPromise;
+    }
+    sharedConnectPromise = sharedWsManager.connect(messageCallback, closeCallback);
+    const ok = await sharedConnectPromise;
+    sharedConnectPromise = null;
+    return ok;
+};
+
 function TaskOffcanvas({ show, handleClose }) {
     const [tasks, setTasks] = useState({});
     const [activeTaskId, setActiveTaskId] = useState(null);
-    const wsManagerRef = useRef(new WebSocketManager());
+    const wsManagerRef = useRef(sharedWsManager);
+    const wsInitRef = useRef(false);
+    const apiRef = useRef(APIManager.getInstance());
     const { t } = useTranslation();
+    const tasksRef = useRef(tasks);
 
     const taskStartListener = useRef();
     const clientTaskMessageListener = useRef();
 
     const appendLogEntry = useCallback((taskId, logEntry, meta = {}) => {
-        let resolvedTaskIdRef = GENERAL_TASK_ID;
         setTasks((prev) => {
-            const resolvedTaskId = resolveTaskKey(taskId, prev);
-            resolvedTaskIdRef = resolvedTaskId;
+            const resolvedTaskId = resolveTaskId(taskId, prev);
             const next = { ...prev };
             const existing = next[resolvedTaskId];
             const createdAt = existing?.createdAt || logEntry.timestamp;
-            const status = existing?.status || meta.initialStatus || TASK_STATUS.RUNNING;
+            const status = meta.status || meta.initialStatus || existing?.status || TASK_STATUS.COMPLETED;
             const displayName = meta.displayName || existing?.displayName || getDefaultDisplayName(resolvedTaskId);
             const canTarget = meta.canTarget ?? existing?.canTarget ?? false;
             const logs = [...(existing?.logs || []), logEntry];
@@ -164,8 +184,9 @@ function TaskOffcanvas({ show, handleClose }) {
             };
             return next;
         });
+        const resolvedTaskIdRef = normalizeTaskId(taskId) || GENERAL_TASK_ID;
         if (resolvedTaskIdRef !== GENERAL_TASK_ID) {
-            setActiveTaskId((current) => current || resolvedTaskIdRef);
+            setActiveTaskId((current) => (meta.focus ? resolvedTaskIdRef : current || resolvedTaskIdRef));
         }
     }, []);
 
@@ -183,7 +204,23 @@ function TaskOffcanvas({ show, handleClose }) {
         });
     }, []);
 
-    const sendTerminateAllTasks = useCallback(() => {
+    const fetchTaskRunningStatus = useCallback(async (taskIds = []) => {
+        const names = Array.isArray(taskIds) ? taskIds.filter(Boolean) : [];
+        if (!names.length) {
+            return {};
+        }
+        try {
+            const res = await apiRef.current.getTaskStatus(names);
+            if (res && res.success && res.data) {
+                return res.data;
+            }
+        } catch (error) {
+            console.error('Failed to fetch task status before terminate:', error);
+        }
+        return null;
+    }, []);
+
+    const sendTerminateAllTasks = useCallback(async () => {
         const wsManager = wsManagerRef.current;
         if (!wsManager) {
             return;
@@ -194,11 +231,19 @@ function TaskOffcanvas({ show, handleClose }) {
         );
 
         if (!runningTasks.length) {
-            wsManager.sendMessage(JSON.stringify({ type: 'terminate_process' }));
             return;
         }
 
-        const targetableTasks = runningTasks.filter((task) => task.canTarget !== false);
+        const runningStatus = await fetchTaskRunningStatus(runningTasks.map((task) => task.id));
+        const confirmedRunning = runningStatus
+            ? runningTasks.filter((task) => Boolean(runningStatus[task.id]))
+            : runningTasks;
+
+        if (!confirmedRunning.length) {
+            return;
+        }
+
+        const targetableTasks = confirmedRunning.filter((task) => task.canTarget !== false);
 
         targetableTasks.forEach((task) => {
             wsManager.sendMessage(
@@ -206,17 +251,17 @@ function TaskOffcanvas({ show, handleClose }) {
             );
         });
 
-        if (targetableTasks.length < runningTasks.length) {
+        if (targetableTasks.length < confirmedRunning.length) {
             wsManager.sendMessage(JSON.stringify({ type: 'terminate_process' }));
         }
-    }, [tasks]);
+    }, [fetchTaskRunningStatus, tasks]);
 
-    const handleClearAllLogs = useCallback(() => {
+    const handleClearAllLogs = useCallback(async () => {
         const hasRunning = Object.values(tasks).some(
             (task) => task.status === TASK_STATUS.RUNNING && task.id !== GENERAL_TASK_ID
         );
         if (hasRunning) {
-            sendTerminateAllTasks();
+            await sendTerminateAllTasks();
         }
         setTasks({});
         setActiveTaskId(null);
@@ -227,7 +272,7 @@ function TaskOffcanvas({ show, handleClose }) {
 
     const setTaskStatus = useCallback((taskId, status, meta = {}) => {
         setTasks((prev) => {
-            const resolvedTaskId = resolveTaskKey(taskId, prev);
+            const resolvedTaskId = resolveTaskId(taskId, prev);
             const next = { ...prev };
             const existing = next[resolvedTaskId];
             const now = Date.now();
@@ -247,26 +292,23 @@ function TaskOffcanvas({ show, handleClose }) {
     }, []);
 
     const handleTaskCompleted = useCallback((info) => {
-        const normalizedTaskId = normalizeTaskId(info.taskName);
-        const displayName = normalizedTaskId ? shortTaskName(normalizedTaskId) : undefined;
-        const resolvedTaskId = normalizedTaskId || GENERAL_TASK_ID;
-        setTaskStatus(resolvedTaskId, TASK_STATUS.COMPLETED, { displayName, canTarget: Boolean(info.taskName) });
+        const normalizedTaskId = mapTaskIdForDisplay(normalizeTaskId(info.taskName));
+        const displayName = normalizedTaskId ? shortTaskName(normalizedTaskId) : DEFAULT_SYSTEM_LABEL;
+        setTaskStatus(normalizedTaskId || GENERAL_TASK_ID, TASK_STATUS.COMPLETED, {
+            displayName,
+            canTarget: Boolean(normalizedTaskId)
+        });
     }, [setTaskStatus]);
 
     const appendServerLog = useCallback((info) => {
         const parsed = extractTaskFromMessage(info.message || '');
         const taskIdFromEvent = normalizeTaskId(info.taskName);
-        const resolvedTaskId = taskIdFromEvent || parsed.taskId;
-        const displayName = taskIdFromEvent ? shortTaskName(taskIdFromEvent) : parsed.taskId;
-        const canTarget = Boolean(taskIdFromEvent || parsed.taskId);
-        const normalizedText = (parsed.text || '').toLowerCase();
-
-        if (
-            resolvedTaskId !== GENERAL_TASK_ID &&
-            (normalizedText.startsWith('started') || normalizedText.includes(' task started'))
-        ) {
-            setTaskStatus(resolvedTaskId, TASK_STATUS.RUNNING, { displayName, canTarget });
-        }
+        const resolvedTaskId = mapTaskIdForDisplay(taskIdFromEvent || parsed.taskId) || GENERAL_TASK_ID;
+        const displayName = resolvedTaskId === GENERAL_TASK_ID
+            ? DEFAULT_SYSTEM_LABEL
+            : shortTaskName(resolvedTaskId);
+        const canTarget = resolvedTaskId !== GENERAL_TASK_ID;
+        const targetTaskId = resolvedTaskId;
 
         const logEntry = createLogEntry(
             parsed.text || info.message,
@@ -275,12 +317,46 @@ function TaskOffcanvas({ show, handleClose }) {
             Date.now(),
             info.time
         );
-        appendLogEntry(resolvedTaskId, logEntry, { displayName, canTarget });
-    }, [appendLogEntry, setTaskStatus]);
+        appendLogEntry(targetTaskId, logEntry, { displayName, canTarget });
+    }, [appendLogEntry]);
 
     const appendGeneralLog = useCallback((message) => {
         const logEntry = createLogEntry(message, message);
         appendLogEntry(GENERAL_TASK_ID, logEntry, { displayName: DEFAULT_SYSTEM_LABEL, canTarget: false });
+    }, [appendLogEntry]);
+
+    const seedTaskStart = useCallback((payload = {}) => {
+        const taskName = normalizeTaskId(payload.taskName);
+        const taskData = payload.taskData || {};
+        const envIds = Array.isArray(taskData.envIds) ? taskData.envIds : [];
+        const walletIds = Array.isArray(taskData.walletIds) ? taskData.walletIds : [];
+
+        const now = Date.now();
+        const seedOne = (taskId) => {
+            if (!taskId) return;
+            const displayName = shortTaskName(taskId);
+            const logEntry = createLogEntry('started (client)', 'started (client)', 'info', now);
+            appendLogEntry(taskId, logEntry, { displayName, canTarget: true, status: TASK_STATUS.RUNNING, focus: true });
+        };
+
+        if (taskName === 'syncFunction') {
+            seedOne('syncFunction');
+            return;
+        }
+
+        if (envIds.length && taskName) {
+            envIds.forEach((envId) => seedOne(`${envId}_${taskName}`));
+            return;
+        }
+
+        if (walletIds.length && taskName) {
+            walletIds.forEach((walletId) => seedOne(`${walletId}_${taskName}`));
+            return;
+        }
+
+        if (taskName) {
+            seedOne(taskName);
+        }
     }, [appendLogEntry]);
 
     const processIncomingMessages = useCallback(() => {
@@ -291,6 +367,15 @@ function TaskOffcanvas({ show, handleClose }) {
         while (wsManager.getQueueLength() > 0) {
             const info = wsManager.popFromQueue();
             if (!info) {
+                continue;
+            }
+            if (info.type === 'task_started') {
+                const taskId = mapTaskIdForDisplay(normalizeTaskId(info.taskName));
+                if (taskId) {
+                    const displayName = shortTaskName(taskId);
+                    const logEntry = createLogEntry('started', 'started', 'info', Date.now(), info.time);
+                    appendLogEntry(taskId, logEntry, { displayName, canTarget: true, status: TASK_STATUS.RUNNING, focus: true });
+                }
                 continue;
             }
             if (info.type === 'task_completed') {
@@ -308,7 +393,7 @@ function TaskOffcanvas({ show, handleClose }) {
         console.log('WebSocket connection closed:', event);
     }, []);
 
-    const terminateTask = () => {
+    const terminateTask = async () => {
         const activeTask = activeTaskId ? tasks[activeTaskId] : null;
         if (!activeTask || activeTask.status !== TASK_STATUS.RUNNING) {
             return; // only terminate the currently selected running task
@@ -319,8 +404,29 @@ function TaskOffcanvas({ show, handleClose }) {
         if (!activeTask.canTarget) {
             return; // task cannot be targeted directly
         }
+        const runningStatus = await fetchTaskRunningStatus([activeTask.id]);
+        if (runningStatus && !runningStatus[activeTask.id]) {
+            const now = Date.now();
+            setTaskStatus(activeTask.id, TASK_STATUS.COMPLETED, {
+                displayName: activeTask.displayName,
+                canTarget: activeTask.canTarget
+            });
+            appendLogEntry(activeTask.id, createLogEntry('already stopped (server)', 'already stopped (server)', 'info', now), {
+                displayName: activeTask.displayName,
+                canTarget: activeTask.canTarget,
+                status: TASK_STATUS.COMPLETED
+            });
+            return;
+        }
         const payload = { type: 'terminate_process', taskName: activeTask.id };
         wsManagerRef.current.sendMessage(JSON.stringify(payload));
+        const now = Date.now();
+        const logEntry = createLogEntry('terminated (client)', 'terminated (client)', 'info', now);
+        appendLogEntry(activeTask.id, logEntry, {
+            displayName: activeTask.displayName,
+            canTarget: activeTask.canTarget,
+            status: TASK_STATUS.COMPLETED
+        });
     };
 
     const handleDeleteActiveTask = () => {
@@ -356,7 +462,7 @@ function TaskOffcanvas({ show, handleClose }) {
                         [GENERAL_TASK_ID]: {
                             id: GENERAL_TASK_ID,
                             logs,
-                            status: TASK_STATUS.RUNNING,
+                            status: TASK_STATUS.COMPLETED,
                             displayName: DEFAULT_SYSTEM_LABEL,
                             canTarget: false,
                             createdAt: now,
@@ -384,17 +490,24 @@ function TaskOffcanvas({ show, handleClose }) {
 
     useEffect(() => {
         const wsManager = wsManagerRef.current;
+        if (wsInitRef.current) {
+            return;
+        }
+        wsInitRef.current = true;
 
         const connectWebSocket = async () => {
-            const connected = await wsManager.connect(processIncomingMessages, closeCallback);
+            const connected = await ensureSharedConnection(processIncomingMessages, closeCallback);
             if (!connected) {
-                alert(t('connectionFailedAlert'));
+                console.warn('WebSocket connection failed');
             }
         };
 
         connectWebSocket();
 
-        taskStartListener.current = connectWebSocket;
+        taskStartListener.current = (payload) => {
+            connectWebSocket();
+            seedTaskStart(payload);
+        };
         clientTaskMessageListener.current = (message) => {
             appendGeneralLog(message);
         };
@@ -402,22 +515,27 @@ function TaskOffcanvas({ show, handleClose }) {
         eventEmitter.on('taskStart', taskStartListener.current);
         eventEmitter.on('clientTaskMessage', clientTaskMessageListener.current);
 
-        const interval = setInterval(() => {
-            if (!wsManager.wss || !wsManager.checkConnection()) {
-                connectWebSocket();
-            }
-        }, 5000);
-
         return () => {
-            wsManager.close();
+            // Do not close shared websocket on unmount; just remove listeners
             eventEmitter.off('taskStart', taskStartListener.current);
             eventEmitter.off('clientTaskMessage', clientTaskMessageListener.current);
-            clearInterval(interval);
         };
-    }, [appendGeneralLog, closeCallback, processIncomingMessages, t]);
+    }, [appendGeneralLog, closeCallback, processIncomingMessages, seedTaskStart, t]);
 
     const sortedTasks = useMemo(() => {
-        return Object.values(tasks).sort((a, b) => b.createdAt - a.createdAt);
+        return Object.values(tasks).sort((a, b) => {
+            const aRunning = a.status === TASK_STATUS.RUNNING;
+            const bRunning = b.status === TASK_STATUS.RUNNING;
+            if (aRunning !== bRunning) {
+                return aRunning ? -1 : 1;
+            }
+            const aUpdated = a.lastUpdatedAt || a.createdAt || 0;
+            const bUpdated = b.lastUpdatedAt || b.createdAt || 0;
+            if (aUpdated !== bUpdated) {
+                return bUpdated - aUpdated;
+            }
+            return (b.createdAt || 0) - (a.createdAt || 0);
+        });
     }, [tasks]);
 
     useEffect(() => {
@@ -438,6 +556,12 @@ function TaskOffcanvas({ show, handleClose }) {
     }, [activeTaskId, sortedTasks]);
 
     const activeTask = activeTaskId ? tasks[activeTaskId] : null;
+    const activeLogs = useMemo(() => {
+        if (!activeTask || !Array.isArray(activeTask.logs)) {
+            return [];
+        }
+        return activeTask.logs.slice().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    }, [activeTask]);
     const canDeleteActive = Boolean(activeTask && activeTask.status === TASK_STATUS.COMPLETED);
     const canTerminateActive = Boolean(
         activeTask &&
@@ -459,6 +583,7 @@ function TaskOffcanvas({ show, handleClose }) {
     return (
         <Offcanvas
             className="task-offcanvas"
+            data-testid="task-offcanvas"
             show={show}
             onHide={() => handleClose(false)}
             placement="bottom"
@@ -515,9 +640,9 @@ function TaskOffcanvas({ show, handleClose }) {
                     <Col md={9} className="task-log-panel">
                         <div className="logs">
                             {activeTask ? (
-                                activeTask.logs.length ? (
+                                activeLogs.length ? (
                                     <ul className="log-list">
-                                        {activeTask.logs.map((log) => (
+                                        {activeLogs.map((log) => (
                                             <li key={log.id} className={`log-entry ${log.level}`}>
                                                 <span className="log-time">{log.timeLabel}</span>
                                                 <span className="log-text">{log.text || log.raw}</span>

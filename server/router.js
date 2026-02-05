@@ -72,9 +72,16 @@ router.post('/initWallets', async(req, res) => {
 router.post('/openWallets', async(req, res) => {
   const ids = req.body.ids;
   console.log('ids:', ids);
-  const message = await walletService.openWallets(ids);
-  console.log('message:', message);
-  res.send(message);
+  try {
+    const result = await taskService.execTask('openWallet', { walletIds: ids });
+    if (result && result.success === false) {
+      return res.send(result);
+    }
+    return res.send({ success: true, code: 0, message: 'Open-wallet task dispatched' });
+  } catch (error) {
+    console.error('openWallets error:', error);
+    return res.send({ success: false, code: 3009, message: error.message || 'openWallets error' });
+  }
 });
 router.post('/importTask', async(req, res) => {
   const taskObj = req.body;
@@ -115,9 +122,10 @@ router.delete('/deleteTask', async(req, res) => {
 });
 router.post('/setSavePath',async(req,res)=>{
   const path = req.body.path;
-  const message = config.setSavePath(path);
+  const message = await config.setSavePath(path);
   res.send(message);
 });
+// 重新加载保存路径下的 DB 数据（用于二次安装后的同步）
 router.get('/getSavePath',async(req,res)=>{
   const message = config.getSavePath();
   res.send(message);
@@ -125,6 +133,11 @@ router.get('/getSavePath',async(req,res)=>{
 
 router.get('/checkWebSocket',async(req,res)=>{
   const message = await taskService.checkWebSocket();
+  res.send(message);
+});
+router.post('/getTaskStatus', async (req, res) => {
+  const { taskNames } = req.body || {};
+  const message = taskService.getTaskRunningStatus(taskNames);
   res.send(message);
 });
 router.post('/checkProxy',async(req,res)=>{
@@ -156,12 +169,6 @@ router.get('/getFingerPrints',async(req,res)=>{
   const fingerPrints = await fingerPrintService.getFingerPrints();
   res.send(fingerPrints);
 })
-//获取指纹生成进度
-router.get('/getFingerPrintProgress',async(req,res)=>{
-  const message = await walletService.getFingerPrintProgress();
-  console.log('finger message:', message);
-  res.send(message);
-})
 //清空指纹数据
 router.get('/clearFingerPrints',async(req,res)=>{
   const message = await fingerPrintService.clearFingerPrints();
@@ -171,6 +178,11 @@ router.get('/clearFingerPrints',async(req,res)=>{
 router.post('/updateFingerPrintProxy', async (req, res) => {
   const { id, proxy } = req.body;
   const result = await fingerPrintService.updateFingerPrintProxy(id, proxy);
+  res.send(result);
+});
+router.post('/deleteFingerPrintProxy', async (req, res) => {
+  const { id } = req.body;
+  const result = await fingerPrintService.deleteFingerPrintProxy(id);
   res.send(result);
 });
 router.post('/setChromePath', async (req, res) => {
@@ -204,8 +216,13 @@ router.post('/bindWalletEnv', async (req, res) => {
 
 router.post('/setWalletScriptDirectory', async (req, res) => {
   const directory = req.body.directory;
-  const message = config.setWalletScriptDirectory(directory);
-
+  const current = config.getWalletScriptDirectory();
+  const currentDir = current && current.directory ? current.directory : 'default';
+  const message = await config.setWalletScriptDirectory(directory);
+  const nextDir = directory || 'default';
+  if (message && message.success && currentDir !== nextDir) {
+    await walletService.resetAllWalletsInitialized();
+  }
   res.send(message);
 });
 router.get('/getWalletScriptDirectory', async (req, res) => {
@@ -213,9 +230,17 @@ router.get('/getWalletScriptDirectory', async (req, res) => {
   res.send(message);
 });
 
+router.post('/resetWalletScriptDirectory', async (req, res) => {
+  const message = config.resetWalletScriptDirectory();
+  if (message && message.success) {
+    await walletService.resetAllWalletsInitialized();
+  }
+  res.send(message);
+});
+
 router.post('/setSyncScriptDirectory', async (req, res) => {
   const directory = req.body.directory;
-  const message = config.setSyncScriptDirectory(directory);
+  const message = await config.setSyncScriptDirectory(directory);
   res.send(message);
 });
 

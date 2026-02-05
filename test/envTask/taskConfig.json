@@ -1,0 +1,22 @@
+[
+  {
+    "taskName": "环境配置测试",
+    "scriptPath": "./envConfigTest.js",
+    "taskKey": "envConfigTest",
+    "defaultTask": false,
+    "taskType": "execByOrder",
+    "taskSchema": {
+      "globalNote": { "type": "input", "text": "通用配置 - 备注" },
+      "retryCount": { "type": "input", "text": "通用配置 - 重试次数" },
+      "mode": {
+        "type": "select",
+        "text": "配置模式",
+        "options": [
+          { "value": "env", "text": "按环境" },
+          { "value": "wallet", "text": "按钱包" }
+        ],
+        "defaultValue": "env"
+      }
+    }
+  }
+]

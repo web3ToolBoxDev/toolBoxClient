@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { Container, Card, Row, Col, Button, Form } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import CustomModal from '../../components/customModal';
@@ -25,13 +25,16 @@ const SyncFunction = () => {
     const fingerPrintsObj = useFingerPrintStore((state) => state.fingerPrints);
     const fetchFingerPrints = useFingerPrintStore((state) => state.fetchFingerPrints);
     const childRef = useRef();
+    const selectAllGroupsRef = useRef(null);
     const [walletList, setWalletList] = useState([]);
-    const fingerPrintList = fingerPrintsObj && typeof fingerPrintsObj === 'object' ? Object.values(fingerPrintsObj) : [];
+    const fingerPrintList = useMemo(() => (
+        fingerPrintsObj && typeof fingerPrintsObj === 'object' ? Object.values(fingerPrintsObj) : []
+    ), [fingerPrintsObj]);
 
 
 
     // 从 localStorage 加载 groups
-    const loadGroupsFromStorage = () => {
+    const loadGroupsFromStorage = useCallback(() => {
         try {
             const storedGroups = localStorage.getItem('syncGroups');
             if (storedGroups) {
@@ -41,27 +44,28 @@ const SyncFunction = () => {
         } catch (error) {
             console.error('Failed to load groups from localStorage:', error);
         }
-    };
+    }, []);
 
     // 保存 groups 到 localStorage
-    const saveGroupsToStorage = (newGroups) => {
+    const saveGroupsToStorage = useCallback((newGroups) => {
         try {
             localStorage.setItem('syncGroups', JSON.stringify(newGroups));
         } catch (error) {
             console.error('Failed to save groups to localStorage:', error);
         }
-    };
+    }, []);
 
     useEffect(() => {
-        fetchWallets().then(() => {
-            // 处理获取到的钱包数据
-            console.log('Fetched wallets:', wallets);
-            setWalletList(wallets.filter(w => w.walletInitialized));
-        });
+        fetchWallets();
         fetchFingerPrints();
-        // 加载存储的 groups
         loadGroupsFromStorage();
-    }, []);
+    }, [fetchWallets, fetchFingerPrints, loadGroupsFromStorage]);
+
+    useEffect(() => {
+        if (Array.isArray(wallets)) {
+            setWalletList(wallets.filter(w => w.walletInitialized));
+        }
+    }, [wallets]);
 
 
 
@@ -245,9 +249,13 @@ const SyncFunction = () => {
         }
     };
 
-    // 切换模式时重置已选 group
+    // 切换模式时重置已选 group/当前选择
     useEffect(() => {
         setSelectedGroupIds([]);
+        setSelectedMaster(null);
+        setSelectedSlaves([]);
+        setSelectedMasterEnv(null);
+        setSelectedSlavesEnv([]);
     }, [syncMode]);
 
     // 添加group
@@ -278,14 +286,7 @@ const SyncFunction = () => {
         setGroups(newGroups);
         saveGroupsToStorage(newGroups);
 
-        // 调用后端启动同步任务
-        startSyncForCurrentSelection(masterId, slaveIds, syncMode).then((ok) => {
-            if (ok) {
-                alert(t('sync.groupStarted'));
-            } else {
-                alert(t('sync.startFailed'));
-            }
-        });
+        // 仅添加组合，不自动启动任务
 
         // 重置当前选择
         if (isEnvMode) {
@@ -297,9 +298,8 @@ const SyncFunction = () => {
         }
     };
     // 启动group
-    const handleStartGroup = (idx) => {
-        const filtered = groups.filter(group => (group.mode || 'wallet') === syncMode);
-        const g = filtered[idx];
+    const handleStartGroup = (groupId) => {
+        const g = groups.find(group => group.id === groupId && (group.mode || 'wallet') === syncMode);
         if (!g) return;
         startSyncForCurrentSelection(g.master, g.slaves, g.mode || 'wallet').then((ok) => {
             if (ok) {
@@ -460,6 +460,13 @@ const SyncFunction = () => {
 
     const filteredGroups = groups.filter(g => (g.mode || 'wallet') === syncMode);
 
+    useEffect(() => {
+        if (!selectAllGroupsRef.current) return;
+        const total = Array.isArray(filteredGroups) ? filteredGroups.length : 0;
+        const selected = Array.isArray(selectedGroupIds) ? selectedGroupIds.length : 0;
+        selectAllGroupsRef.current.indeterminate = selected > 0 && selected < total;
+    }, [selectedGroupIds, filteredGroups]);
+
     return (
         <Container className="sync-function-page">
             <h1 style={{ textAlign: 'center' }}>{t('syncFunction.title')}</h1>
@@ -547,9 +554,9 @@ const SyncFunction = () => {
                 <Card.Header className="d-flex justify-content-between align-items-center">
                     <div className="header-checkbox-align">
                         <input
+                            ref={selectAllGroupsRef}
                             type="checkbox"
                             checked={filteredGroups.length > 0 && selectedGroupIds.length === filteredGroups.length}
-                            indeterminate={selectedGroupIds.length > 0 && selectedGroupIds.length < filteredGroups.length}
                             onChange={toggleSelectAllGroups}
                             style={{ marginRight: 8 }}
                         />
@@ -561,7 +568,7 @@ const SyncFunction = () => {
                 </Card.Header>
                 <Card.Body className="group-list-scroll">
                     {filteredGroups.length > 0 ? (
-                        filteredGroups.map((group, idx) => (
+                        filteredGroups.map((group) => (
                             <Row key={group.id} className="align-items-center group-row">
                                 <Col xs={1} className="d-flex align-items-center p-0">
                                     <input
@@ -586,7 +593,7 @@ const SyncFunction = () => {
                                 </Col>
                                 {/* 移除状态展示列 */}
                                 <Col xs="auto" className="p-0">
-                                    <Button size="sm" variant="outline-success" onClick={() => handleStartGroup(idx)}>
+                                    <Button size="sm" variant="outline-success" onClick={() => handleStartGroup(group.id)}>
                                         {t('sync.startGroup')}
                                     </Button>
                                 </Col>

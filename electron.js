@@ -1,6 +1,14 @@
-const { app, BrowserWindow, utilityProcess, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, utilityProcess, ipcMain, dialog, Menu } = require('electron');
+const { t } = require('i18next');
 const path = require('path');
 const shell = require('electron').shell;
+if (!process.env.APP_USER_DATA) {
+  try {
+    process.env.APP_USER_DATA = app.getPath('userData');
+  } catch (e) {
+    // ignore if not available
+  }
+}
 const config = require('./config').getInstance();
 const isBuild = config.getIsBuild();
 // const isBuild = true;
@@ -48,6 +56,12 @@ function createWindow() {
     : 'http://localhost:3000';
 
   mainWindow.loadURL(startURL);
+  // if (true){
+  if (isBuild) {
+    mainWindow.setMenuBarVisibility(false);
+    mainWindow.setAutoHideMenuBar(true);
+    Menu.setApplicationMenu(null);
+  }
 
   mainWindow.on('closed', () => {
     mainWindow = null;

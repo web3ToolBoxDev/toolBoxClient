@@ -1,10 +1,12 @@
 import { Container, Button, Card, Row, Col } from "react-bootstrap";
 import { useTranslation } from "react-i18next";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import APIManager from "../../utils/api";
 import CustomModal from '../../components/customModal';
 import useFingerPrintStore from '../../store/fingerPrintStore';
 import usePathStore from '../../store/pathStore';
+import useWalletStore from '../../store/walletStore';
+import { eventEmitter } from '../../utils/eventEmitter';
 import './index.scss';
 
 
@@ -16,17 +18,23 @@ const ChromeManager = () => {
     const api = APIManager.getInstance();
     const fingerPrintsObj = useFingerPrintStore(state => state.fingerPrints);
     const setFingerPrints = useFingerPrintStore(state => state.setFingerPrints);
+    const setWallets = useWalletStore(state => state.setWallets);
+    const wallets = useWalletStore(state => state.wallets);
     // 兼容对象结构
-    const fingerPrints = fingerPrintsObj && typeof fingerPrintsObj === 'object' ? Object.values(fingerPrintsObj) : [];
+    const fingerPrints = useMemo(() => (
+        fingerPrintsObj && typeof fingerPrintsObj === 'object' ? Object.values(fingerPrintsObj) : []
+    ), [fingerPrintsObj]);
     // 排序：先按createdAt正序，再按id正序
-    const sortedFingerPrints = fingerPrints.slice().sort((a, b) => {
-        if ((a.createdAt || 0) !== (b.createdAt || 0)) {
-            return (a.createdAt || 0) - (b.createdAt || 0);
-        }
-        if ((a.id || '') < (b.id || '')) return -1;
-        if ((a.id || '') > (b.id || '')) return 1;
-        return 0;
-    });
+    const sortedFingerPrints = useMemo(() => (
+        fingerPrints.slice().sort((a, b) => {
+            if ((a.createdAt || 0) !== (b.createdAt || 0)) {
+                return (a.createdAt || 0) - (b.createdAt || 0);
+            }
+            if ((a.id || '') < (b.id || '')) return -1;
+            if ((a.id || '') > (b.id || '')) return 1;
+            return 0;
+        })
+    ), [fingerPrints]);
 
     const savePath = usePathStore(state => state.savePath);
     const chromePath = usePathStore(state => state.chromePath);
@@ -37,9 +45,12 @@ const ChromeManager = () => {
         rowList: []
     });
     const modalRef = useRef();
+    const selectAllRef = useRef(null);
+    const skipNextSyncRef = useRef(false);
 
     const [baseFingerprintCount, setBaseFingerprintCount] = useState(0);
-    const fetchBaseFingerprintCount = async () => {
+    const [selectedIds, setSelectedIds] = useState([]);
+    const fetchBaseFingerprintCount = useCallback(async () => {
         try {
             const data = await api.getFingerPrintCount();
             if (data && data.success) {
@@ -51,15 +62,52 @@ const ChromeManager = () => {
         } catch (error) {
             console.error(t('fetchBaseFingerprintCountError'), error);
         }
-    }
+    }, [api, t]);
 
 
 
 
-    useState(() => {
+    useEffect(() => {
         fetchPaths();
         fetchBaseFingerprintCount();
-    }, []);
+    }, [fetchPaths, fetchBaseFingerprintCount]);
+
+    useEffect(() => {
+        if (!selectAllRef.current) return;
+        const total = Array.isArray(fingerPrints) ? fingerPrints.length : 0;
+        const selected = Array.isArray(selectedIds) ? selectedIds.length : 0;
+        selectAllRef.current.indeterminate = selected > 0 && selected < total;
+    }, [selectedIds, fingerPrints]);
+
+    const syncDataFromSavePath = useCallback(async (path) => {
+        if (!path) return;
+        const res = await api.setSavePath(path);
+        if (res && res.success) {
+            if (res.data && res.data.fingerprints) {
+                setFingerPrints(res.data.fingerprints);
+            } else {
+                setFingerPrints({});
+            }
+            if (res.data && Array.isArray(res.data.wallets)) {
+                setWallets(res.data.wallets);
+            } else {
+                setWallets([]);
+            }
+            if (res.data && Array.isArray(res.data.tasks)) {
+                eventEmitter.emit('tasksRefreshed', res.data.tasks);
+            }
+            fetchBaseFingerprintCount();
+        }
+    }, [api, fetchBaseFingerprintCount, setFingerPrints, setWallets]);
+
+    useEffect(() => {
+        if (!savePath) return;
+        if (skipNextSyncRef.current) {
+            skipNextSyncRef.current = false;
+            return;
+        }
+        syncDataFromSavePath(savePath);
+    }, [savePath, syncDataFromSavePath]);
 
     const setChromePathHandler = async () => {
         if (!window.electronAPI) {
@@ -83,7 +131,24 @@ const ChromeManager = () => {
         const res = await window.electronAPI.chooseDirectory();
         if (res) {
             window.localStorage.setItem('savePath', res);
-            await api.setSavePath(res);
+            const refreshRes = await api.setSavePath(res);
+            if (refreshRes && refreshRes.success) {
+                if (refreshRes.data && refreshRes.data.fingerprints) {
+                    setFingerPrints(refreshRes.data.fingerprints);
+                } else {
+                    setFingerPrints({});
+                }
+                if (refreshRes.data && Array.isArray(refreshRes.data.wallets)) {
+                    setWallets(refreshRes.data.wallets);
+                } else {
+                    setWallets([]);
+                }
+                if (refreshRes.data && Array.isArray(refreshRes.data.tasks)) {
+                    eventEmitter.emit('tasksRefreshed', refreshRes.data.tasks);
+                }
+                fetchBaseFingerprintCount();
+            }
+            skipNextSyncRef.current = true;
             fetchPaths();
             alert(t('setSuccess'));
         }
@@ -207,13 +272,16 @@ const ChromeManager = () => {
                         inputType: 'number',
                         colWidth: 3,
                         style: { marginLeft: 'auto', marginRight: '1rem', },
-                        onChange: (e) => {
+                        inputProps: { min: 1, step: 1, inputMode: 'numeric', pattern: '[0-9]*' },
+                        onChange: (e, _value, valueObj) => {
                             const value = e.target.value;
-                            if (value && !isNaN(value) && parseInt(value) > 0) {
-                                modalRef.current.updateValueObj('generateCount', parseInt(value));
-                            } else {
-                                modalRef.current.updateValueObj('generateCount', 1);
+                            if (value === '') {
+                                return '';
                             }
+                            if (/^\d+$/.test(value)) {
+                                return value;
+                            }
+                            return valueObj?.generateCount ?? '';
                         }
                     },
                     {
@@ -224,8 +292,9 @@ const ChromeManager = () => {
                         click: () => {
                             console.log('generateButton clicked');
                             console.log('modalRef.current.valueObj:', modalRef.current.getValue('generateCount'));
-                            const generateCount = modalRef.current.getValue('generateCount') || 1;
-                            if (generateCount <= 0) {
+                            const rawCount = modalRef.current.getValue('generateCount');
+                            const generateCount = parseInt(rawCount, 10);
+                            if (!Number.isFinite(generateCount) || generateCount <= 0) {
                                 alert(t('invalidGenerateCount'));
                                 return;
                             }
@@ -253,8 +322,6 @@ const ChromeManager = () => {
     };
 
 
-
-    const [selectedIds, setSelectedIds] = useState([]);
 
     // 选中/取消选中单个环境
     const toggleSelect = (id) => {
@@ -376,6 +443,45 @@ const ChromeManager = () => {
         // 调用后端批量删除
         const res = await api.deleteFingerPrints(selectedIds);
         if (res && res.success) {
+            const removedEnvIds = new Set(selectedIds);
+            const walletsToDelete = Array.isArray(wallets)
+                ? wallets.filter((w) => w.bindEnvId && removedEnvIds.has(w.bindEnvId)).map((w) => w.id)
+                : [];
+
+            if (walletsToDelete.length) {
+                const walletRes = await api.deleteWallets(walletsToDelete);
+                if (!walletRes || !walletRes.success) {
+                    console.error('deleteWallets failed:', walletRes);
+                } else {
+                    const remainingWallets = wallets.filter((w) => !walletsToDelete.includes(w.id));
+                    setWallets(remainingWallets);
+                }
+            }
+
+            try {
+                const storedGroups = localStorage.getItem('syncGroups');
+                if (storedGroups) {
+                    const parsed = JSON.parse(storedGroups);
+                    if (Array.isArray(parsed)) {
+                        const removedWalletSet = new Set(walletsToDelete);
+                        const filtered = parsed.filter((group) => {
+                            const mode = group.mode || 'wallet';
+                            if (mode === 'env') {
+                                if (removedEnvIds.has(group.master)) return false;
+                                const slaves = Array.isArray(group.slaves) ? group.slaves : [];
+                                return !slaves.some((id) => removedEnvIds.has(id));
+                            }
+                            if (removedWalletSet.has(group.master)) return false;
+                            const slaves = Array.isArray(group.slaves) ? group.slaves : [];
+                            return !slaves.some((id) => removedWalletSet.has(id));
+                        });
+                        localStorage.setItem('syncGroups', JSON.stringify(filtered));
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to update syncGroups:', error);
+            }
+
             // 前端同步移除
             const newObj = { ...fingerPrintsObj };
             selectedIds.forEach(id => { delete newObj[id]; });
@@ -403,9 +509,24 @@ const ChromeManager = () => {
     }
 
     // 设置IP代理
-    const setIpConfig = (id) => {
-        const fp = fingerPrintsObj[id];
+    const setIpConfig = async (id) => {
+        let fp = fingerPrintsObj[id];
+        try {
+            const latest = await api.getFingerPrints();
+            if (latest && latest.success && latest.data && latest.data[id]) {
+                fp = latest.data[id];
+            }
+        } catch (error) {
+            console.error('Failed to fetch latest fingerprint:', error);
+        }
         console.log('setIpConfig fp:', fp);
+        const hasProxy = Boolean(fp?.proxy?.ipHost && fp?.proxy?.ipPort);
+        const ipTypeDefault = hasProxy ? (fp?.proxy?.ipType || fp?.proxy_type || 'http') : 'http';
+        const ipHostDefault = hasProxy ? (fp?.proxy?.ipHost || '') : '';
+        const ipPortDefault = hasProxy ? (fp?.proxy?.ipPort || '') : '';
+        const ipUsernameDefault = hasProxy ? (fp?.proxy?.ipUsername || '') : '';
+        const ipPasswordDefault = hasProxy ? (fp?.proxy?.ipPassword || '') : '';
+        console.log('Proxy defaults:', { ipTypeDefault, ipHostDefault, ipPortDefault, ipUsernameDefault, ipPasswordDefault });
         setModalProps({
             show: true,
             title: t('configProxy'),
@@ -424,27 +545,27 @@ const ChromeManager = () => {
                     { type: 'select', key: 'ipType', colWidth: 7, options: [
                         { text: 'HTTP', value: 'http' },
                         { text: 'SOCKET', value: 'socket' }
-                    ], defaultValue: fp.proxy_type || 'http' },
+                    ], defaultValue: ipTypeDefault },
                 ],
                 [
                     { type: 'label', text: t('proxyIpAddress'), colWidth: 3 },
-                    { type: 'input', key: 'ipHost', inputType: 'text', colWidth: 7, placeholder: t('inputProxyIp'), defaultValue: fp?.proxy?.ipHost || '' },
+                    { type: 'input', key: 'ipHost', inputType: 'text', colWidth: 7, placeholder: t('inputProxyIp'), defaultValue: ipHostDefault },
                 ],
                 [
                     { type: 'label', text: t('proxyPort'), colWidth: 3 },
-                    { type: 'input', key: 'ipPort', inputType: 'number',colWidth: 7, placeholder: t('inputProxyPort'), defaultValue: fp?.proxy?.ipPort || '' },
+                    { type: 'input', key: 'ipPort', inputType: 'number',colWidth: 7, placeholder: t('inputProxyPort'), defaultValue: ipPortDefault },
                 ],
                 [
                     { type: 'label', text: t('proxyUsername'), colWidth: 3 },
-                    { type: 'input', key: 'ipUsername', inputType: 'text', colWidth: 7, placeholder: t('inputProxyUsername'), defaultValue: fp?.proxy?.ipUsername || '' },
+                    { type: 'input', key: 'ipUsername', inputType: 'text', colWidth: 7, placeholder: t('inputProxyUsername'), defaultValue: ipUsernameDefault },
                 ],
                 [
                     { type: 'label', text: t('proxyPassword'), colWidth: 3 },
-                    { type: 'input', key: 'ipPassword', inputType: 'password', colWidth: 7, placeholder: t('inputProxyPassword'), defaultValue: fp?.proxy?.ipPassword || '' },
+                    { type: 'input', key: 'ipPassword', inputType: 'password', colWidth: 7, placeholder: t('inputProxyPassword'), defaultValue: ipPasswordDefault },
                 ],
                 [
-                    { type: 'label', text: '', colWidth: 6 },
-                    { type: 'button', text: t('testProxy'), colWidth: 2, style: { marginRight: 8 }, 
+                    { type: 'label', text: '', colWidth: 2 },
+                    { type: 'button', text: t('testProxy'), colWidth: 3, 
                         click: () => {
                             const ipType = modalRef.current.getValue('ipType') || 'http';
                             const ipHost = modalRef.current.getValue('ipHost');
@@ -468,7 +589,22 @@ const ChromeManager = () => {
                                 alert(t('4006'));
                             });
                         }},
-                    { type: 'button', text: t('saveConfig'), colWidth: 2, click: () => {
+                    { type: 'button', text: t('deleteProxy'), colWidth: 3, click: () => {
+                        api.deleteFingerPrintProxy(id).then((data) => {
+                            if (data && data.success) {
+                                alert(t('updateSuccess'));
+                                const newFingerPrints = { ...fingerPrintsObj, [id]: { ...fp, proxy: null } };
+                                setFingerPrints(newFingerPrints);
+                                setModalProps({ show: false });
+                            } else {
+                                alert(t('updateFailed') + ': ' + (data.message || t('unknownError', '未知错误')));
+                            }
+                        }).catch((error) => {
+                            console.error(t('updateError', '更新错误:'), error);
+                            alert(t('updateFailed', '更新失败'));
+                        });
+                    } },
+                    { type: 'button', text: t('saveConfig'), colWidth: 3, click: () => {
                         const ipType = modalRef.current.getValue('ipType') || 'http';
                         const ipHost = modalRef.current.getValue('ipHost');
                         const ipPort = modalRef.current.getValue('ipPort');
@@ -490,7 +626,7 @@ const ChromeManager = () => {
                             if (data && data.success) {
                                 alert(t('updateSuccess'));
                                 // 更新本地状态
-                                const newFingerPrints = { ...fingerPrintsObj, [id]: { ...fp, proxy_type: ipType, proxy_ip: ipHost, proxy_port: ipPort, proxy_username: ipUsername, proxy_password: ipPassword } };
+                                const newFingerPrints = { ...fingerPrintsObj, [id]: { ...fp, proxy: data.data?.proxy || fp?.proxy } };
                                 setFingerPrints(newFingerPrints);
                                 setModalProps({ show: false });
                             } else {
@@ -500,10 +636,19 @@ const ChromeManager = () => {
                             console.error(t('updateError', '更新错误:'), error);
                             alert(t('updateFailed', '更新失败'));
                         });
-                    } }
+                    } },
+                    
                 ]
             ]
         });
+        setTimeout(() => {
+            if (!modalRef.current) return;
+            modalRef.current.updateValueObj('ipType', ipTypeDefault);
+            modalRef.current.updateValueObj('ipHost', ipHostDefault);
+            modalRef.current.updateValueObj('ipPort', ipPortDefault);
+            modalRef.current.updateValueObj('ipUsername', ipUsernameDefault);
+            modalRef.current.updateValueObj('ipPassword', ipPasswordDefault);
+        }, 0);
     }
 
 
@@ -576,9 +721,9 @@ const ChromeManager = () => {
                 <Card.Header className="d-flex justify-content-between align-items-center">
                     <div className="header-checkbox-align">
                         <input
+                            ref={selectAllRef}
                             type="checkbox"
                             checked={Array.isArray(fingerPrints) && fingerPrints.length > 0 && selectedIds.length === fingerPrints.length}
-                            indeterminate={selectedIds.length > 0 && selectedIds.length < fingerPrints.length}
                             onChange={e => {
                                 if (e.target.checked) {
                                     setSelectedIds(fingerPrints.map(fp => fp.id));

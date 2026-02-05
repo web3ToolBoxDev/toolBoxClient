@@ -5,53 +5,204 @@ import { sleep } from "../utils"
 class WebSocketManager {
     static instance;
     constructor() {
+      if (typeof window !== 'undefined' && window.__wsManager) {
+        return window.__wsManager;
+      }
       if (!WebSocketManager.instance) {
         WebSocketManager.instance = this;
         this.apiManager = new APIManager();
+        this._connecting = null;
+        this._heartbeatTimer = null;
+        this._reconnectTimer = null;
+        this._lastCallbacks = null;
+        if (typeof window !== 'undefined') {
+          window.__wsManager = this;
+        }
       }
       return WebSocketManager.instance;
     }
 
     static getInstance() {
+      if (typeof window !== 'undefined' && window.__wsManager) {
+        WebSocketManager.instance = window.__wsManager;
+        return window.__wsManager;
+      }
       if (!WebSocketManager.instance) {
         WebSocketManager.instance = new WebSocketManager();
       }
+      if (typeof window !== 'undefined' && !window.__wsManager) {
+        window.__wsManager = WebSocketManager.instance;
+      }
       return WebSocketManager.instance;
     }
+    startHeartbeat(){
+      if (this._heartbeatTimer) {
+        clearInterval(this._heartbeatTimer);
+      }
+      this._heartbeatTimer = setInterval(() => {
+        try {
+          if (this.wss && this.wss.readyState === WebSocket.OPEN) {
+            this.wss.send(JSON.stringify({ type: 'heart_beat' }));
+          }
+        } catch (error) {
+          console.warn('WebSocket heartbeat send failed:', error);
+        }
+      }, 5000);
+    }
+
+    stopHeartbeat(){
+      if (this._heartbeatTimer) {
+        clearInterval(this._heartbeatTimer);
+        this._heartbeatTimer = null;
+      }
+    }
+
     async connectWebsocket(messageCallback,closeCallback){
-      this.wss = new WebSocket('ws://localhost:30001/ws');
+      console.log('Connecting to WebSocket server...');
+      const backendReady = await this.ensureBackendReady();
+      if (!backendReady) {
+        console.warn('Backend WebSocket check failed; skip connecting');
+        return false;
+      }
+      let socket;
+      try {
+        const clientTag =
+        window.__WS_CLIENT_TAG ||
+        (window.__WS_CLIENT_TAG = `renderer-${Math.random().toString(16).slice(2)}`);
+
+        console.log('[WS][CLIENT_TAG]', clientTag);
+        const wsUrl = `ws://localhost:30001/ws?clientTag=${encodeURIComponent(clientTag)}`;
+        console.log('WebSocket URL:', wsUrl);
+        socket = new WebSocket(wsUrl);
+      } catch (error) {
+        console.warn('WebSocket init failed:', error);
+        return false;
+      }
+      this.wss = socket;
+      const isCurrent = () => this.wss === socket;
       this.messageQueue = []; // 存储消息的队列
+      this._lastCallbacks = { messageCallback, closeCallback };
+      let connectTimer = null;
   
       return new Promise((resolve, reject) => {
+        connectTimer = setTimeout(() => {
+          try {
+            if (this.wss && this.wss.readyState !== WebSocket.OPEN) {
+              this.wss.close();
+            }
+          } catch {}
+          resolve(false);
+        }, 5000);
+
         this.wss.onopen = () => {
+          if (!isCurrent()) return;
+          this.startHeartbeat();
           resolve(true);
         };
-  
-        this.wss.onmessage = (event) => {
-          let message = JSON.parse(event.data);
+
+        this.wss.onmessage = async (event) => {
+          let message;
+          try {
+            let raw = event.data;
+            if (raw instanceof Blob) {
+              raw = await raw.text();
+            } else if (raw instanceof ArrayBuffer) {
+              raw = new TextDecoder().decode(raw);
+            }
+            message = JSON.parse(raw);
+          } catch (error) {
+            console.warn('WebSocket message parse failed:', error, event.data);
+            return;
+          }
+          if (!isCurrent()) return;
           this.pushToQueue(message);
           // 使用回调函数处理消息，为防止遗漏,使用this.popFromQueue()获取消息
           messageCallback();
         };
   
         this.wss.onclose = async(event) => {
+          if (!isCurrent()) return;
+          if (connectTimer) {
+            clearTimeout(connectTimer);
+            connectTimer = null;
+          }
+          this.stopHeartbeat();
           closeCallback(event);
+          const reason = String(event?.reason || '').toLowerCase();
+          if (reason.includes('duplicate frontend connection')) {
+            // An older socket is kept by server; avoid reconnect loop
+            resolve(false);
+            return;
+          }
+          this.scheduleReconnect();
           resolve(false);
         };
   
         this.wss.onerror = async(error) => {
+          if (!isCurrent()) return;
+          if (connectTimer) {
+            clearTimeout(connectTimer);
+            connectTimer = null;
+          }
+          this.stopHeartbeat();
           console.log('WebSocket error:', error);
+          this.scheduleReconnect();
           resolve(false);
         };
       });
     }
+
+    scheduleReconnect() {
+      if (this._reconnectTimer) return;
+      this._reconnectTimer = setTimeout(async () => {
+        this._reconnectTimer = null;
+        const callbacks = this._lastCallbacks;
+        if (!callbacks || !callbacks.messageCallback) return;
+        await this.connect(callbacks.messageCallback, callbacks.closeCallback, 3);
+      }, 1500);
+    }
+
+    async ensureBackendReady() {
+      const checkOnce = async () => {
+        const res = await this.apiManager.checkWebSocket();
+        return res && res.success !== false;
+      };
+
+      try {
+        const ready = await checkOnce();
+        if (ready) return true;
+      } catch (err) {
+        console.warn('Backend WebSocket check failed (first attempt):', err?.message || err);
+      }
+
+      await sleep(500);
+
+      try {
+        const ready = await checkOnce();
+        if (!ready) {
+          console.warn('Backend WebSocket not ready after retry');
+        }
+        return ready;
+      } catch (error) {
+        console.warn('Backend WebSocket not ready:', error?.message || error);
+        return false;
+      }
+    }
     
     async connect(messageCallback,closeCallback,tryCount=5){ 
-      if(this.wss){
-        this.wss.close();
+      if (this.wss && this.wss.readyState === WebSocket.OPEN) {
+        return true;
+      }
+      if (this.wss && this.wss.readyState === WebSocket.CONNECTING && this._connecting) {
+        return await this._connecting;
+      }
+      if (this._connecting) {
+        return await this._connecting;
       }
       while(tryCount>0){
-        let connected = await this.connectWebsocket(messageCallback,closeCallback);
+        this._connecting = this.connectWebsocket(messageCallback,closeCallback);
+        const connected = await this._connecting;
+        this._connecting = null;
         if(connected){
           return true;
         }
@@ -77,13 +228,13 @@ class WebSocketManager {
       return this.messageQueue.length;
     }
     sendMessage(message){
-        if(this.wss.readyState === 1){
+        if(this.wss && this.wss.readyState === 1){
             this.wss.send(message);
         }
     }
     //检查连接状态
     checkConnection(){
-      if(this.wss.readyState === 1){
+      if(this.wss && this.wss.readyState === 1){
         return true;
       }else{
         return false;
@@ -93,8 +244,13 @@ class WebSocketManager {
     // 关闭WebSocket连接
     close() {
       if (this.wss) {
+        this.stopHeartbeat();
         this.wss.close();
         this.wss = null; // 清除引用
+      }
+      if (this._reconnectTimer) {
+        clearTimeout(this._reconnectTimer);
+        this._reconnectTimer = null;
       }
     }
   }

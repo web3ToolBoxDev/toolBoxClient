@@ -45,12 +45,16 @@ class HttpProxy extends EventEmitter {
         const pReq = http.request(options);
         pReq
             .on('response', pRes => {
+            if (!uRes.headersSent) {
+                uRes.writeHead(pRes.statusCode, pRes.headers);
+            }
             pRes.pipe(uRes);
-            uRes.writeHead(pRes.statusCode, pRes.headers);
             this.emit('request:success');
         })
             .on('error', e => {
-            uRes.writeHead(500);
+            if (!uRes.headersSent) {
+                uRes.writeHead(500);
+            }
             uRes.end('Connection error\n');
             this.emit('request:error', e);
         });

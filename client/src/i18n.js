@@ -12,11 +12,15 @@ const resources = {
   },
 };
 
+const storedLang = typeof window !== 'undefined'
+  ? window.localStorage.getItem('appLanguage')
+  : null;
+
 i18n
   .use(initReactI18next) // Passes i18n down to react-i18next
   .init({
     resources,
-    lng: 'zh-CN', // Default language
+    lng: storedLang || 'zh-CN', // Default language
     fallbackLng: 'en', // Fallback language if the current language translation is not available
     interpolation: {
       escapeValue: false, // React already does escaping

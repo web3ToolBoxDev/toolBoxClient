@@ -4,12 +4,15 @@ const puppeteer = require('puppeteer-extra');
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
+const axios = require('axios');
+const { HttpProxyAgent } = require('http-proxy-agent');
 
 
 
-let ws = new WebSocket(url);
+let ws = null;
 let webSocketReady = false;
 let taskData = null;
+let heartBeatTimer = null;
 const ENABLE_DEBUG_LOGS = /^1|true$/i.test(String(process.env.TOOLBOX_DEBUG_LOGS || process.env.TOOLBOX_SLAVE_DEBUG || ''));
 const WINDOW_LAYOUT = {
   master: { x: 100, y: 100, width: 600, height: 800 },
@@ -17,17 +20,60 @@ const WINDOW_LAYOUT = {
 };
 function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
 
+const SENSITIVE_KEYS = new Set([
+  'mnemonic',
+  'privateKey',
+  'ethPrivateKey',
+  'solPrivateKey',
+  'seed',
+  'password'
+]);
+
+const maskString = (value = '') => {
+  const str = String(value);
+  if (str.length <= 8) return '***';
+  return `${str.slice(0, 4)}****${str.slice(-4)}`;
+};
+
+const sanitize = (value) => {
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(sanitize);
+  const out = {};
+  Object.entries(value).forEach(([key, val]) => {
+    if (SENSITIVE_KEYS.has(key)) {
+      out[key] = '***';
+      return;
+    }
+    if (key.toLowerCase().includes('private') || key.toLowerCase().includes('mnemonic')) {
+      out[key] = '***';
+      return;
+    }
+    if (typeof val === 'string' && (key.toLowerCase().includes('address') || key.toLowerCase().includes('id'))) {
+      out[key] = maskString(val);
+      return;
+    }
+    out[key] = sanitize(val);
+  });
+  return out;
+};
+
 // 统一消息
 function sendHeartBeat() {
-    setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'heart_beat' }));
-    }, 5000);
+  if (heartBeatTimer) {
+    clearInterval(heartBeatTimer);
+  }
+  heartBeatTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'heart_beat' }));
+  }, 5000);
 }
 function sendRequestTaskData() {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'request_task_data', data: '' }));
 }
 function sendTaskLog(message) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'task_log', message }));
+    if (ws.readyState === WebSocket.OPEN) {
+      const safeMessage = typeof message === 'string' ? message : JSON.stringify(sanitize(message));
+      ws.send(JSON.stringify({ type: 'task_log', message: safeMessage }));
+    }
 }
 function sendDebugLog(message) {
   if (!ENABLE_DEBUG_LOGS) return;
@@ -37,28 +83,49 @@ function sendTerminateProcess() {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'terminate_process' }));
 }
 
-ws.on('open', () => { webSocketReady = true; sendHeartBeat(); });
-ws.on('message', (message) => {
+function initWebSocket() {
+  try {
+    if (ws) {
+      ws.removeAllListeners();
+      ws.close();
+    }
+  } catch {}
+  ws = new WebSocket(url);
+  ws.on('open', () => {
+    webSocketReady = true;
+    sendHeartBeat();
+    sendRequestTaskData();
+  });
+  ws.on('message', (message) => {
     let data = JSON.parse(message);
     switch (data.type) {
-        case 'heart_beat':
-            break;
-        case 'request_task_data':
-            taskData = data.data;
-            break;
-        case 'terminate_process':
-            sendTerminateProcess();
-            gracefulExit();
-            break;
-        default:
-            break;
+      case 'heart_beat':
+        break;
+      case 'request_task_data':
+        taskData = data.data;
+        break;
+      case 'terminate_process':
+        sendTerminateProcess();
+        gracefulExit();
+        break;
+      default:
+        break;
     }
-});
-ws.on('error', (err) => { console.error('[syncFunction] WebSocket error:', err); process.exit(1); });
+  });
+  ws.on('close', () => { webSocketReady = false; });
+  ws.on('error', (err) => {
+    console.error('[syncFunction] WebSocket error:', err);
+    webSocketReady = false;
+    try { ws.close(); } catch { }
+  });
+}
+
+initWebSocket();
+
 setInterval(() => {
-    if (ws.readyState === WebSocket.CLOSED) {
-        try { ws = new WebSocket(url); } catch { }
-    }
+  if (!ws || ws.readyState === WebSocket.CLOSED) {
+    try { initWebSocket(); } catch { }
+  }
 }, 5000);
 
 function ensureTaskDataIsObject() {
@@ -77,21 +144,36 @@ async function gracefulExit() {
 }
 
 function buildFingerprints(env) {
-    const base = {
-        canvas: env.canvas,
-        hardware: env.hardware,
-        screen: env.screen,
-        clientHint: env.clientHint,
-        languages_js: env.language_js,
-        languages_http: env.language_http,
-        fonts_remove: (env.fonts_remove || '') + ',Tahoma'
-    };
-    if (env.useProxy) {
-        base.position = env.position;
-        base.timeZone = env.timeZone;
-        base.webrtc_public = env.webrtc_public;
-    }
-    return JSON.stringify(base);
+  if (!env) return '';
+  if (env.useProxy) {
+    return JSON.stringify({
+      audio: env.audio,
+      clientRect: env.clientRect,
+      webgl: env.webgl,
+      canvas: env.canvas,
+      hardware: env.hardware,
+      screen: env.screen,
+      clientHint: env.clientHint,
+      languages_js: env.language_js,
+      languages_http: env.language_http,
+      fonts_remove: env.fonts_remove,
+      position: env.position,
+      timeZone: env.timeZone,
+      webrtc_public: env.webrtc_public,
+    });
+  }
+  return JSON.stringify({
+    audio: env.audio,
+    clientRect: env.clientRect,
+    webgl: env.webgl,
+    canvas: env.canvas,
+    hardware: env.hardware,
+    screen: env.screen,
+    clientHint: env.clientHint,
+    languages_js: env.language_js,
+    languages_http: env.language_http,
+    fonts_remove: env.fonts_remove,
+  });
 }
 
 function buildLaunchArgs(env, metamaskDir) {
@@ -110,6 +192,80 @@ function buildLaunchArgs(env, metamaskDir) {
     if (env && env.useProxy && env.proxyUrl) args.push(`--proxy-server=${env.proxyUrl}`);
     if (env) args.push(`--toolbox=${buildFingerprints(env)}`);
     return args;
+}
+
+async function queryProxyGeo(proxyUrl) {
+  if (!proxyUrl) return null;
+  let agent;
+  try {
+    agent = new HttpProxyAgent(proxyUrl);
+  } catch (e) {
+    throw new Error(`Invalid proxy URL: ${e.message}`);
+  }
+  const request = async () => {
+    const res = await Promise.race([
+      axios.get('http://ip-api.com/json/?fields=61439', { httpAgent: agent, timeout: 5000 }),
+      axios.get('https://ipinfo.io/json', { httpsAgent: agent, timeout: 5000 })
+    ]);
+    if (!res || res.status !== 200) {
+      throw new Error(`Proxy request failed: ${res?.status} ${res?.statusText || ''}`.trim());
+    }
+    const data = res.data || {};
+    let ip = '';
+    let latitude = '';
+    let longitude = '';
+    let country = '';
+    let timeZone = '';
+    if (data.ip) {
+      ip = data.ip;
+      if (data.loc) {
+        const parts = String(data.loc).split(',');
+        latitude = parts[0] || '';
+        longitude = parts[1] || '';
+      }
+      country = data.country || '';
+      timeZone = data.timezone || '';
+    } else if (data.query) {
+      ip = data.query;
+      latitude = data.lat || '';
+      longitude = data.lon || '';
+      country = data.countryCode || '';
+      timeZone = data.timezone || '';
+    }
+    if (!ip) {
+      throw new Error('No IP found in proxy response');
+    }
+    return { ip, position: { latitude, longitude }, country, timeZone };
+  };
+
+  let attempts = 0;
+  while (attempts < 3) {
+    try {
+      return await request();
+    } catch (e) {
+      attempts += 1;
+      if (attempts >= 3) throw e;
+      await sleep(1000);
+    }
+  }
+  return null;
+}
+
+async function applyProxyGeoToEnv(env, label) {
+  if (!env || !env.useProxy || !env.proxyUrl) return;
+  try {
+    const geo = await queryProxyGeo(env.proxyUrl);
+    if (!geo) return;
+    env.webrtc_public = geo.ip;
+    // env.web_rtc_ip = geo.ip;
+    env.timeZone = geo.timeZone || env.timeZone;
+    env.ipzone = geo.timeZone || env.ipzone;
+    env.position = geo.position || env.position;
+    env.country = geo.country || env.country;
+    sendTaskLog(`[syncFunction] ${label} proxy geo updated: ${geo.ip} ${geo.timeZone || ''}`.trim());
+  } catch (e) {
+    sendTaskLog(`[syncFunction] ${label} proxy geo failed: ${e.message}`);
+  }
 }
 
 
@@ -222,8 +378,6 @@ function spawnSlaveWorkers(slaveEnvs, options) {
   const { chromePath, savePath, metamaskDir, positionBase } = options;
   const defaultSlaveWindow = WINDOW_LAYOUT.slave || {};
   const SLAVE_WINDOW = Object.assign({}, defaultSlaveWindow, positionBase || {});
-  const gapX = Number.isFinite(SLAVE_WINDOW.gapX) ? SLAVE_WINDOW.gapX : (defaultSlaveWindow.gapX ?? 20);
-  const gapY = Number.isFinite(SLAVE_WINDOW.gapY) ? SLAVE_WINDOW.gapY : (defaultSlaveWindow.gapY ?? 0);
   sendTaskLog(`[syncFunction] Launching ${slaveEnvs.length} slave processes...`);
 
   slaveWorkers = slaveEnvs.map((env, i) => {
@@ -232,8 +386,8 @@ function spawnSlaveWorkers(slaveEnvs, options) {
     const label = resolveSlaveLabel(env, ordinal);
     const tag = formatSlaveTag(ordinal, label);
     const position = {
-      x: SLAVE_WINDOW.x + i * (SLAVE_WINDOW.width + gapX),
-      y: SLAVE_WINDOW.y + i * gapY,
+      x: SLAVE_WINDOW.x,
+      y: SLAVE_WINDOW.y,
       width: SLAVE_WINDOW.width,
       height: SLAVE_WINDOW.height,
     };
@@ -752,6 +906,11 @@ async function startSync(payload) {
     if (!slaveEnvs.length) {
       sendTaskLog('slaveEnvs missing; at least one slave environment is required.');
     }
+
+    await applyProxyGeoToEnv(masterEnv, 'master');
+    await Promise.allSettled(
+      (slaveEnvs || []).map((env, idx) => applyProxyGeoToEnv(env, `slave${idx + 1}`))
+    );
 
   const masterWindow = Object.assign({}, WINDOW_LAYOUT.master, initialPosition || {});
 

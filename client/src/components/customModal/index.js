@@ -3,7 +3,7 @@ import { Modal, Button, Row, Col, Form,ProgressBar } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import './index.scss';
 
-const CustomModal = forwardRef(({ show, handleClose, title, rowList },ref)=> {
+const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData },ref)=> {
     const [valueObj,setValueObj] = useState({});
     const { t } = useTranslation();
 
@@ -22,20 +22,36 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList },ref)=> {
         }
     }, [rowList]);
 
-    const onChange = (e, key) => {
-        setValueObj({...valueObj,[key]:e.target.value});
+    const onChange = (e, item) => {
+      let nextVal = e.target.value;
+      if (item && typeof item.onChange === 'function') {
+        const override = item.onChange(e, nextVal, valueObj);
+        if (override !== undefined) {
+          nextVal = override;
+        }
+      }
+      setValueObj({ ...valueObj, [item.key]: nextVal });
+      if (handleData) {
+        handleData(item.key, nextVal);
+      }
     }
     // 多选添加：将指定选项加入已选
     const multipleAdd = (itemKey, optionValue) => {
       const selected = valueObj[itemKey] || [];
       const newSelected = Array.from(new Set([...selected, optionValue]));
       setValueObj({ ...valueObj, [itemKey]: newSelected });
+      if (handleData) {
+        handleData(itemKey, newSelected);
+      }
     };
     // 多选移除：将指定选项从已选中移除
     const multipleMinus = (itemKey, optionValue) => {
       const selected = valueObj[itemKey] || [];
       const newSelected = selected.filter(v => v !== optionValue);
       setValueObj({ ...valueObj, [itemKey]: newSelected });
+      if (handleData) {
+        handleData(itemKey, newSelected);
+      }
     };
     // 检查选项是否已选中（使用Set优化时间复杂度）
     const isOptionSelected = (itemKey, optionValue) => {
@@ -46,7 +62,7 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList },ref)=> {
 
     useImperativeHandle(ref, () => ({
         updateValueObj: (key,value) => {
-            setValueObj({...valueObj,[key]:value});
+        setValueObj(prev => ({...prev,[key]:value}));
         },
         clearValueObj: () => {
             setValueObj({});
@@ -84,9 +100,10 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList },ref)=> {
                                 {item.type === 'input' && (
                                     <Form.Control
                                         placeholder={item.placeholder}
-                                        onChange={(e) => onChange(e, item.key)}
+                                    onChange={(e) => onChange(e, item)}
                                         value={valueObj[item.key] || ''}
                                         type={item.inputType}
+                                    {...(item.inputProps || {})}
                                     />
                                 )}
                                 {item.type === 'select' && (
@@ -138,7 +155,13 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList },ref)=> {
                                   ) : (
                                     <Form.Select
                                       value={valueObj[item.key] || item.defaultValue || ''}
-                                      onChange={e => setValueObj({ ...valueObj, [item.key]: e.target.value })}
+                                      onChange={e => {
+                                        const nextVal = e.target.value;
+                                        setValueObj({ ...valueObj, [item.key]: nextVal });
+                                        if (handleData) {
+                                            handleData(item.key, nextVal);
+                                        }
+                                      }}
                                       style={item.style}
                                     >
                                       {item.options.map((option, index) => (

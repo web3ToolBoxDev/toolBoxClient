@@ -42,6 +42,50 @@ const checkIfDirectoryExists = (dirPath) => {
     }
 }
 
+const SENSITIVE_KEYS = new Set([
+    'mnemonic',
+    'privateKey',
+    'ethPrivateKey',
+    'solPrivateKey',
+    'seed',
+    'password'
+]);
+
+const maskString = (value = '') => {
+    const str = String(value);
+    if (str.length <= 8) return '***';
+    return `${str.slice(0, 4)}****${str.slice(-4)}`;
+};
+
+const sanitize = (value) => {
+    if (!value || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value.map(sanitize);
+    const out = {};
+    Object.entries(value).forEach(([key, val]) => {
+        if (SENSITIVE_KEYS.has(key)) {
+            out[key] = '***';
+            return;
+        }
+        if (key.toLowerCase().includes('private') || key.toLowerCase().includes('mnemonic')) {
+            out[key] = '***';
+            return;
+        }
+        if (typeof val === 'string' && (key.toLowerCase().includes('address') || key.toLowerCase().includes('id'))) {
+            out[key] = maskString(val);
+            return;
+        }
+        out[key] = sanitize(val);
+    });
+    return out;
+};
+
+function sendSafeLog(log) {
+    if (ws.readyState === webSocket.OPEN) {
+        const message = typeof log === 'string' ? log : JSON.stringify(sanitize(log));
+        ws.send(JSON.stringify({ type: 'task_log', message }));
+    }
+}
+
 // Heartbeat scheduler
 function sendHeartBeat() {
     setInterval(() => {
@@ -65,13 +109,7 @@ function sendRequestTaskData() {
 }
 
 function sendTaskLog(log) {
-    if (ws.readyState === webSocket.OPEN) {
-        const taskLogMessage = JSON.stringify({
-            type: 'task_log',
-            message: log
-        });
-        ws.send(taskLogMessage);
-    }
+    sendSafeLog(log);
 }
 
 function sendTaskCompleted(taskName, success, message) {
@@ -190,7 +228,7 @@ async function unlockWallet(page) {
 // Task logic
 async function runTask() {
     console.log('Task execution started');
-    // console.log('Task data:', taskData);
+    // avoid logging raw task data to frontend
 
     const currentTaskData = ensureTaskDataIsObject();
 
@@ -225,13 +263,16 @@ async function runTask() {
 
     if (currentTaskData.env.useProxy) {
         fingerprints = JSON.stringify({
+            audio: currentTaskData.env.audio,
+            clientRect: currentTaskData.env.clientRect,
+            webgl: currentTaskData.env.webgl,
             canvas: currentTaskData.env.canvas,
             hardware: currentTaskData.env.hardware,
             screen: currentTaskData.env.screen,
             clientHint: currentTaskData.env.clientHint,
             languages_js: currentTaskData.env.language_js,
             languages_http: currentTaskData.env.language_http,
-            fonts_remove: currentTaskData.env.fonts_remove + ',Tahoma',
+            fonts_remove: currentTaskData.env.fonts_remove,
             position: currentTaskData.env.position,
             timeZone: currentTaskData.env.timeZone,
             webrtc_public: currentTaskData.env.webrtc_public,
@@ -239,13 +280,16 @@ async function runTask() {
         args.push(`--proxy-server=${currentTaskData.env.proxyUrl}`);
     } else {
         fingerprints = JSON.stringify({
+            audio: currentTaskData.env.audio,
+            clientRect: currentTaskData.env.clientRect,
+            webgl: currentTaskData.env.webgl,
             canvas: currentTaskData.env.canvas,
             hardware: currentTaskData.env.hardware,
             screen: currentTaskData.env.screen,
             clientHint: currentTaskData.env.clientHint,
             languages_js: currentTaskData.env.language_js,
             languages_http: currentTaskData.env.language_http,
-            fonts_remove: currentTaskData.env.fonts_remove + ',Tahoma'
+            fonts_remove: currentTaskData.env.fonts_remove
         });
     }
 
@@ -283,8 +327,8 @@ async function runTask() {
                     await page.goto(`chrome-extension://${extensionId}/home.html#unlock`);
                     const success = await unlockWallet(page);
                     if (success) {
-                        // sendTaskCompleted('openWallet', true, '钱包打开成功');
-                        sendTaskLog('钱包已成功打开并解锁');
+                        // sendTaskCompleted('openWallet', true, 'Wallet opened successfully');
+                        sendSafeLog('Wallet opened and unlocked successfully');
                         breaked = true;
                         break;
                     } else {

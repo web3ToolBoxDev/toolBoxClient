@@ -1,0 +1,14 @@
+[
+  {
+    "taskName": "initWallet",
+    "scriptPath": "initWallet.js",
+    "taskType": "execByOrder",
+    "defaultTask": true
+  },
+  {
+    "taskName": "openWallet",
+    "scriptPath": "openWallet.js",
+    "taskType": "execByAsync",
+    "defaultTask": true
+  }
+]
