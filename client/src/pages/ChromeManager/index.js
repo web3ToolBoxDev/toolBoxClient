@@ -172,99 +172,99 @@ const ChromeManager = () => {
                 });
             },
             rowList: [
-                [
-                    {
-                        type: 'label',
-                        text: t('downloadBaseFingerPrintCount'),
-                        colWidth: 9,
-                    },
-                    {
-                        type: 'button',
-                        text: t('downloadButton'),
-                        style: { marginLeft: 'auto', marginRight: '1rem', },
-                        colWidth: 2,
-                        click: () => {
-                            if (!window.electronAPI) {
-                                alert(t('runInElectron'));
-                                return;
-                            }
-                            window.electronAPI.openLink('https://web3toolbox.app/');
-                        }
-                    },
-                ],
-                [
-                    {
-                        type: 'label',
-                        text: t('importBaseFingerPrintCount'),
-                        colWidth: 9
-                    },
-                    {
-                        type: 'button',
-                        text: t('importButton'),
-                        colWidth: 2,
-                        style: { marginLeft: 'auto', marginRight: '1rem', },
-                        click: () => {
-                            if (!window.electronAPI) {
-                                alert(t('runInElectron'));
-                                return;
-                            }
-                            window.electronAPI.openFile().then((res) => {
-                                if (res) {
-                                    api.loadFingerPrints(res).then(async (data) => {
-                                        if (data && data.success) {
-                                            alert(t('importSuccess'));
-                                            fetchBaseFingerprintCount();
-                                        } else {
-                                            alert(t('importFailed') + ': ' + (data.message || t('unknownError')));
-                                        }
-                                    }).catch((error) => {
-                                        console.error(t('importError'), error);
-                                        alert(t('importFailed'));
-                                    });
-                                }
-                            });
-                        }
-                    }
-                ],
-                [
-                    {
-                        type: 'label',
-                        text: t('baseFingerprintNumber'),
-                        colWidth: 6,
-                    },
-                    {
-                        type: 'text',
-                        key: 'baseFingerprintCount',
-                        text: baseFingerprintCount || 0,
-                        colWidth: 2,
-                        style: { marginLeft: 'auto', marginRight: '1rem', },
-                    },
-                    {
-                        type: 'button',
-                        text: t('clearBaseFPButton'),
-                        colWidth: 2,
-                        style: { marginLeft: 'auto', marginRight: '1rem', },
-                        click: () => {
-                            // console.log('clearBaseFPButton clicked');
-                            api.clearFingerPrints().then((data) => {
-                                if (data && data.success) {
-                                    alert(t('clearSuccess'));
-                                    fetchBaseFingerprintCount();
-                                } else {
-                                    alert(t('clearFailed') + ': ' + (data.message || t('unknownError')));
-                                }
-                            }).catch((error) => {
-                                console.error(t('clearError'), error);
-                                alert(t('clearFailed'));
-                            });
-                        }
-                    }
-                ],
+                // [
+                //     {
+                //         type: 'label',
+                //         text: t('downloadBaseFingerPrintCount'),
+                //         colWidth: 9,
+                //     },
+                //     {
+                //         type: 'button',
+                //         text: t('downloadButton'),
+                //         style: { marginLeft: 'auto', marginRight: '1rem', },
+                //         colWidth: 2,
+                //         click: () => {
+                //             if (!window.electronAPI) {
+                //                 alert(t('runInElectron'));
+                //                 return;
+                //             }
+                //             window.electronAPI.openLink('https://web3toolbox.app/');
+                //         }
+                //     },
+                // ],
+                // [
+                //     {
+                //         type: 'label',
+                //         text: t('importBaseFingerPrintCount'),
+                //         colWidth: 9
+                //     },
+                //     {
+                //         type: 'button',
+                //         text: t('importButton'),
+                //         colWidth: 2,
+                //         style: { marginLeft: 'auto', marginRight: '1rem', },
+                //         click: () => {
+                //             if (!window.electronAPI) {
+                //                 alert(t('runInElectron'));
+                //                 return;
+                //             }
+                //             window.electronAPI.openFile().then((res) => {
+                //                 if (res) {
+                //                     api.loadFingerPrints(res).then(async (data) => {
+                //                         if (data && data.success) {
+                //                             alert(t('importSuccess'));
+                //                             fetchBaseFingerprintCount();
+                //                         } else {
+                //                             alert(t('importFailed') + ': ' + (data.message || t('unknownError')));
+                //                         }
+                //                     }).catch((error) => {
+                //                         console.error(t('importError'), error);
+                //                         alert(t('importFailed'));
+                //                     });
+                //                 }
+                //             });
+                //         }
+                //     }
+                // ],
+                // [
+                //     {
+                //         type: 'label',
+                //         text: t('baseFingerprintNumber'),
+                //         colWidth: 6,
+                //     },
+                //     {
+                //         type: 'text',
+                //         key: 'baseFingerprintCount',
+                //         text: baseFingerprintCount || 0,
+                //         colWidth: 2,
+                //         style: { marginLeft: 'auto', marginRight: '1rem', },
+                //     },
+                //     {
+                //         type: 'button',
+                //         text: t('clearBaseFPButton'),
+                //         colWidth: 2,
+                //         style: { marginLeft: 'auto', marginRight: '1rem', },
+                //         click: () => {
+                //             // console.log('clearBaseFPButton clicked');
+                //             api.clearFingerPrints().then((data) => {
+                //                 if (data && data.success) {
+                //                     alert(t('clearSuccess'));
+                //                     fetchBaseFingerprintCount();
+                //                 } else {
+                //                     alert(t('clearFailed') + ': ' + (data.message || t('unknownError')));
+                //                 }
+                //             }).catch((error) => {
+                //                 console.error(t('clearError'), error);
+                //                 alert(t('clearFailed'));
+                //             });
+                //         }
+                //     }
+                // ],
                 [
                     {
                         type: 'label',
                         text: t('generateFingerprintCount'),
-                        colWidth: 6,
+                        colWidth: 5,
                     },
                     {
                         type: 'input',
@@ -287,8 +287,8 @@ const ChromeManager = () => {
                     {
                         type: 'button',
                         text: t('generateButton'),
-                        colWidth: 2,
-                        style: { marginLeft: 'auto', marginRight: '1rem', },
+                        colWidth: 3,
+                        style: { textAlign: 'center', minWidth: '80px' },
                         click: () => {
                             console.log('generateButton clicked');
                             console.log('modalRef.current.valueObj:', modalRef.current.getValue('generateCount'));
@@ -407,9 +407,9 @@ const ChromeManager = () => {
             rowList: [
                 [
                     { type: 'label', text: t('envName'), colWidth: 3 },
-                    { type: 'input', key: 'envName', inputType: 'text', colWidth: 7, placeholder: t('inputEnvName'), defaultValue: fp.name || '' },
+                    { type: 'input', key: 'envNameInput', inputType: 'text', colWidth: 7, placeholder: t('inputEnvName'), defaultValue: fp.name || '' },
                     { type: 'button', text: t('save'), colWidth: 2, click: () => {
-                        const newName = modalRef.current.getValue('envName');
+                        const newName = modalRef.current.getValue('envNameInput');
                         if (!newName) {
                             alert(t('2007'));
                             return;
@@ -417,8 +417,8 @@ const ChromeManager = () => {
                         api.updateFingerPrintName(id, newName).then((data) => {
                             if (data && data.success) {
                                 alert(t('0'));
-                                const newFingerPrints = { ...fingerPrintsObj, [id]: { ...fp, name: newName } };
-                                setFingerPrints(newFingerPrints);
+                                const updatedFingerPrints = { ...fingerPrintsObj, [id]: { ...fp, name: newName } };
+                                setFingerPrints(updatedFingerPrints);
                             } else {
                                 alert(t(data.code) + ': ' + (data.message || t('unknownError')));
                             }
@@ -427,7 +427,6 @@ const ChromeManager = () => {
                             alert(t('2009'));
                         });
                         setModalProps({ show: false });
-                        
                     }}
                 ]
             ]
@@ -519,7 +518,7 @@ const ChromeManager = () => {
         } catch (error) {
             console.error('Failed to fetch latest fingerprint:', error);
         }
-        console.log('setIpConfig fp:', fp);
+        console.log('setIpConfig fp:', fp.name);
         const hasProxy = Boolean(fp?.proxy?.ipHost && fp?.proxy?.ipPort);
         const ipTypeDefault = hasProxy ? (fp?.proxy?.ipType || fp?.proxy_type || 'http') : 'http';
         const ipHostDefault = hasProxy ? (fp?.proxy?.ipHost || '') : '';

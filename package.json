@@ -35,7 +35,7 @@
           "**/*",
           "!savePath.json",
           "!chromePath.json",
-          "!extensionInfo.json"
+          "!/scripts/extensionInfo.json"
         ]
       }
     ],

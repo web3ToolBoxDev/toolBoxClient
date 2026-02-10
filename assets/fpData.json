@@ -274,8 +274,8 @@
             "jsLanguage": "en-US"
         },
         "screenFingerprint": {
-            "availableHeight": 1040,
-            "availableWidth": 1920,
+            "availHeight": 1040,
+            "availWidth": 1920,
             "height": 1080,
             "pixelDepth": 24,
             "width": 1920
@@ -1144,25 +1144,9 @@
         { "httpLanguage": "en", "jsLanguage": "en" }
     ],
     "screenFingerprintList": [
-        { "availableHeight": 1040, "availableWidth": 1920, "height": 1080, "pixelDepth": 24, "width": 1920 },
-        { "availableHeight": 900, "availableWidth": 1600, "height": 900, "pixelDepth": 24, "width": 1600 },
-        { "availableHeight": 1400, "availableWidth": 2560, "height": 1440, "pixelDepth": 24, "width": 2560 },
-        { "availableHeight": 728, "availableWidth": 1366, "height": 768, "pixelDepth": 24, "width": 1366 },
-        { "availableHeight": 760, "availableWidth": 1280, "height": 800, "pixelDepth": 24, "width": 1280 },
-        { "availableHeight": 828, "availableWidth": 1536, "height": 864, "pixelDepth": 24, "width": 1536 },
-        { "availableHeight": 860, "availableWidth": 1440, "height": 900, "pixelDepth": 24, "width": 1440 },
-        { "availableHeight": 1000, "availableWidth": 1680, "height": 1050, "pixelDepth": 24, "width": 1680 },
-        { "availableHeight": 1040, "availableWidth": 1920, "height": 1080, "pixelDepth": 24, "width": 1920 },
-        { "availableHeight": 680, "availableWidth": 1280, "height": 720, "pixelDepth": 24, "width": 1280 },
-        { "availableHeight": 1400, "availableWidth": 2560, "height": 1440, "pixelDepth": 24, "width": 2560 },
-        { "availableHeight": 1000, "availableWidth": 1920, "height": 1080, "pixelDepth": 24, "width": 1920 },
-        { "availableHeight": 1320, "availableWidth": 2560, "height": 1440, "pixelDepth": 24, "width": 2560 },
-        { "availableHeight": 1560, "availableWidth": 2560, "height": 1600, "pixelDepth": 24, "width": 2560 },
-        { "availableHeight": 1160, "availableWidth": 1920, "height": 1200, "pixelDepth": 24, "width": 1920 },
-        { "availableHeight": 1040, "availableWidth": 1920, "height": 1080, "pixelDepth": 24, "width": 1920 },
-        { "availableHeight": 1760, "availableWidth": 2880, "height": 1800, "pixelDepth": 24, "width": 2880 },
-        { "availableHeight": 1160, "availableWidth": 2000, "height": 1200, "pixelDepth": 24, "width": 2000 },
-        { "availableHeight": 1400, "availableWidth": 2560, "height": 1440, "pixelDepth": 24, "width": 2560 },
-        { "availableHeight": 1560, "availableWidth": 2560, "height": 1600, "pixelDepth": 24, "width": 2560 }
+        { "availHeight": 1032, "availWidth": 1920, "height": 1080, "pixelDepth": 24, "width": 1920 },
+        { "availHeight": 892, "availWidth": 1600, "height": 900, "pixelDepth": 24, "width": 1600 }
+        
+       
     ]
 }

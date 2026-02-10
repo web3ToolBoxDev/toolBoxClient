@@ -54,8 +54,8 @@ async function loadFingerPrints(filePath) {
         const requiredKeys = [
             'userdata',
             'matchedFingerprintList',
-            'languageFingerprintList',
-            'screenFingerprintList'
+            'languageFingerprintList'
+            // 'screenFingerprintList'
         ];
         for (const key of requiredKeys) {
             if (!data.hasOwnProperty(key)) {
@@ -80,8 +80,8 @@ async function getFingerPrintCount() {
         }
         const count = Math.max(
             fpData.matchedFingerprintList.length,
-            fpData.languageFingerprintList.length,
-            fpData.screenFingerprintList.length
+            fpData.languageFingerprintList.length
+            // fpData.screenFingerprintList.length
         );
         return { success: true, code: 0, message: count };
     } catch (error) {
@@ -116,9 +116,9 @@ async function generateRandomFingerPrint(counts) {
     if (!Array.isArray(fpData.languageFingerprintList) || fpData.languageFingerprintList.length === 0) {
         return { success: false, message: 'languageFingerprintList missing' };
     }
-    if (!Array.isArray(fpData.screenFingerprintList) || fpData.screenFingerprintList.length === 0) {
-        return { success: false, message: 'screenFingerprintList missing' };
-    }
+    // if (!Array.isArray(fpData.screenFingerprintList) || fpData.screenFingerprintList.length === 0) {
+    //     return { success: false, message: 'screenFingerprintList missing' };
+    // }
 
     const randomIndex = (length) => Math.floor(Math.random() * length);
     const random1 = () => Math.floor(Math.random() * 1000) / 1000;
@@ -127,7 +127,7 @@ async function generateRandomFingerPrint(counts) {
         const envId = uuidv4();
         const matchedIdex = randomIndex(fpData.matchedFingerprintList.length);
         const languageIndex = randomIndex(fpData.languageFingerprintList.length);
-        const screenIndex = randomIndex(fpData.screenFingerprintList.length);
+        // const screenIndex = randomIndex(fpData.screenFingerprintList.length);
         const fontsRemoveNum = Math.floor(Math.random() * 10) + 1;
         const removeFonts = [];
         for (let j = 0; j < fontsRemoveNum; j++) {
@@ -143,8 +143,8 @@ async function generateRandomFingerPrint(counts) {
             webgl: fpData.matchedFingerprintList[matchedIdex].webglFingerprint,
             language_js: fpData.languageFingerprintList[languageIndex].jsLanguage,
             language_http: fpData.languageFingerprintList[languageIndex].httpLanguage,
-            screen: fpData.screenFingerprintList[screenIndex],
-            canvas: { toDataUrl: random1() },
+            // screen: fpData.screenFingerprintList[screenIndex],
+            canvas: { toDataUrl: random1() * 10 },
             hardware: fpData.userdata.hardware || {
                 memory: 8,
                 concurrency: 8
@@ -200,8 +200,8 @@ async function clearFingerPrints() {
     fpData = {
         userdata: {},
         matchedFingerprintList: [],
-        languageFingerprintList: [],
-        screenFingerprintList: [],
+        languageFingerprintList: []
+        // screenFingerprintList: [],
     };
     const fpDataJson = JSON.stringify(fpData);
     fs.writeFileSync(fpDataPath, fpDataJson);

@@ -13,13 +13,19 @@ const Introduction = () => {
 
   const openIntroduction = () => {
     if (window.electronAPI) {
-      window.electronAPI.openLink('https://youtu.be/9OFP_NxKi00');
+      window.electronAPI.openLink('https://youtu.be/Vxxpiq4j8k0');
     }
   };
 
   const openGithub = () => {
     if (window.electronAPI) {
       window.electronAPI.openLink('https://github.com/web3ToolBoxDev/toolBoxClient');
+    }
+  };
+
+  const obtainBrowser = () => {
+    if (window.electronAPI) {
+      window.electronAPI.openLink('https://web3toolbox.app/');
     }
   };
 
@@ -33,6 +39,9 @@ const Introduction = () => {
           <div className="btn-row">
             <Button className="btn" onClick={openIntroduction}>
               {t('introduction.guideButton', '使用说明')}
+            </Button>
+            <Button className="btn" onClick={obtainBrowser}>
+              {t('introduction.browserButton', '浏览器')}
             </Button>
             <Button className="btn" onClick={openGithub}>
               {t('introduction.githubButton', 'github链接')}

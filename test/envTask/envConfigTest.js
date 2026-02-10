@@ -124,7 +124,7 @@ async function runTask() {
   const taskConfig = payload.taskDataFromFront?.config || {};
   const runMode = taskConfig.__mode || payload.taskDataFromFront?.mode || 'env';
 
-  console.log('envConfigTest payload:', safeJson(payload));
+//   console.log('envConfigTest payload:', safeJson(payload));
 
   sendTaskLog(`[envConfigTest] env.id=${env.id || env._id || env.name}`);
   sendTaskLog(`[envConfigTest] mode=${runMode}`);

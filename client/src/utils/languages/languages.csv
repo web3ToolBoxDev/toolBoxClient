@@ -276,7 +276,7 @@ syncScriptDirectory.resetSuccess,Sync script directory reset to default successf
 syncScriptDirectory.resetFailed,Failed to reset sync script directory,重置同步脚本目录失败
 syncScriptDirectory.resetError,Error resetting sync script directory,重置同步脚本目录出错
 resetToDefault,Reset to Default,重置为默认
-taskManage,Task Management,任务管理
+taskManage,Task Manage,任务管理
 taskManage.importTitle,Import Task,导入任务
 taskManage.taskDir,Task Directory,任务目录
 taskManage.taskDirPlaceholder,Select a directory containing taskConfig.json,请选择包含 taskConfig.json 的目录
@@ -325,6 +325,7 @@ taskManage.configSuccess,Config saved,配置成功
 introduction.heading,Web3ToolBox,Web3ToolBox
 introduction.description,"Hi everyone, I'm Aming. GitHub docs and videos are here; updates will be posted on Twitter; follow to stay informed.",大家好，我是阿明，GitHub文档和视频在此，大家可以点击前往，后续工具有任何更新会发布在Twitter上，各位老板可以关注Twitter，关注更新内容
 introduction.guideButton,Guide,使用说明
+introduction.browserButton,Obtain Browser,获取浏览器
 introduction.githubButton,GitHub,GitHub链接
 introduction.twitterButton,Twitter,Twitter
 web3.emptyTaskList,Task list is empty,任务列表为空
