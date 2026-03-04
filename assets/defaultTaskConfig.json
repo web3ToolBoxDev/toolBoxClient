@@ -65,41 +65,5 @@
         "defaultTask":true,
         "taskType":"execWithoutWallet"
 
-    },
-    {
-        "taskName": "jobSeekAgent",
-        "taskI18n": { "zh-CN": "\u6C42\u804CAI\u52A9\u624B", "en": "Job Seek AI Assistant" },
-        "scriptPath": "job-seek/agent.js",
-        "taskKey": "jobSeekAgent",
-        "defaultTask": true,
-        "taskType": "ai",
-        "aiEnabled": true,
-        "aiSessionTemplate": "job-search-v1",
-        "taskSchema": {
-            "provider": {
-                "type": "select",
-                "text": "AI Provider",
-                "defaultValue": "auto",
-                "options": [
-                    { "value": "auto", "text": "Auto Detect (CLI first)" },
-                    { "value": "codex-cli", "text": "Codex CLI (Subscription)" },
-                    { "value": "claude-code", "text": "Claude Code (Subscription)" },
-                    { "value": "api-key", "text": "API Key" }
-                ]
-            },
-            "apiKey": { "type": "input", "inputType": "password", "text": "API Key (only for API Key provider)" },
-            "model": {
-                "type": "select",
-                "text": "Model",
-                "defaultValue": "gpt-4o-mini",
-                "options": [
-                    { "value": "gpt-4o-mini", "text": "gpt-4o-mini (API)" },
-                    { "value": "gpt-4.1-mini", "text": "gpt-4.1-mini (API)" },
-                    { "value": "gpt-4.1", "text": "gpt-4.1 (API)" },
-                    { "value": "codex-mini", "text": "codex-mini (Codex CLI)" },
-                    { "value": "claude-sonnet-4-6", "text": "claude-sonnet-4-6 (Claude Code)" }
-                ]
-            }
-        }
     }
 ]

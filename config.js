@@ -159,10 +159,7 @@ class Config {
 				}
 				let taskObj = defaultTaskConfig.find((el) => el.taskName === taskName);
 				if (taskObj.scriptPath && !path.isAbsolute(taskObj.scriptPath)) {
-					const basePath = (taskObj.taskType === 'ai' || taskObj.aiEnabled)
-						? this.defaultAgentPath
-						: this.defaultScriptPath;
-					taskObj.scriptPath = path.join(basePath, taskObj.scriptPath);
+					taskObj.scriptPath = path.join(this.defaultScriptPath, taskObj.scriptPath);
 				}
 				//如果不存在则插入，存在替换
 				if (!doc) {
@@ -170,9 +167,55 @@ class Config {
 				} else {
 					this.#taskDb.update({ taskName: taskName }, taskObj);
 				}
-				
+
 			});
 		});
+		// 扫描 assets/agents/*/taskConfig.json，自动加载每个 agent 自带的任务配置
+		this._loadAgentTasks();
+	}
+	_loadAgentTasks() {
+		try {
+			if (!fs.existsSync(this.defaultAgentPath)) return;
+			const dirs = fs.readdirSync(this.defaultAgentPath, { withFileTypes: true })
+				.filter((d) => d.isDirectory())
+				.map((d) => d.name);
+			dirs.forEach((dirName) => {
+				const agentDir = path.join(this.defaultAgentPath, dirName);
+				const configFile = path.join(agentDir, 'taskConfig.json');
+				if (!fs.existsSync(configFile)) return;
+				let taskArr;
+				try {
+					taskArr = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
+				} catch (e) {
+					console.error(`[_loadAgentTasks] ${configFile} 解析失败:`, e.message);
+					return;
+				}
+				if (!Array.isArray(taskArr)) taskArr = [taskArr];
+				taskArr.forEach((taskObj) => {
+					if (!taskObj || !taskObj.taskName) return;
+					// scriptPath 相对于 agent 自身目录解析
+					if (taskObj.scriptPath && !path.isAbsolute(taskObj.scriptPath)) {
+						taskObj.scriptPath = path.join(agentDir, taskObj.scriptPath);
+					}
+					if (typeof taskObj.defaultTask === 'undefined') {
+						taskObj.defaultTask = true;
+					}
+					this.#taskDb.findOne({ taskName: taskObj.taskName }, (err, doc) => {
+						if (err) {
+							console.error(`[_loadAgentTasks] 查询 ${taskObj.taskName} 失败:`, err);
+							return;
+						}
+						if (!doc) {
+							this.#taskDb.insert(taskObj);
+						} else {
+							this.#taskDb.update({ taskName: taskObj.taskName }, taskObj);
+						}
+					});
+				});
+			});
+		} catch (e) {
+			console.error('[_loadAgentTasks] 扫描 agent 目录失败:', e.message);
+		}
 	}
 	// 从指定目录加载并 upsert 任务（taskConfig.json）
 	async _loadTasksFromDirectory(directory) {
