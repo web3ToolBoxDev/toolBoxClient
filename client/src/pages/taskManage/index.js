@@ -2,14 +2,17 @@ import { Container, Button, Row, Col, Card, Modal, Form } from 'react-bootstrap'
 import CustomModal from '../../components/customModal';
 import SetWalletConfigModal from '../../components/setWalletConfigModal';
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { eventEmitter } from '../../utils/eventEmitter';
 import APIManager from '../../utils/api';
+import { resolveTaskDisplayName } from '../../utils/taskI18n';
 import useWalletStore from '../../store/walletStore';
 import useFingerPrintStore from '../../store/fingerPrintStore';
 import './index.scss';
 const TaskManage = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const apiManager = APIManager.getInstance();
   const walletsStore = useWalletStore((state) => state.wallets);
   const fetchWallets = useWalletStore((state) => state.fetchWallets);
@@ -23,7 +26,7 @@ const TaskManage = () => {
       setTaskList(res);
     });
   };
-  const [runModal, setRunModal] = useState({ show: false, taskName: '' });
+  const [runModal, setRunModal] = useState({ show: false, taskName: '', entry: 'run' });
   const [runMode, setRunMode] = useState('env'); // env | wallet
   const [selectedEnvIds, setSelectedEnvIds] = useState([]);
   const [selectedWalletIds, setSelectedWalletIds] = useState([]);
@@ -111,11 +114,37 @@ const TaskManage = () => {
     setSelectedWalletIds((prev) => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
+  const getTaskDisplayName = (task) => resolveTaskDisplayName(task, {
+    language: i18n?.resolvedLanguage || i18n?.language || 'en'
+  });
+
+  const openAiWorkspace = async (task) => {
+    const taskName = task?.taskName;
+    if (!taskName) return;
+    navigate(`/agentWorkspace/${encodeURIComponent(taskName)}`, {
+      state: {
+        taskDisplayName: getTaskDisplayName(task),
+        taskI18n: task?.taskI18n || {},
+        taskKey: task?.taskKey || ''
+      }
+    });
+  };
+
+  const closeRunModal = () => {
+    setRunModal({ show: false, taskName: '', entry: 'run' });
+    setSelectedEnvIds([]);
+    setSelectedWalletIds([]);
+    setRunMode('env');
+  };
+
   const execTask = (taskName) => {
     setSelectedEnvIds([]);
     setSelectedWalletIds([]);
-    setRunModal({ show: true, taskName });
+    setRunMode('env');
+    setRunModal({ show: true, taskName, entry: 'run' });
   };
+
+  const isAiTask = (task) => task?.taskType === 'ai' || task?.aiEnabled === true;
 
   const handleRunConfirm = async () => {
     const currentTask = taskList.find(t => t.taskName === runModal.taskName);
@@ -127,7 +156,7 @@ const TaskManage = () => {
       const res = await apiManager.execTask(runModal.taskName, { envIds: selectedEnvIds, mode: 'env' });
       if (res && res.success) {
         alert(t('taskManage.startSuccess', '任务启动成功'));
-        setRunModal({ show: false, taskName: '' });
+        closeRunModal();
       } else {
         alert(res?.message || t('taskManage.startFailed', '启动失败'));
       }
@@ -144,7 +173,7 @@ const TaskManage = () => {
       const res = await apiManager.execTask(runModal.taskName, { walletIds: selectedWalletIds, mode: 'wallet' });
       if (res && res.success) {
         alert(t('taskManage.startSuccess', '任务启动成功'));
-        setRunModal({ show: false, taskName: '' });
+        closeRunModal();
       } else {
         alert(res?.message || t('taskManage.startFailed', '启动失败'));
       }
@@ -160,7 +189,7 @@ const TaskManage = () => {
     const res = await apiManager.execTask(runModal.taskName, { envIds, mode: 'wallet', walletIds: selectedWalletIds });
     if (res && res.success) {
       alert(t('taskManage.startSuccess', '任务启动成功'));
-      setRunModal({ show: false, taskName: '' });
+      closeRunModal();
     } else {
       alert(res?.message || t('taskManage.startFailed', '启动失败'));
     }
@@ -181,10 +210,11 @@ const TaskManage = () => {
     });
     setTaskList(updatedTaskList);
   }
-  const setConfig = (taskName,configSchema) => {
+  const setConfig = (taskName,configSchema,task) => {
     setWalletConfigModalProp({
       taskName,
       configSchema,
+      isAiTask: isAiTask(task),
       show: true,
       onHide: () => {
         setWalletConfigModalProp({ show: false });
@@ -248,19 +278,23 @@ const TaskManage = () => {
           {taskList.length > 0 ? taskList.map((task, index) => (
             <Row key={index} className="align-items-center task-row">
               <Col xs={1} className="d-flex justify-content-center">
-                <input type='checkbox' checked={task.selected} onChange={() => { handleSelect(index) }} />
+                <input type='checkbox' checked={Boolean(task.selected)} onChange={() => { handleSelect(index) }} />
               </Col>
-              <Col xs={5} className="task-name" title={task.taskName}>{task.taskName}</Col>
+              <Col xs={5} className="task-name" title={getTaskDisplayName(task)}>{getTaskDisplayName(task)}</Col>
               <Col xs={3} className="text-center">
                 {task.configSchema ? (
-                  <Button size="sm" variant="outline-primary" onClick={() => { setConfig(task.taskName,task.configSchema) }}>
+                  <Button size="sm" variant="outline-primary" onClick={() => { setConfig(task.taskName,task.configSchema,task) }}>
                     {t('taskManage.configBtn', '配置')}
                   </Button>
                 ) : <span className="text-muted">{t('taskManage.noConfig', '无配置')}</span>}
               </Col>
               <Col xs={3} className="text-center">
-                <Button size="sm" variant="success" onClick={() => { execTask(task.taskName) }}>
-                  {t('taskManage.startBtn', '启动')}
+                <Button
+                  size="sm"
+                  variant="success"
+                  onClick={() => { isAiTask(task) ? openAiWorkspace(task) : execTask(task.taskName); }}
+                >
+                  {isAiTask(task) ? t('taskManage.openAiWorkspace', '进入AI工作台') : t('taskManage.startBtn', '启动')}
                 </Button>
               </Col>
             </Row>
@@ -270,7 +304,7 @@ const TaskManage = () => {
         </Card.Body>
       </Card>
 
-      <Modal show={runModal.show} onHide={() => { setRunModal({ show: false, taskName: '' }); setSelectedEnvIds([]); setSelectedWalletIds([]); }} centered size="lg">
+      <Modal show={runModal.show} onHide={closeRunModal} centered size="lg">
         <Modal.Header closeButton>
           <Modal.Title>{t('taskManage.startTask', '启动任务')}</Modal.Title>
         </Modal.Header>
@@ -327,7 +361,7 @@ const TaskManage = () => {
           )}
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={() => setRunModal({ show: false, taskName: '' })}>{t('common.cancel', '取消')}</Button>
+          <Button variant="secondary" onClick={closeRunModal}>{t('common.cancel', '取消')}</Button>
           <Button variant="success" onClick={handleRunConfirm}>{t('taskManage.startBtn', '启动')}</Button>
         </Modal.Footer>
       </Modal>

@@ -8,7 +8,6 @@ const useWalletStore = create((set) => ({
   clearWallets: () => set({ wallets: [] }),
   fetchWallets: async () => {
     const res = await api.getAllWallets();
-    console.log('getAllWallets res:', res);
     if (res && Array.isArray(res)) {
       const sortedWallets = res
         .slice()

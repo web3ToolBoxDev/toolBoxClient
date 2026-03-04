@@ -5,3 +5,7 @@ assets/db/
 assets/savePath.json
 assets/scrpits/extensionInfo.json
 test.ipynb
+coverage/
+client/coverage/
+.vscode/
+.claude/

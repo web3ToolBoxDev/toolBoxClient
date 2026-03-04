@@ -11,6 +11,56 @@ const { getEnvById } = require('./fingerPrintService');
 const fs = require('fs');
 const path = require('path');
 
+const AI_SUB_TASK_KEYS = ['profile', 'search', 'match', 'resume', 'coverLetter'];
+const AI_SUB_TASK_STATUSES = ['pending', 'running', 'review', 'done', 'failed'];
+
+const genSessionId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const normalizeTaskConfig = (raw = {}) => {
+    if (!raw || typeof raw !== 'object') {
+        return { mode: 'wallet', defaultConfig: {}, envConfigs: {}, walletConfigs: {} };
+    }
+    const knownKeys = ['default', 'envConfigs', 'walletConfigs', 'mode'];
+    const flatWalletConfigs = {};
+    Object.keys(raw).forEach((k) => {
+        if (knownKeys.includes(k)) return;
+        if (raw[k] && typeof raw[k] === 'object') {
+            flatWalletConfigs[k] = raw[k];
+        }
+    });
+    return {
+        mode: raw.mode || 'wallet',
+        defaultConfig: raw.default || {},
+        envConfigs: raw.envConfigs || {},
+        walletConfigs: (raw.walletConfigs && Object.keys(raw.walletConfigs).length > 0) ? raw.walletConfigs : flatWalletConfigs,
+    };
+};
+
+const resolveAiApiKey = (taskConfig = {}) => {
+    const normalized = normalizeTaskConfig(taskConfig || {});
+    const defaultCfg = normalized.defaultConfig || {};
+    return defaultCfg.apiKey || defaultCfg.openaiApiKey || taskConfig?.apiKey || '';
+};
+
+const createDefaultAiSubTasks = () => AI_SUB_TASK_KEYS.map((key, idx) => ({
+    key,
+    status: idx === 0 ? 'running' : 'pending',
+    updatedAt: Date.now()
+}));
+
+const isAiTaskDefinition = (task = {}) => task?.taskType === 'ai' || task?.aiEnabled === true;
+
+const getAiAssistantReply = (subTaskKey = '') => {
+    const map = {
+        profile: 'Candidate profile parsed. Next step: collecting matching jobs.',
+        search: 'Job search completed. Next step: requirement matching.',
+        match: 'Requirement match generated. Next step: drafting resume.',
+        resume: 'Resume draft prepared. Next step: drafting cover letter.',
+        coverLetter: 'Cover letter draft prepared. Please review outputs before submission.'
+    };
+    return map[subTaskKey] || 'Task updated.';
+};
+
 
 
 
@@ -89,6 +139,7 @@ class TaskService {
             this.savePath = config.getSavePath().path;
 
             this.isSuccess = {};
+            this.aiSessions = {};
         }
         return TaskService.instance;
     }
@@ -97,6 +148,22 @@ class TaskService {
             TaskService.instance = new TaskService();
         }
         return TaskService.instance;
+    }
+
+    _getAiRuntimeTaskName(taskName, sessionId) {
+        return `${taskName}__${sessionId}`;
+    }
+
+    _parseAiRuntimeTaskName(runtimeTaskName = '') {
+        const marker = '__';
+        const index = String(runtimeTaskName || '').lastIndexOf(marker);
+        if (index <= 0) {
+            return null;
+        }
+        return {
+            taskName: runtimeTaskName.slice(0, index),
+            sessionId: runtimeTaskName.slice(index + marker.length)
+        };
     }
 
     //任务进程和服务端通讯的消息格式
@@ -374,7 +441,7 @@ class TaskService {
             ids = taskDataFromFront.envIds;
         }
         // 钱包直连型任务允许无 env（只要有 walletIds）
-        const allowNoEnv = task.taskType === 'execByWallet';
+        const allowNoEnv = task.taskType === 'execByWallet' || task.taskType === 'ai';
         if ((!Array.isArray(ids) || ids.length === 0) && !allowNoEnv) {
             return { success: false, code: 1011, message: '缺少可执行的环境，请选择后重试' };
         }
@@ -389,23 +456,6 @@ class TaskService {
             taskSuccessCallBack = taskDataFromFront.successCallBack;
         }
 
-
-        const normalizeTaskConfig = (raw = {}) => {
-            const knownKeys = ['default', 'envConfigs', 'walletConfigs', 'mode'];
-            const flatWalletConfigs = {};
-            Object.keys(raw).forEach((k) => {
-                if (knownKeys.includes(k)) return;
-                if (raw[k] && typeof raw[k] === 'object') {
-                    flatWalletConfigs[k] = raw[k];
-                }
-            });
-            return {
-                mode: raw.mode || 'wallet',
-                defaultConfig: raw.default || {},
-                envConfigs: raw.envConfigs || {},
-                walletConfigs: (raw.walletConfigs && Object.keys(raw.walletConfigs).length > 0) ? raw.walletConfigs : flatWalletConfigs,
-            };
-        };
 
         const resolveConfigForTarget = (taskConfig, env, envData) => {
             const cfg = normalizeTaskConfig(taskConfig || {});
@@ -474,7 +524,82 @@ class TaskService {
             }
         };
 
+        const buildAiRuntimeContext = async () => {
+            const inputRuntimeContext = (taskDataFromFront?.runtimeContext && typeof taskDataFromFront.runtimeContext === 'object')
+                ? taskDataFromFront.runtimeContext
+                : {};
+            const mode = inputRuntimeContext.mode || taskDataFromFront?.mode || 'env';
+            const rawEnvIds = Array.isArray(inputRuntimeContext.envIds)
+                ? inputRuntimeContext.envIds
+                : (Array.isArray(taskDataFromFront?.envIds) ? taskDataFromFront.envIds : []);
+            const rawWalletIds = Array.isArray(inputRuntimeContext.walletIds)
+                ? inputRuntimeContext.walletIds
+                : (Array.isArray(taskDataFromFront?.walletIds) ? taskDataFromFront.walletIds : []);
+            const envIdSet = new Set();
+            const walletIdSet = new Set();
+            const wallets = [];
+            const envs = [];
+            const runtimeEnvsData = {};
+            const baseEnvsData = (inputRuntimeContext.envsData && typeof inputRuntimeContext.envsData === 'object')
+                ? inputRuntimeContext.envsData
+                : ((taskDataFromFront?.envsData && typeof taskDataFromFront.envsData === 'object') ? taskDataFromFront.envsData : {});
 
+            rawEnvIds.forEach((id) => {
+                if (!id) return;
+                envIdSet.add(String(id));
+            });
+            rawWalletIds.forEach((id) => {
+                if (!id) return;
+                walletIdSet.add(String(id));
+            });
+
+            if (walletIdSet.size > 0) {
+                const { getWalletById } = require('./walletService');
+                for (const walletId of walletIdSet) {
+                    try {
+                        const res = await getWalletById(walletId);
+                        const wallet = res?.data || res;
+                        if (!wallet) continue;
+                        wallets.push(wallet);
+                        if (wallet.bindEnvId) {
+                            envIdSet.add(String(wallet.bindEnvId));
+                        }
+                    } catch (error) {
+                        console.warn('[TaskService] buildAiRuntimeContext wallet fetch failed:', walletId, error?.message || error);
+                    }
+                }
+            }
+
+            for (const envId of envIdSet) {
+                try {
+                    const envRes = await getEnvById(envId);
+                    const env = envRes?.data;
+                    if (!env) continue;
+                    envs.push(env);
+                    let mergedEnvData = baseEnvsData[envId] || {};
+                    mergedEnvData = await this._attachWalletToEnvData(env, mergedEnvData);
+                    runtimeEnvsData[envId] = mergedEnvData;
+                } catch (error) {
+                    console.warn('[TaskService] buildAiRuntimeContext env fetch failed:', envId, error?.message || error);
+                }
+            }
+
+            return {
+                ...inputRuntimeContext,
+                mode,
+                envIds: Array.from(envIdSet),
+                walletIds: Array.from(walletIdSet),
+                envs,
+                wallets,
+                envsData: runtimeEnvsData,
+                walletExtensionPath: path.dirname(config.getInitWalletScriptPath()),
+                chromePath: this.chromePath,
+                savePath: this.savePath
+            };
+        };
+
+
+        let startedAny = false;
         switch (task.taskType) {
             case 'execWithoutWallet': {
                 let taskNameNew = `${task.taskName}`;
@@ -501,6 +626,7 @@ class TaskService {
                 }
                 console.log('taskNameNew:', taskNameNew);
                 this.runTask(taskNameNew, taskData, task.execPath || this.defaultExecPath, task.scriptPath);
+                startedAny = true;
                 break;
             }
 
@@ -516,6 +642,7 @@ class TaskService {
                         continue;
                     }
                     this.runTask(taskNameForEnv, taskDataPayload, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
+                    startedAny = true;
                     await this.checkCompleted(taskNameForEnv);
                 }
                 break;
@@ -528,6 +655,7 @@ class TaskService {
                         return;
                     }
                     this.runTask(taskNameForEnv, taskDataPayload, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
+                    startedAny = true;
                     this.checkCompleted(taskNameForEnv);
                 }));
                 break;
@@ -561,6 +689,7 @@ class TaskService {
                     walletExtensionPath: walletExtensionPath
                 };
                 this.runTask(taskNameAll, taskDataAll, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
+                startedAny = true;
                 this.checkCompleted(taskNameAll);
                 break;
             case 'execByWallet': {
@@ -576,14 +705,41 @@ class TaskService {
                         continue;
                     }
                     this.runTask(taskNameForWallet, taskDataPayload, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
+                    startedAny = true;
                     await this.checkCompleted(taskNameForWallet);
                 }
+                break;
+            }
+            case 'ai': {
+                const taskNameAi = `${task.taskName}`;
+                if (this.isRunning[taskNameAi]) {
+                    return { success: false, code: 1003, message: 'Task is running' };
+                }
+                const runtimeContext = await buildAiRuntimeContext();
+                const taskDataAi = {
+                    taskType: 'ai',
+                    taskName: task.taskName,
+                    aiSessionTemplate: task.aiSessionTemplate || 'default',
+                    taskConfig: task.config || {},
+                    taskSchema: task.configSchema || task.taskSchema || {},
+                    taskDataFromFront: { ...(taskDataFromFront || {}), runtimeContext },
+                    runtimeContext,
+                    chromePath: this.chromePath,
+                    savePath: this.savePath
+                };
+                this.runTask(taskNameAi, taskDataAi, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack, 10 * 60 * 1000);
+                startedAny = true;
+                this.checkCompleted(taskNameAi);
                 break;
             }
             default:
                 break;
 
         }
+        if (!startedAny) {
+            return { success: false, code: 1013, message: 'No task instance started' };
+        }
+        return { success: true, code: 0, message: `Task ${taskName} is being executed.` };
     }
 
     async deleteTask(taskNames) {
@@ -642,6 +798,20 @@ class TaskService {
                 this.webSocketService.sendToFront(
                     this.taskLogMessage(`Task:${this.shortTaskName(taskName)} completed`, 0, taskName)
                 );
+                break;
+            }
+            case 'agent_state_snapshot':
+            case 'agent_session_list':
+            case 'agent_conversation_update':
+            case 'agent_subtask_update':
+            case 'agent_artifact_update':
+            case 'agent_error': {
+                this.webSocketService.sendToFront({
+                    ...data,
+                    // Use runtime task name to avoid frontend filtering mismatches
+                    taskName,
+                    time: new Date().toLocaleString()
+                });
                 break;
             }
             default:
@@ -827,8 +997,328 @@ class TaskService {
             return { success: false, code: 1010, message: error.message };
         }
     }
+
+    _appendAiMessage(session, role, content) {
+        if (!session.messages) {
+            session.messages = [];
+        }
+        session.messages.push({
+            id: genSessionId(),
+            role,
+            content,
+            createdAt: Date.now()
+        });
+    }
+
+    _createAiSessionRecord(taskName, name = '') {
+        const now = Date.now();
+        const sessionOrder = ((this.aiSessions?.[taskName]?.order || []).length + 1);
+        const sessionName = String(name || '').trim() || `Session ${sessionOrder}`;
+        const session = {
+            taskName,
+            sessionId: genSessionId(),
+            name: sessionName,
+            subTasks: createDefaultAiSubTasks(),
+            messages: [],
+            prompt: null,
+            artifacts: [],
+            createdAt: now,
+            updatedAt: now
+        };
+        this._appendAiMessage(session, 'assistant', 'AI workspace initialized. Configure API Key before running generation.');
+        return session;
+    }
+
+    _formatAiSessionPayload(session, task = null) {
+        const aiApiKey = resolveAiApiKey(task?.config || {});
+        const apiKeyConfigured = Boolean(String(aiApiKey || '').trim());
+        return {
+            taskName: session.taskName,
+            sessionId: session.sessionId,
+            name: session.name || '',
+            apiKeyConfigured,
+            messages: session.messages || [],
+            subTasks: session.subTasks || [],
+            prompt: session.prompt || null,
+            artifacts: session.artifacts || [],
+            updatedAt: session.updatedAt || Date.now()
+        };
+    }
+
+    async _ensureAiSession(taskName, sessionId = null) {
+        const task = await this.getTaskByName(taskName);
+        if (!task) {
+            return { success: false, code: 1002, message: 'Task does not exist' };
+        }
+        if (!isAiTaskDefinition(task)) {
+            return { success: false, code: 1014, message: 'Task is not an AI task' };
+        }
+
+        if (!this.aiSessions[taskName]) {
+            this.aiSessions[taskName] = {
+                taskName,
+                activeSessionId: '',
+                sessions: {},
+                order: [],
+                createdAt: Date.now(),
+                updatedAt: Date.now()
+            };
+        }
+
+        const workspace = this.aiSessions[taskName];
+        let targetSessionId = String(sessionId || '').trim();
+        if (!targetSessionId) {
+            targetSessionId = workspace.activeSessionId || workspace.order[0] || '';
+        }
+        if (targetSessionId && workspace.sessions[targetSessionId]) {
+            workspace.activeSessionId = targetSessionId;
+            workspace.updatedAt = Date.now();
+            return { success: true, task, workspace, session: workspace.sessions[targetSessionId] };
+        }
+
+        const session = this._createAiSessionRecord(taskName);
+        workspace.sessions[session.sessionId] = session;
+        workspace.order.push(session.sessionId);
+        workspace.activeSessionId = session.sessionId;
+        workspace.updatedAt = Date.now();
+        return { success: true, task, workspace, session };
+    }
+
+    _advanceAiSubTask(session) {
+        const runningIdx = (session.subTasks || []).findIndex((item) => item.status === 'running');
+        if (runningIdx === -1) {
+            return null;
+        }
+        session.subTasks[runningIdx] = {
+            ...session.subTasks[runningIdx],
+            status: 'done',
+            updatedAt: Date.now()
+        };
+        const next = session.subTasks[runningIdx + 1];
+        if (next && next.status === 'pending') {
+            session.subTasks[runningIdx + 1] = {
+                ...next,
+                status: 'running',
+                updatedAt: Date.now()
+            };
+        }
+        return session.subTasks[runningIdx].key;
+    }
+
+    _formatAiSessionList(workspace) {
+        return (workspace?.order || [])
+            .map((id) => workspace.sessions[id])
+            .filter(Boolean)
+            .map((session) => ({
+                sessionId: session.sessionId,
+                name: session.name || 'Session',
+                updatedAt: session.updatedAt || session.createdAt || Date.now()
+            }));
+    }
+
+    async _ensureAiTaskRunning(task, sessionId) {
+        const runtimeTaskName = this._getAiRuntimeTaskName(task.taskName, sessionId);
+        if (this.isRunning[runtimeTaskName]) {
+            return { success: true, runtimeTaskName };
+        }
+        await this.execTask(task.taskName, { mode: 'ai', sessionId });
+        return { success: true, runtimeTaskName };
+    }
+
+    async listAiSessions(taskName) {
+        const ensured = await this._ensureAiSession(taskName);
+        if (!ensured.success) {
+            return ensured;
+        }
+        const { workspace } = ensured;
+        return {
+            success: true,
+            code: 0,
+            data: {
+                taskName,
+                activeSessionId: workspace.activeSessionId,
+                sessions: this._formatAiSessionList(workspace)
+            }
+        };
+    }
+
+    async createAiSession(taskName, name = '') {
+        const ensured = await this._ensureAiSession(taskName);
+        if (!ensured.success) {
+            return ensured;
+        }
+        const { workspace, task } = ensured;
+        const session = this._createAiSessionRecord(taskName, name);
+        workspace.sessions[session.sessionId] = session;
+        workspace.order.push(session.sessionId);
+        workspace.activeSessionId = session.sessionId;
+        workspace.updatedAt = Date.now();
+        await this._ensureAiTaskRunning(task, session.sessionId);
+        return {
+            success: true,
+            code: 0,
+            data: {
+                taskName,
+                activeSessionId: workspace.activeSessionId,
+                sessions: this._formatAiSessionList(workspace),
+                current: this._formatAiSessionPayload(session, task)
+            }
+        };
+    }
+
+    async deleteAiSession(taskName, sessionId) {
+        const ensured = await this._ensureAiSession(taskName);
+        if (!ensured.success) {
+            return ensured;
+        }
+        const { workspace } = ensured;
+        const targetId = String(sessionId || '').trim();
+        if (!targetId || !workspace.sessions[targetId]) {
+            return { success: false, code: 1020, message: 'AI session not found' };
+        }
+        const runtimeTaskName = this._getAiRuntimeTaskName(taskName, targetId);
+        if (this.webSocketService.getTaskSocket(runtimeTaskName)) {
+            this.webSocketService.sendToTask(runtimeTaskName, JSON.stringify({ type: 'terminate_process' }));
+        }
+        delete workspace.sessions[targetId];
+        workspace.order = (workspace.order || []).filter((id) => id !== targetId);
+        if (!workspace.order.length) {
+            const fallback = this._createAiSessionRecord(taskName);
+            workspace.sessions[fallback.sessionId] = fallback;
+            workspace.order.push(fallback.sessionId);
+            workspace.activeSessionId = fallback.sessionId;
+        } else if (workspace.activeSessionId === targetId) {
+            workspace.activeSessionId = workspace.order[0];
+        }
+        workspace.updatedAt = Date.now();
+        return {
+            success: true,
+            code: 0,
+            data: {
+                taskName,
+                activeSessionId: workspace.activeSessionId,
+                sessions: this._formatAiSessionList(workspace)
+            }
+        };
+    }
+
+    async getAiSession(taskName, sessionId = null) {
+        const ensured = await this._ensureAiSession(taskName, sessionId);
+        if (!ensured.success) {
+            return ensured;
+        }
+        const { session, task, workspace } = ensured;
+        workspace.activeSessionId = session.sessionId;
+        session.updatedAt = Date.now();
+        await this._ensureAiTaskRunning(task, session.sessionId);
+        return { success: true, code: 0, data: this._formatAiSessionPayload(session, task) };
+    }
+
+    async sendAiMessage(taskName, message = '', sessionId = null) {
+        const ensured = await this._ensureAiSession(taskName, sessionId);
+        if (!ensured.success) {
+            return ensured;
+        }
+        const { session, task } = ensured;
+        const cleanMessage = String(message || '').trim();
+        if (!cleanMessage) {
+            return { success: false, code: 1015, message: 'Message is required' };
+        }
+
+        this._appendAiMessage(session, 'user', cleanMessage);
+        const aiApiKey = resolveAiApiKey(task?.config || {});
+        const apiKeyConfigured = Boolean(String(aiApiKey || '').trim());
+        if (!apiKeyConfigured) {
+            this._appendAiMessage(session, 'assistant', 'Please configure API Key in task config before proceeding.');
+            session.updatedAt = Date.now();
+            return { success: true, code: 0, data: this._formatAiSessionPayload(session, task) };
+        }
+        const runtimeTaskName = this._getAiRuntimeTaskName(taskName, session.sessionId);
+        if (!this.webSocketService.getTaskSocket(runtimeTaskName)) {
+            this._appendAiMessage(session, 'assistant', 'AI task process is not running. Please reopen AI workspace.');
+            session.updatedAt = Date.now();
+            return { success: false, code: 1019, message: 'AI task process is not running', data: this._formatAiSessionPayload(session, task) };
+        }
+        this.webSocketService.sendToTask(runtimeTaskName, JSON.stringify({
+            type: 'ai_user_input',
+            data: {
+                message: cleanMessage
+            }
+        }));
+        session.updatedAt = Date.now();
+        return { success: true, code: 0, data: this._formatAiSessionPayload(session, task) };
+    }
+
+    async sendAiOption(taskName, optionId = '', optionLabel = '', sessionId = null) {
+        const ensured = await this._ensureAiSession(taskName, sessionId);
+        if (!ensured.success) {
+            return ensured;
+        }
+        const { session, task } = ensured;
+        const cleanOptionId = String(optionId || '').trim();
+        if (!cleanOptionId) {
+            return { success: false, code: 1018, message: 'Option id is required' };
+        }
+        const runtimeTaskName = this._getAiRuntimeTaskName(taskName, session.sessionId);
+        if (!this.webSocketService.getTaskSocket(runtimeTaskName)) {
+            this._appendAiMessage(session, 'assistant', 'AI task process is not running. Please reopen AI workspace.');
+            session.updatedAt = Date.now();
+            return { success: false, code: 1019, message: 'AI task process is not running', data: this._formatAiSessionPayload(session, task) };
+        }
+        const cleanOptionLabel = String(optionLabel || '').trim();
+        const userChoiceText = cleanOptionLabel || cleanOptionId;
+        this._appendAiMessage(session, 'user', `[option] ${userChoiceText}`);
+        this.webSocketService.sendToTask(runtimeTaskName, JSON.stringify({
+            type: 'ai_user_input',
+            data: {
+                selectedOption: cleanOptionId,
+                selectedOptionLabel: cleanOptionLabel || cleanOptionId
+            }
+        }));
+        session.updatedAt = Date.now();
+        return { success: true, code: 0, data: this._formatAiSessionPayload(session, task) };
+    }
+
+    async updateAiSubTask(taskName, subTaskKey, status, sessionId = null) {
+        const ensured = await this._ensureAiSession(taskName, sessionId);
+        if (!ensured.success) {
+            return ensured;
+        }
+        if (!AI_SUB_TASK_STATUSES.includes(status)) {
+            return { success: false, code: 1016, message: 'Invalid AI sub task status' };
+        }
+        const { session, task } = ensured;
+        const idx = (session.subTasks || []).findIndex((item) => item.key === subTaskKey);
+        if (idx === -1) {
+            return { success: false, code: 1017, message: 'AI sub task not found' };
+        }
+        session.subTasks[idx] = {
+            ...session.subTasks[idx],
+            status,
+            updatedAt: Date.now()
+        };
+        session.updatedAt = Date.now();
+        return { success: true, code: 0, data: this._formatAiSessionPayload(session, task) };
+    }
+
     async checkWebSocket() {
         return this.webSocketService.checkWebSocket();
+    }
+
+    async sendAgentCommand(taskName, message) {
+        const task = await this.getTaskByName(taskName);
+        if (!task) {
+            return { success: false, code: 1002, message: 'Task does not exist' };
+        }
+        if (!isAiTaskDefinition(task)) {
+            return { success: false, code: 1014, message: 'Task is not an AI task' };
+        }
+        const socket = this.webSocketService.getTaskSocket(taskName);
+        if (!socket) {
+            return { success: false, code: 1019, message: 'AI task process is not running' };
+        }
+        this.webSocketService.sendToTask(taskName, message);
+        return { success: true, code: 0 };
     }
 }
 module.exports = TaskService;

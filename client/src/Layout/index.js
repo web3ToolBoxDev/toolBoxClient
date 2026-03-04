@@ -1,5 +1,5 @@
 import React, { useState,useEffect } from 'react';
-import { Container, Row, Col, Navbar, Nav, Image, Button, Offcanvas } from 'react-bootstrap';
+import { Container, Row, Navbar, Nav, Image, Button, Offcanvas } from 'react-bootstrap';
 import './index.scss';
 import TaskOffcanvas from '../components/taskOffcanvas';
 import { useTranslation } from 'react-i18next';
@@ -8,11 +8,11 @@ import { eventEmitter } from '../utils/eventEmitter';
 
 
 const menuItems = [
-  { name: 'introduction', link: '#/' },
-  { name: 'chromeManage', link: '#/chromeManager' },
-  { name: 'walletManage', link: '#/walletManage' },
-  { name: 'syncFunction', link: '#/syncFunction' },
-  { name: 'taskManage', link: '#/taskManage' }
+  { name: 'introduction', link: '#/', icon: '📘' },
+  { name: 'chromeManage', link: '#/chromeManager', icon: '🌐' },
+  { name: 'walletManage', link: '#/walletManage', icon: '👛' },
+  { name: 'syncFunction', link: '#/syncFunction', icon: '🔄' },
+  { name: 'taskManage', link: '#/taskManage', icon: '✅' }
 ];
 const langOptions = [
   { code: 'zh-CN', label: '中文' },
@@ -24,6 +24,16 @@ const langOptions = [
 const Layout = ({ Child }) => {
   const [showTasksOffcanvas, setShowTasksOffcanvas] = useState(false);
   const [showLangOffcanvas, setShowLangOffcanvas] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    return window.localStorage.getItem('layout.sidebarCollapsed') === '1';
+  });
+  const [isCompactWindow, setIsCompactWindow] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth <= 900;
+  });
   const { t, i18n } = useTranslation();
 
   const handleLangSelect = (lang) => {
@@ -48,19 +58,32 @@ const Layout = ({ Child }) => {
     };
   }, [fetchFingerPrints]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.setItem('layout.sidebarCollapsed', isSidebarCollapsed ? '1' : '0');
+  }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+    const onResize = () => setIsCompactWindow(window.innerWidth <= 900);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const isSidebarEffectivelyCollapsed = isCompactWindow || isSidebarCollapsed;
+  const sidebarWidth = isCompactWindow ? 84 : (isSidebarCollapsed ? 84 : 300);
+
   return (
     <Container fluid className="p-0" style={{ height: '100vh' }}>
       <Row className="g-0" style={{ height: '100%' }}>
         {/* Sidebar */}
-        <Col
-          md={3}
-          className="sidebar d-flex flex-column"
-          style={{
-            backgroundColor: '#201D32',
-            borderRight: '1px solid #dee2e6',
-            position: 'fixed',
-            height: '100vh'
-          }}
+        <aside
+          className={`sidebar d-flex flex-column ${isSidebarEffectivelyCollapsed ? 'collapsed' : ''}`}
+          style={{ width: `${sidebarWidth}px` }}
         >
           <Navbar expand="md" className="flex-md-column">
             <Navbar.Brand className="navbar-brand-my">
@@ -69,33 +92,47 @@ const Layout = ({ Child }) => {
                 height="50"
                 className="d-inline-block align-top"
               />
-              Web3ToolBox
+              {!isSidebarEffectivelyCollapsed ? 'Web3ToolBox' : null}
             </Navbar.Brand>
+            {!isCompactWindow ? (
+              <Button
+                className="sidebar-toggle-btn"
+                variant="outline-light"
+                size="sm"
+                onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+                title={isSidebarCollapsed ? 'Expand Navigation' : 'Collapse Navigation'}
+                aria-label={isSidebarCollapsed ? 'Expand Navigation' : 'Collapse Navigation'}
+              >
+                {isSidebarCollapsed ? '>' : '<'}
+              </Button>
+            ) : null}
             <Navbar.Toggle aria-controls="sidebar-menu" />
             <Navbar.Collapse id="sidebar-menu">
               <Nav className="flex-md-column">
                 {menuItems.map((item, idx) => (
-                  <Nav.Link key={idx} href={item.link} className="nav-link-my">
-                    {t(item.name)}
+                  <Nav.Link key={idx} href={item.link} className="nav-link-my" title={t(item.name)}>
+                    <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+                    {!isSidebarEffectivelyCollapsed ? <span className="nav-label">{t(item.name)}</span> : null}
                   </Nav.Link>
                 ))}
               </Nav>
             </Navbar.Collapse>
           </Navbar>
           <div className="mt-auto mb-3 text-center w-100">
-            <Button className="mb-2 btn-change-lang" onClick={() => setShowLangOffcanvas(true)}>
-              {t('changeLang')}
+            <Button className="mb-2 btn-change-lang" onClick={() => setShowLangOffcanvas(true)} title={t('changeLang')}>
+              {isSidebarEffectivelyCollapsed ? <span className="btn-icon">🌍</span> : t('changeLang')}
             </Button>
             <Button
               variant="primary"
               className="btn-task-info"
               data-testid="task-info-button"
               onClick={() => setShowTasksOffcanvas(true)}
+              title={t('taskInfo')}
             >
-              {t('taskInfo')}
+              {isSidebarEffectivelyCollapsed ? <span className="btn-icon">📋</span> : t('taskInfo')}
             </Button>
           </div>
-        </Col>
+        </aside>
 
         {/* Language Offcanvas */}
         <Offcanvas
@@ -122,17 +159,16 @@ const Layout = ({ Child }) => {
         </Offcanvas>
 
         {/* Content */}
-        <Col
-          md={{ span: 9, offset: 3 }}
-          className="content p-0"
-          style={{ overflow: 'auto', height: '100vh' }}
+        <main
+          className={`content p-0 ${isSidebarEffectivelyCollapsed ? 'collapsed' : ''}`}
+          style={{ marginLeft: `${sidebarWidth}px`, width: `calc(100% - ${sidebarWidth}px)` }}
         >
           <Child />
           <TaskOffcanvas
             show={showTasksOffcanvas}
             handleClose={() => setShowTasksOffcanvas(false)}
           />
-        </Col>
+        </main>
       </Row>
     </Container>
   );

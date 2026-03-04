@@ -1,6 +1,10 @@
 [
     {
         "taskName": "测试任务",
+        "taskI18n": {
+            "zh-CN": "测试任务",
+            "en": "Sample Task"
+        },
         "scriptPath": "./example.js",
         "taskKey": "testTask",
         "defaultTask": false,
@@ -27,6 +31,50 @@
                     }
                 ],
                 "defaultValue": "test2"
+            }
+        }
+    },
+    {
+        "taskName": "求职AI助手",
+        "taskI18n": {
+            "zh-CN": "求职AI助手",
+            "en": "Job Search AI Assistant"
+        },
+        "scriptPath": "./ai_example.js",
+        "taskKey": "jobAgentTask",
+        "defaultTask": false,
+        "taskType": "ai",
+        "aiEnabled": true,
+        "aiSessionTemplate": "job-search-v1",
+        "taskSchema": {
+            "apiKey": {
+                "type": "input",
+                "inputType": "password",
+                "text": "OpenAI API Key"
+            },
+            "model": {
+                "type": "select",
+                "text": "Model",
+                "defaultValue": "gpt-4o-mini",
+                "options": [
+                    {
+                        "value": "gpt-4o-mini",
+                        "text": "gpt-4o-mini"
+                    },
+                    {
+                        "value": "gpt-4.1-mini",
+                        "text": "gpt-4.1-mini"
+                    },
+                    {
+                        "value": "gpt-4.1",
+                        "text": "gpt-4.1"
+                    }
+                ]
+            },
+            "jobTracks": {
+                "type": "array",
+                "text": "求职方向列表",
+                "defaultValue": []
             }
         }
     }

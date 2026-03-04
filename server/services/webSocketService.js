@@ -11,6 +11,8 @@ class WebSocketService {
             this.frontMessageBuffer = [];
             this.frontMessageBufferLimit = 200;
             this.frontRouteRegistered = false;
+            this.pendingTaskMessages = {};
+            this.pendingTaskMessageLimit = 100;
         }
         return WebSocketService.instance;
     }
@@ -119,6 +121,20 @@ class WebSocketService {
                             }));
                         }
                     }
+                    return;
+                }
+
+                if (String(message.type || '').startsWith('agent_')) {
+                    const targetTaskName = message.taskName;
+                    if (!targetTaskName) {
+                        return;
+                    }
+                    const target = this.getTaskSocket(targetTaskName);
+                    if (!target) {
+                        this.enqueueTaskMessage(targetTaskName, message);
+                        return;
+                    }
+                    target.send(JSON.stringify(message));
                 }
             });
             ws.on('error', (error) => {
@@ -227,6 +243,7 @@ class WebSocketService {
             // Store socket by both numeric key and taskName for targeted operations
             this.wsTaskServer[this.taskKey[taskName]] = ws;
             this.wsTaskServer[taskName] = ws;
+            this.flushTaskMessageQueue(taskName);
         });
         return 'ws://localhost:30001' + taskUrl
     }
@@ -247,7 +264,7 @@ class WebSocketService {
     sendToTask(taskName, message, code = 0) {
         const socket = this.getTaskSocket(taskName);
         if (!socket) {
-            console.log('Task socket not initialized:', taskName);
+            this.enqueueTaskMessage(taskName, message);
             return;
         }
         let msgObj;
@@ -258,6 +275,38 @@ class WebSocketService {
         }
         if (msgObj.code === undefined) msgObj.code = code;
         socket.send(JSON.stringify(msgObj));
+    }
+
+    enqueueTaskMessage(taskName, message) {
+        if (!taskName) return;
+        if (!this.pendingTaskMessages[taskName]) {
+            this.pendingTaskMessages[taskName] = [];
+        }
+        this.pendingTaskMessages[taskName].push(message);
+        if (this.pendingTaskMessages[taskName].length > this.pendingTaskMessageLimit) {
+            this.pendingTaskMessages[taskName].splice(
+                0,
+                this.pendingTaskMessages[taskName].length - this.pendingTaskMessageLimit
+            );
+        }
+    }
+
+    flushTaskMessageQueue(taskName) {
+        const socket = this.getTaskSocket(taskName);
+        const queue = this.pendingTaskMessages[taskName];
+        if (!socket || !Array.isArray(queue) || queue.length === 0) {
+            return;
+        }
+        const pending = queue.slice();
+        this.pendingTaskMessages[taskName] = [];
+        pending.forEach((message) => {
+            try {
+                const payload = typeof message === 'string' ? message : JSON.stringify(message);
+                socket.send(payload);
+            } catch (error) {
+                this.enqueueTaskMessage(taskName, message);
+            }
+        });
     }
 
     shortTaskName(taskName = '') {

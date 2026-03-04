@@ -1,16 +1,23 @@
 @import '../../index.scss';
 
 .wallet-manager-page {
+  min-height: 100vh;
+  padding: 0.75rem clamp(0.75rem, 2vw, 2rem) 1rem;
+  display: flex;
+  flex-direction: column;
+
   h1 {
     font-size: 1.2rem;
     font-weight: 600;
     text-align: center;
-    margin-top: 1rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.8rem;
     color: $clr-page-text;
   }
   .control-panel {
-    max-width: 600px;
-    margin: 0 auto 1.5rem auto;
+    max-width: $page-card-max-width;
+    width: 100%;
+    margin: 0 auto 0.8rem auto;
     background: #fff;
     border: 1px solid $clr-sidebar-border;
     border-radius: 8px;
@@ -71,12 +78,18 @@
     }
   }
   .wallet-list-card {
-    max-width: 600px;
-    margin: 0 auto 1rem auto;
+    max-width: $page-card-max-width;
+    width: 100%;
+    margin: 0 auto;
     background: #fff;
     border: 1px solid $clr-sidebar-border;
     border-radius: 8px;
     box-shadow: 0 2px 8px 0 rgba(0,0,0,0.03);
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+
     .card-header {
       font-size: 1.05rem;
       font-weight: 600;
@@ -101,7 +114,8 @@
       }
     }
     .wallet-list-scroll {
-      max-height: 230px;
+      flex: 1;
+      min-height: clamp(220px, 40vh, 520px);
       overflow-y: auto;
       padding: 1rem 1rem 0.5rem 1rem;
       scrollbar-width: thin;
@@ -139,6 +153,15 @@
         margin-right: 0.12rem;
         &:last-child { margin-right: 0; }
       }
+    }
+  }
+}
+
+@media (max-width: 900px) {
+  .wallet-manager-page {
+    padding: 0.65rem 0.65rem 0.8rem;
+    .control-panel, .wallet-list-card {
+      max-width: 100%;
     }
   }
 }

@@ -1,6 +1,11 @@
 @import '../../index.scss';
 
 .introduction-page {
+	min-height: 100vh;
+	padding: 0.75rem clamp(0.75rem, 2vw, 2rem) 1rem;
+	display: flex;
+	flex-direction: column;
+
 	h1 {
 		font-size: 1.2rem;
 		font-weight: 600;
@@ -11,7 +16,8 @@
 	}
 
 	.intro-card {
-		max-width: 720px;
+		max-width: $page-card-max-width;
+		width: 100%;
 		margin: 0 auto 1rem auto;
 		background: #fff;
 		border: 1px solid $clr-sidebar-border;
@@ -22,6 +28,7 @@
 			padding: 1rem 1.1rem;
 
 			p {
+				max-width: 65ch;
 				margin: 0 0 0.9rem 0;
 				color: $clr-page-text;
 				line-height: 1.6;
@@ -46,6 +53,15 @@
 					&:hover { background: $clr-btn-primary-hover; }
 				}
 			}
+		}
+	}
+}
+
+@media (max-width: 900px) {
+	.introduction-page {
+		padding: 0.65rem 0.65rem 0.8rem;
+		.intro-card {
+			max-width: 100%;
 		}
 	}
 }

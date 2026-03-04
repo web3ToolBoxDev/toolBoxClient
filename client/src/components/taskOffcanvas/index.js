@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import Offcanvas from 'react-bootstrap/Offcanvas';
-import { Button, Row, Col } from 'react-bootstrap';
+import { Button } from 'react-bootstrap';
+import { useNavigate } from 'react-router-dom';
 import WebSocketManager from '../../utils/webSocket';
 import APIManager from '../../utils/api';
 import { eventEmitter } from '../../utils/eventEmitter';
+import { resolveTaskDisplayName } from '../../utils/taskI18n';
+import TaskOffcanvasShell from './TaskOffcanvasShell';
 import './index.scss';
 import { useTranslation } from 'react-i18next';
 
@@ -68,6 +70,23 @@ const resolveTaskId = (taskId, tasksSnapshot = {}) => {
     return fallback || normalized;
 };
 
+const extractTaskNameFromTaskId = (taskId, knownTaskNames = []) => {
+    const normalized = normalizeTaskId(taskId);
+    if (!normalized || normalized === GENERAL_TASK_ID) {
+        return '';
+    }
+    const bestMatch = knownTaskNames
+        .filter((taskName) => normalized === taskName || normalized.endsWith(`_${taskName}`))
+        .sort((a, b) => b.length - a.length)[0];
+    if (bestMatch) {
+        return bestMatch;
+    }
+    const splitIndex = normalized.lastIndexOf('_');
+    if (splitIndex === -1) {
+        return normalized;
+    }
+    return normalized.slice(splitIndex + 1);
+};
 
 const extractTaskFromMessage = (message = '') => {
     const match = /Task:([^\s]+)\s?([\s\S]*)/i.exec(message);
@@ -121,11 +140,10 @@ const sanitizeStoredTasks = (stored) => {
                 return createLogEntry(text, text);
             })
             : [];
-        const normalizedStatus = TASK_STATUS.COMPLETED;
         acc[safeId] = {
             id: safeId,
             logs,
-            status: normalizedStatus,
+            status: TASK_STATUS.COMPLETED,
             displayName: payload.displayName || getDefaultDisplayName(safeId),
             canTarget: Boolean(payload.canTarget && safeId !== GENERAL_TASK_ID),
             createdAt,
@@ -135,7 +153,6 @@ const sanitizeStoredTasks = (stored) => {
     }, {});
 };
 
-// Shared WebSocket manager to avoid duplicate connections (StrictMode/rehydrate)
 const sharedWsManager = WebSocketManager.getInstance();
 let sharedConnectPromise = null;
 const ensureSharedConnection = async (messageCallback, closeCallback) => {
@@ -154,11 +171,13 @@ const ensureSharedConnection = async (messageCallback, closeCallback) => {
 function TaskOffcanvas({ show, handleClose }) {
     const [tasks, setTasks] = useState({});
     const [activeTaskId, setActiveTaskId] = useState(null);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [taskDefinitions, setTaskDefinitions] = useState({});
     const wsManagerRef = useRef(sharedWsManager);
     const wsInitRef = useRef(false);
     const apiRef = useRef(APIManager.getInstance());
-    const { t } = useTranslation();
-    const tasksRef = useRef(tasks);
+    const navigate = useNavigate();
+    const { t, i18n } = useTranslation();
 
     const taskStartListener = useRef();
     const clientTaskMessageListener = useRef();
@@ -169,7 +188,7 @@ function TaskOffcanvas({ show, handleClose }) {
             const next = { ...prev };
             const existing = next[resolvedTaskId];
             const createdAt = existing?.createdAt || logEntry.timestamp;
-            const status = meta.status || meta.initialStatus || existing?.status || TASK_STATUS.COMPLETED;
+            const status = meta.status || existing?.status || TASK_STATUS.COMPLETED;
             const displayName = meta.displayName || existing?.displayName || getDefaultDisplayName(resolvedTaskId);
             const canTarget = meta.canTarget ?? existing?.canTarget ?? false;
             const logs = [...(existing?.logs || []), logEntry];
@@ -225,32 +244,23 @@ function TaskOffcanvas({ show, handleClose }) {
         if (!wsManager) {
             return;
         }
-
         const runningTasks = Object.values(tasks).filter(
             (task) => task.id !== GENERAL_TASK_ID && task.status === TASK_STATUS.RUNNING
         );
-
         if (!runningTasks.length) {
             return;
         }
-
         const runningStatus = await fetchTaskRunningStatus(runningTasks.map((task) => task.id));
         const confirmedRunning = runningStatus
             ? runningTasks.filter((task) => Boolean(runningStatus[task.id]))
             : runningTasks;
-
         if (!confirmedRunning.length) {
             return;
         }
-
         const targetableTasks = confirmedRunning.filter((task) => task.canTarget !== false);
-
         targetableTasks.forEach((task) => {
-            wsManager.sendMessage(
-                JSON.stringify({ type: 'terminate_process', taskName: task.id })
-            );
+            wsManager.sendMessage(JSON.stringify({ type: 'terminate_process', taskName: task.id }));
         });
-
         if (targetableTasks.length < confirmedRunning.length) {
             wsManager.sendMessage(JSON.stringify({ type: 'terminate_process' }));
         }
@@ -304,12 +314,8 @@ function TaskOffcanvas({ show, handleClose }) {
         const parsed = extractTaskFromMessage(info.message || '');
         const taskIdFromEvent = normalizeTaskId(info.taskName);
         const resolvedTaskId = mapTaskIdForDisplay(taskIdFromEvent || parsed.taskId) || GENERAL_TASK_ID;
-        const displayName = resolvedTaskId === GENERAL_TASK_ID
-            ? DEFAULT_SYSTEM_LABEL
-            : shortTaskName(resolvedTaskId);
+        const displayName = resolvedTaskId === GENERAL_TASK_ID ? DEFAULT_SYSTEM_LABEL : shortTaskName(resolvedTaskId);
         const canTarget = resolvedTaskId !== GENERAL_TASK_ID;
-        const targetTaskId = resolvedTaskId;
-
         const logEntry = createLogEntry(
             parsed.text || info.message,
             info.message || parsed.text,
@@ -317,7 +323,7 @@ function TaskOffcanvas({ show, handleClose }) {
             Date.now(),
             info.time
         );
-        appendLogEntry(targetTaskId, logEntry, { displayName, canTarget });
+        appendLogEntry(resolvedTaskId, logEntry, { displayName, canTarget });
     }, [appendLogEntry]);
 
     const appendGeneralLog = useCallback((message) => {
@@ -330,7 +336,6 @@ function TaskOffcanvas({ show, handleClose }) {
         const taskData = payload.taskData || {};
         const envIds = Array.isArray(taskData.envIds) ? taskData.envIds : [];
         const walletIds = Array.isArray(taskData.walletIds) ? taskData.walletIds : [];
-
         const now = Date.now();
         const seedOne = (taskId) => {
             if (!taskId) return;
@@ -338,56 +343,43 @@ function TaskOffcanvas({ show, handleClose }) {
             const logEntry = createLogEntry('started (client)', 'started (client)', 'info', now);
             appendLogEntry(taskId, logEntry, { displayName, canTarget: true, status: TASK_STATUS.RUNNING, focus: true });
         };
-
         if (taskName === 'syncFunction') {
             seedOne('syncFunction');
             return;
         }
-
         if (envIds.length && taskName) {
             envIds.forEach((envId) => seedOne(`${envId}_${taskName}`));
             return;
         }
-
         if (walletIds.length && taskName) {
             walletIds.forEach((walletId) => seedOne(`${walletId}_${taskName}`));
             return;
         }
-
         if (taskName) {
             seedOne(taskName);
         }
     }, [appendLogEntry]);
 
-    const processIncomingMessages = useCallback(() => {
-        const wsManager = wsManagerRef.current;
-        if (!wsManager) {
+    const processIncomingMessages = useCallback((info) => {
+        if (!info) return;
+        if (info.type === 'task_started') {
+            const taskId = mapTaskIdForDisplay(normalizeTaskId(info.taskName));
+            if (taskId) {
+                const displayName = shortTaskName(taskId);
+                const logEntry = createLogEntry('started', 'started', 'info', Date.now(), info.time);
+                appendLogEntry(taskId, logEntry, { displayName, canTarget: true, status: TASK_STATUS.RUNNING, focus: true });
+            }
             return;
         }
-        while (wsManager.getQueueLength() > 0) {
-            const info = wsManager.popFromQueue();
-            if (!info) {
-                continue;
-            }
-            if (info.type === 'task_started') {
-                const taskId = mapTaskIdForDisplay(normalizeTaskId(info.taskName));
-                if (taskId) {
-                    const displayName = shortTaskName(taskId);
-                    const logEntry = createLogEntry('started', 'started', 'info', Date.now(), info.time);
-                    appendLogEntry(taskId, logEntry, { displayName, canTarget: true, status: TASK_STATUS.RUNNING, focus: true });
-                }
-                continue;
-            }
-            if (info.type === 'task_completed') {
-                handleTaskCompleted(info);
-                eventEmitter.emit('taskCompleted', info);
-                continue;
-            }
-            if (info.message) {
-                appendServerLog(info);
-            }
+        if (info.type === 'task_completed') {
+            handleTaskCompleted(info);
+            eventEmitter.emit('taskCompleted', info);
+            return;
         }
-    }, [appendServerLog, handleTaskCompleted]);
+        if (info.message) {
+            appendServerLog(info);
+        }
+    }, [appendLogEntry, appendServerLog, handleTaskCompleted]);
 
     const closeCallback = useCallback((event) => {
         console.log('WebSocket connection closed:', event);
@@ -395,14 +387,8 @@ function TaskOffcanvas({ show, handleClose }) {
 
     const terminateTask = async () => {
         const activeTask = activeTaskId ? tasks[activeTaskId] : null;
-        if (!activeTask || activeTask.status !== TASK_STATUS.RUNNING) {
-            return; // only terminate the currently selected running task
-        }
-        if (activeTask.id === GENERAL_TASK_ID) {
-            return; // don't terminate system/general
-        }
-        if (!activeTask.canTarget) {
-            return; // task cannot be targeted directly
+        if (!activeTask || activeTask.status !== TASK_STATUS.RUNNING || activeTask.id === GENERAL_TASK_ID || !activeTask.canTarget) {
+            return;
         }
         const runningStatus = await fetchTaskRunningStatus([activeTask.id]);
         if (runningStatus && !runningStatus[activeTask.id]) {
@@ -411,22 +397,20 @@ function TaskOffcanvas({ show, handleClose }) {
                 displayName: activeTask.displayName,
                 canTarget: activeTask.canTarget
             });
-            appendLogEntry(activeTask.id, createLogEntry('already stopped (server)', 'already stopped (server)', 'info', now), {
-                displayName: activeTask.displayName,
-                canTarget: activeTask.canTarget,
-                status: TASK_STATUS.COMPLETED
-            });
+            appendLogEntry(
+                activeTask.id,
+                createLogEntry('already stopped (server)', 'already stopped (server)', 'info', now),
+                { displayName: activeTask.displayName, canTarget: activeTask.canTarget, status: TASK_STATUS.COMPLETED }
+            );
             return;
         }
-        const payload = { type: 'terminate_process', taskName: activeTask.id };
-        wsManagerRef.current.sendMessage(JSON.stringify(payload));
+        wsManagerRef.current.sendMessage(JSON.stringify({ type: 'terminate_process', taskName: activeTask.id }));
         const now = Date.now();
-        const logEntry = createLogEntry('terminated (client)', 'terminated (client)', 'info', now);
-        appendLogEntry(activeTask.id, logEntry, {
-            displayName: activeTask.displayName,
-            canTarget: activeTask.canTarget,
-            status: TASK_STATUS.COMPLETED
-        });
+        appendLogEntry(
+            activeTask.id,
+            createLogEntry('terminated (client)', 'terminated (client)', 'info', now),
+            { displayName: activeTask.displayName, canTarget: activeTask.canTarget, status: TASK_STATUS.COMPLETED }
+        );
     };
 
     const handleDeleteActiveTask = () => {
@@ -437,15 +421,44 @@ function TaskOffcanvas({ show, handleClose }) {
     };
 
     useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
+        const loadTaskDefinitions = async () => {
+            try {
+                const [defaultTasks, customTasks] = await Promise.all([
+                    apiRef.current.getAllTasks(true),
+                    apiRef.current.getAllTasks(false)
+                ]);
+                const merged = [
+                    ...(Array.isArray(defaultTasks) ? defaultTasks : []),
+                    ...(Array.isArray(customTasks) ? customTasks : [])
+                ];
+                const map = merged.reduce((acc, item) => {
+                    if (item?.taskName) acc[item.taskName] = item;
+                    return acc;
+                }, {});
+                setTaskDefinitions(map);
+            } catch (error) {
+                console.error('Failed to load task definitions:', error);
+            }
+        };
+        loadTaskDefinitions();
+        const refreshListener = () => loadTaskDefinitions();
+        eventEmitter.on('tasksRefreshed', refreshListener);
+
+        return () => {
+            if (typeof eventEmitter.off === 'function') {
+                eventEmitter.off('tasksRefreshed', refreshListener);
+            } else if (typeof eventEmitter.removeListener === 'function') {
+                eventEmitter.removeListener('tasksRefreshed', refreshListener);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
         const stored = window.localStorage.getItem(STORAGE_KEY);
         if (stored) {
             try {
-                const parsed = JSON.parse(stored);
-                const sanitized = sanitizeStoredTasks(parsed);
-                setTasks(sanitized);
+                setTasks(sanitizeStoredTasks(JSON.parse(stored)));
                 return;
             } catch (error) {
                 console.error('Failed to parse stored task logs:', error);
@@ -478,9 +491,7 @@ function TaskOffcanvas({ show, handleClose }) {
     }, []);
 
     useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
+        if (typeof window === 'undefined') return;
         if (Object.keys(tasks).length) {
             window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
         } else {
@@ -489,21 +500,16 @@ function TaskOffcanvas({ show, handleClose }) {
     }, [tasks]);
 
     useEffect(() => {
-        const wsManager = wsManagerRef.current;
-        if (wsInitRef.current) {
-            return;
-        }
-        wsInitRef.current = true;
-
         const connectWebSocket = async () => {
             const connected = await ensureSharedConnection(processIncomingMessages, closeCallback);
             if (!connected) {
                 console.warn('WebSocket connection failed');
             }
         };
-
-        connectWebSocket();
-
+        if (!wsInitRef.current) {
+            wsInitRef.current = true;
+            connectWebSocket();
+        }
         taskStartListener.current = (payload) => {
             connectWebSocket();
             seedTaskStart(payload);
@@ -511,16 +517,13 @@ function TaskOffcanvas({ show, handleClose }) {
         clientTaskMessageListener.current = (message) => {
             appendGeneralLog(message);
         };
-
         eventEmitter.on('taskStart', taskStartListener.current);
         eventEmitter.on('clientTaskMessage', clientTaskMessageListener.current);
-
         return () => {
-            // Do not close shared websocket on unmount; just remove listeners
             eventEmitter.off('taskStart', taskStartListener.current);
             eventEmitter.off('clientTaskMessage', clientTaskMessageListener.current);
         };
-    }, [appendGeneralLog, closeCallback, processIncomingMessages, seedTaskStart, t]);
+    }, [appendGeneralLog, closeCallback, processIncomingMessages, seedTaskStart]);
 
     const sortedTasks = useMemo(() => {
         return Object.values(tasks).sort((a, b) => {
@@ -540,9 +543,7 @@ function TaskOffcanvas({ show, handleClose }) {
 
     useEffect(() => {
         if (!sortedTasks.length) {
-            if (activeTaskId !== null) {
-                setActiveTaskId(null);
-            }
+            if (activeTaskId !== null) setActiveTaskId(null);
             return;
         }
         if (!activeTaskId) {
@@ -556,6 +557,17 @@ function TaskOffcanvas({ show, handleClose }) {
     }, [activeTaskId, sortedTasks]);
 
     const activeTask = activeTaskId ? tasks[activeTaskId] : null;
+    const knownTaskNames = useMemo(() => Object.keys(taskDefinitions), [taskDefinitions]);
+    const activeTaskName = useMemo(
+        () => extractTaskNameFromTaskId(activeTask?.id, knownTaskNames),
+        [activeTask?.id, knownTaskNames]
+    );
+    const isActiveAiTask = useMemo(() => {
+        if (!activeTaskName) return false;
+        const taskDef = taskDefinitions[activeTaskName];
+        if (!taskDef) return false;
+        return taskDef.taskType === 'ai' || taskDef.aiEnabled === true;
+    }, [activeTaskName, taskDefinitions]);
     const activeLogs = useMemo(() => {
         if (!activeTask || !Array.isArray(activeTask.logs)) {
             return [];
@@ -569,40 +581,75 @@ function TaskOffcanvas({ show, handleClose }) {
         activeTask.id !== GENERAL_TASK_ID &&
         activeTask.canTarget
     );
-    const hasRunningTasks = useMemo(() => (
-        Object.values(tasks).some((task) => task.status === TASK_STATUS.RUNNING && task.id !== GENERAL_TASK_ID)
-    ), [tasks]);
-    const hasAnyTasks = sortedTasks.length > 0;
-
-    const getTaskLabel = (task) => (
-        task.id === GENERAL_TASK_ID
-            ? t('taskLog.systemTab')
-            : task.displayName || shortTaskName(task.id) || task.id
+    const hasRunningTasks = useMemo(
+        () => Object.values(tasks).some((task) => task.status === TASK_STATUS.RUNNING && task.id !== GENERAL_TASK_ID),
+        [tasks]
     );
+    const getTaskLabel = (task) => {
+        if (task.id === GENERAL_TASK_ID) return t('taskLog.systemTab');
+        const baseTaskName = extractTaskNameFromTaskId(task.id, knownTaskNames);
+        const taskDef = baseTaskName ? taskDefinitions[baseTaskName] : null;
+        const localizedBaseName = taskDef
+            ? resolveTaskDisplayName(taskDef, { language: i18n?.resolvedLanguage || i18n?.language || 'en' })
+            : '';
+        if (!localizedBaseName) {
+            return task.displayName || shortTaskName(task.id) || task.id;
+        }
+        if (task.id === baseTaskName) {
+            return localizedBaseName;
+        }
+        const rawLabel = task.displayName || shortTaskName(task.id) || task.id;
+        return rawLabel.replace(baseTaskName, localizedBaseName);
+    };
+
+    useEffect(() => {
+        if (!show) {
+            setIsFullscreen(false);
+        }
+    }, [show]);
+
+    const handlePanelClose = () => {
+        setIsFullscreen(false);
+        handleClose(false);
+    };
+
+    const goToAiWorkspace = () => {
+        if (!isActiveAiTask || !activeTaskName) return;
+        const taskDef = taskDefinitions[activeTaskName];
+        const taskDisplayName = resolveTaskDisplayName(taskDef, {
+            language: i18n?.resolvedLanguage || i18n?.language || 'en'
+        });
+        navigate(`/agentWorkspace/${encodeURIComponent(activeTaskName)}`, {
+            state: {
+                taskDisplayName,
+                taskI18n: taskDef?.taskI18n || {},
+                taskKey: taskDef?.taskKey || ''
+            }
+        });
+    };
 
     return (
-        <Offcanvas
-            className="task-offcanvas"
-            data-testid="task-offcanvas"
+        <TaskOffcanvasShell
             show={show}
-            onHide={() => handleClose(false)}
-            placement="bottom"
-        >
-            <Offcanvas.Header closeButton>
-                <Offcanvas.Title>{t('taskLog')}</Offcanvas.Title>
-                <div className="header-actions">
+            onClose={handlePanelClose}
+            title={t('taskLog')}
+            canToggleFullscreen={false}
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={() => setIsFullscreen((prev) => !prev)}
+            isAiMode={false}
+            actions={(
+                <>
                     <Button
-                        className="btn-terminate"
-                        onClick={terminateTask}
-                        disabled={!canTerminateActive}
+                        className="btn-fullscreen"
+                        onClick={goToAiWorkspace}
+                        disabled={!isActiveAiTask}
                     >
+                        {t('taskManage.openAiWorkspace')}
+                    </Button>
+                    <Button className="btn-terminate" onClick={terminateTask} disabled={!canTerminateActive}>
                         {t('terminateTask')}
                     </Button>
-                    <Button
-                        className="btn-delete"
-                        onClick={handleDeleteActiveTask}
-                        disabled={!canDeleteActive}
-                    >
+                    <Button className="btn-delete" onClick={handleDeleteActiveTask} disabled={!canDeleteActive}>
                         {t('taskLog.deleteLogs')}
                     </Button>
                     <Button
@@ -612,54 +659,51 @@ function TaskOffcanvas({ show, handleClose }) {
                     >
                         {t('taskLog.clearAllLogs')}
                     </Button>
+                </>
+            )}
+        >
+            <div className="task-layout">
+                <div className="task-list-panel">
+                    <div className="task-list">
+                        {sortedTasks.length ? (
+                            sortedTasks.map((task) => (
+                                <Button
+                                    key={task.id}
+                                    type="button"
+                                    className={`task-tab ${activeTaskId === task.id ? 'active' : ''}`}
+                                    onClick={() => setActiveTaskId(task.id)}
+                                >
+                                    <div className="task-name">{getTaskLabel(task)}</div>
+                                    <span className={`status-chip ${task.status}`}>{t(`taskLog.status.${task.status}`)}</span>
+                                </Button>
+                            ))
+                        ) : (
+                            <div className="task-list__empty">{t('taskLog.noTasks')}</div>
+                        )}
+                    </div>
                 </div>
-            </Offcanvas.Header>
-            <Offcanvas.Body>
-                <Row className="task-layout">
-                    <Col md={3} className="task-list-panel">
-                        <div className="task-list">
-                            {sortedTasks.length ? (
-                                sortedTasks.map((task) => (
-                                    <Button
-                                        key={task.id}
-                                        type="button"
-                                        className={`task-tab ${activeTaskId === task.id ? 'active' : ''}`}
-                                        onClick={() => setActiveTaskId(task.id)}
-                                    >
-                                        <div className="task-name">{getTaskLabel(task)}</div>
-                                        <span className={`status-chip ${task.status}`}>
-                                            {t(`taskLog.status.${task.status}`)}
-                                        </span>
-                                    </Button>
-                                ))
+                <div className="task-log-panel">
+                    <div className="logs">
+                        {activeTask ? (
+                            activeLogs.length ? (
+                                <ul className="log-list">
+                                    {activeLogs.map((log) => (
+                                        <li key={log.id} className={`log-entry ${log.level}`}>
+                                            <span className="log-time">{log.timeLabel}</span>
+                                            <span className="log-text">{log.text || log.raw}</span>
+                                        </li>
+                                    ))}
+                                </ul>
                             ) : (
-                                <div className="task-list__empty">{t('taskLog.noTasks')}</div>
-                            )}
-                        </div>
-                    </Col>
-                    <Col md={9} className="task-log-panel">
-                        <div className="logs">
-                            {activeTask ? (
-                                activeLogs.length ? (
-                                    <ul className="log-list">
-                                        {activeLogs.map((log) => (
-                                            <li key={log.id} className={`log-entry ${log.level}`}>
-                                                <span className="log-time">{log.timeLabel}</span>
-                                                <span className="log-text">{log.text || log.raw}</span>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                ) : (
-                                    <div className="placeholder">{t('taskLog.emptyLogs')}</div>
-                                )
-                            ) : (
-                                <div className="placeholder">{t('taskLog.switchHint')}</div>
-                            )}
-                        </div>
-                    </Col>
-                </Row>
-            </Offcanvas.Body>
-        </Offcanvas>
+                                <div className="placeholder">{t('taskLog.emptyLogs')}</div>
+                            )
+                        ) : (
+                            <div className="placeholder">{t('taskLog.switchHint')}</div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </TaskOffcanvasShell>
     );
 }
 

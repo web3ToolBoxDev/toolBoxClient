@@ -3,5 +3,6 @@ console.log('preload.js')
 contextBridge.exposeInMainWorld('electronAPI', {
   openFile: () => ipcRenderer.invoke('dialog:openFile'),
   chooseDirectory: () => ipcRenderer.invoke('dialog:chooseDirectory'),
-  openLink: (url) => ipcRenderer.invoke('dialog:openLink', url)
+  openLink: (url) => ipcRenderer.invoke('dialog:openLink', url),
+  revealInFolder: (payload) => ipcRenderer.invoke('dialog:revealInFolder', payload)
 })

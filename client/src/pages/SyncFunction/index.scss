@@ -1,17 +1,23 @@
 @import '../../index.scss';
 
 .sync-function-page {
+  min-height: 100vh;
+  padding: 0.75rem clamp(0.75rem, 2vw, 2rem) 1rem;
+  display: flex;
+  flex-direction: column;
+
   h1 {
     font-size: 1.2rem;
     font-weight: 600;
     text-align: center;
-    margin-top: 0.5rem;
+    margin-top: 0.25rem;
     margin-bottom: 0.8rem;
     color: $clr-page-text;
   }
 
   .control-panel {
-    max-width: 600px;
+    max-width: $page-card-max-width;
+    width: 100%;
     margin: 0 auto 0.8rem auto;
     background: #fff;
     border: 1px solid $clr-sidebar-border;
@@ -53,7 +59,8 @@
 
   // 选择展示面板样式
   .selection-display-card {
-    max-width: 600px;
+    max-width: $page-card-max-width;
+    width: 100%;
     margin: 0 auto 0.8rem auto;
     background: #fff;
     border: 1px solid $clr-sidebar-border;
@@ -207,13 +214,17 @@
   }
 
   .group-list-card {
-    max-width: 600px;
-    margin: 0 auto 1rem auto;
+    max-width: $page-card-max-width;
+    width: 100%;
+    margin: 0 auto 0 auto;
     background: #fff;
     border: 1px solid $clr-sidebar-border;
     border-radius: 8px;
     box-shadow: 0 2px 8px 0 rgba(0,0,0,0.03);
-    height: 200px; // 增加高度以获得更多列表空间
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
     
     .card-header {
       font-size: 1rem;
@@ -242,7 +253,8 @@
     }
     
     .group-list-scroll {
-      height: 320px; // 固定高度，确保可滚动
+      flex: 1;
+      min-height: clamp(220px, 42vh, 520px);
       overflow-y: auto;
       padding: 0.8rem 1rem 0.5rem 1rem;
       scrollbar-width: thin;
@@ -291,6 +303,26 @@
       padding: 32px 0;
       text-align: center;
       color: #aaa;
+    }
+  }
+}
+
+@media (max-width: 900px) {
+  .sync-function-page {
+    padding: 0.65rem 0.65rem 0.8rem;
+
+    .control-panel,
+    .selection-display-card,
+    .group-list-card {
+      max-width: 100%;
+    }
+
+    .control-panel .card-body {
+      padding: 0.7rem 0.65rem;
+    }
+
+    .selection-display-card .card-body {
+      padding: 0.55rem 0.65rem;
     }
   }
 }

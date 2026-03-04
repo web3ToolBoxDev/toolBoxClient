@@ -99,8 +99,11 @@ router.post('/execTask', async(req, res) => {
   const taskName = req.body.taskName;
   const taskDataFromFront = req.body.taskData;
   console.log(taskDataFromFront);
-  taskService.execTask(taskName,taskDataFromFront);
-  res.send({success:true, message: `Task ${taskName} is being executed.` });
+  const result = await taskService.execTask(taskName, taskDataFromFront);
+  if (result && result.success === false) {
+    return res.send(result);
+  }
+  return res.send(result || { success: true, code: 0, message: `Task ${taskName} is being executed.` });
 });
 router.post('/getConfigInfo', async(req, res) => {
   const taskName = req.body.taskName;
@@ -112,6 +115,42 @@ router.post('/setConfigInfo', async(req, res) => {
   const config = req.body.config;
   const message = await taskService.setConfigInfo(taskName,config);
   res.send(message);
+});
+router.get('/getAiSession', async (req, res) => {
+  const taskName = req.query.taskName;
+  const sessionId = req.query.sessionId;
+  const message = await taskService.getAiSession(taskName, sessionId);
+  res.send(message);
+});
+router.get('/listAiSessions', async (req, res) => {
+  const taskName = req.query.taskName;
+  const message = await taskService.listAiSessions(taskName);
+  res.send(message);
+});
+router.post('/createAiSession', async (req, res) => {
+  const { taskName, name } = req.body || {};
+  const result = await taskService.createAiSession(taskName, name);
+  res.send(result);
+});
+router.post('/deleteAiSession', async (req, res) => {
+  const { taskName, sessionId } = req.body || {};
+  const result = await taskService.deleteAiSession(taskName, sessionId);
+  res.send(result);
+});
+router.post('/sendAiMessage', async (req, res) => {
+  const { taskName, message, sessionId } = req.body || {};
+  const result = await taskService.sendAiMessage(taskName, message, sessionId);
+  res.send(result);
+});
+router.post('/sendAiOption', async (req, res) => {
+  const { taskName, optionId, optionLabel, sessionId } = req.body || {};
+  const result = await taskService.sendAiOption(taskName, optionId, optionLabel, sessionId);
+  res.send(result);
+});
+router.post('/updateAiSubTask', async (req, res) => {
+  const { taskName, subTaskKey, status, sessionId } = req.body || {};
+  const result = await taskService.updateAiSubTask(taskName, subTaskKey, status, sessionId);
+  res.send(result);
 });
 router.delete('/deleteTask', async(req, res) => {
   console.log('req.body:', req.body.taskNames);

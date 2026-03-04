@@ -5,6 +5,7 @@ import WalletManage from './pages/WalletManager';
 import TaskManage from './pages/taskManage';
 import ChromeManager from './pages/ChromeManager';
 import SyncFunction from './pages/SyncFunction';
+import AgentWorkspace from './pages/agentWorkspace';
 
 import { createHashRouter } from 'react-router-dom'; // 导入 createHashRouter
 
@@ -14,6 +15,7 @@ const router = createHashRouter([ // 使用 createHashRouter 替代 createBrowse
   {path:"/walletManage", element:<Layout Child={WalletManage} />},
   {path:"/syncFunction", element:<Layout Child={SyncFunction} />},
   {path:"/taskManage", element:<Layout Child={TaskManage} />},
+  {path:"/agentWorkspace/:taskName", element:<Layout Child={AgentWorkspace} />},
 ]); 
 
 export default router;

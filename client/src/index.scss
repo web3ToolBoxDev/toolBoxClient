@@ -19,6 +19,9 @@ $clr-btn-warning-hover: darken($clr-btn-warning, 10%);
 $clr-btn-secondary:   #38B2AC;
 $clr-btn-secondary-hover: darken($clr-btn-secondary, 8%);
 
+// ===== Unified Layout =====
+$page-card-max-width: 1400px;
+
 // ===== 全局基础样式 =====
 body {
   margin: 0;

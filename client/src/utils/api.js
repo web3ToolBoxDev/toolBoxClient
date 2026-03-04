@@ -18,6 +18,26 @@ class APIManager {
         return APIManager.instance;
     }
 
+    _resolveCurrentLanguage() {
+        if (typeof window === 'undefined') {
+            return 'en';
+        }
+        const stored = window.localStorage.getItem('appLanguage');
+        const i18nStored = window.localStorage.getItem('i18nextLng');
+        return stored || i18nStored || 'en';
+    }
+
+    _withLanguage(taskData) {
+        const lang = this._resolveCurrentLanguage();
+        if (taskData && typeof taskData === 'object') {
+            return {
+                ...taskData,
+                language: taskData.language || lang
+            };
+        }
+        return { language: lang };
+    }
+
     
     async createWallets(params) {
         console.log('params:', params);
@@ -70,6 +90,13 @@ class APIManager {
         return res.data;
     }
     async execTask(taskName,taskData = null) {
+        const suppressRunningAlert = Boolean(taskData && typeof taskData === 'object' && taskData._suppressRunningAlert);
+        const normalizedTaskData = (taskData && typeof taskData === 'object')
+            ? { ...taskData }
+            : taskData;
+        if (normalizedTaskData && typeof normalizedTaskData === 'object') {
+            delete normalizedTaskData._suppressRunningAlert;
+        }
         try {
             if (typeof window !== 'undefined' && taskName) {
                 const stored = window.localStorage.getItem('taskLogsByTask');
@@ -98,22 +125,25 @@ class APIManager {
                         const overlap = requestedIds.filter((rid) => runningIds.has(String(rid)));
                         if (overlap.length) {
                             const now = Date.now();
-                            if (!this._lastRunningAlertAt || now - this._lastRunningAlertAt > 2000) {
+                            if (!suppressRunningAlert && (!this._lastRunningAlertAt || now - this._lastRunningAlertAt > 2000)) {
                                 alert('Task is already running');
                                 this._lastRunningAlertAt = now;
                             }
                             return { success: false, code: 1003, message: 'Task is already running', runningIds: overlap };
                         }
                         // allow if different ids are running
-                        return await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,taskData:taskData }).then(res => {
-                            eventEmitter.emit('taskExecuted');
-                            eventEmitter.emit('taskStart', { taskName, taskData });
+                        const enrichedTaskData = this._withLanguage(taskData);
+                        return await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,taskData:enrichedTaskData }).then(res => {
+                            if (res?.data?.success !== false) {
+                                eventEmitter.emit('taskExecuted');
+                                eventEmitter.emit('taskStart', { taskName, taskData: enrichedTaskData });
+                            }
                             return res.data;
                         });
                     }
                     if (isRunning) {
                         const now = Date.now();
-                        if (!this._lastRunningAlertAt || now - this._lastRunningAlertAt > 2000) {
+                        if (!suppressRunningAlert && (!this._lastRunningAlertAt || now - this._lastRunningAlertAt > 2000)) {
                             alert('Task is already running');
                             this._lastRunningAlertAt = now;
                         }
@@ -124,9 +154,12 @@ class APIManager {
         } catch (error) {
             console.warn('Failed to check running tasks:', error);
         }
-        const res = await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,taskData:taskData });
-        eventEmitter.emit('taskExecuted');
-        eventEmitter.emit('taskStart', { taskName, taskData });
+        const enrichedTaskData = this._withLanguage(normalizedTaskData);
+        const res = await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,taskData:enrichedTaskData });
+        if (res?.data?.success !== false) {
+            eventEmitter.emit('taskExecuted');
+            eventEmitter.emit('taskStart', { taskName, taskData: enrichedTaskData });
+        }
         return res.data;
     }
     async getConfigInfo(taskName) {
@@ -135,6 +168,34 @@ class APIManager {
     }
     async setConfigInfo(taskName,config) {
         const res = await axios.post(`${this.baseUrl}/setConfigInfo`, { taskName: taskName,config:config });
+        return res.data;
+    }
+    async listAiSessions(taskName) {
+        const res = await axios.get(`${this.baseUrl}/listAiSessions`, { params: { taskName } });
+        return res.data;
+    }
+    async createAiSession(taskName, name = '') {
+        const res = await axios.post(`${this.baseUrl}/createAiSession`, { taskName, name });
+        return res.data;
+    }
+    async deleteAiSession(taskName, sessionId) {
+        const res = await axios.post(`${this.baseUrl}/deleteAiSession`, { taskName, sessionId });
+        return res.data;
+    }
+    async getAiSession(taskName, sessionId = '') {
+        const res = await axios.get(`${this.baseUrl}/getAiSession`, { params: { taskName, sessionId } });
+        return res.data;
+    }
+    async sendAiMessage(taskName, message, sessionId = '') {
+        const res = await axios.post(`${this.baseUrl}/sendAiMessage`, { taskName, message, sessionId });
+        return res.data;
+    }
+    async sendAiOption(taskName, optionId, optionLabel = '', sessionId = '') {
+        const res = await axios.post(`${this.baseUrl}/sendAiOption`, { taskName, optionId, optionLabel, sessionId });
+        return res.data;
+    }
+    async updateAiSubTask(taskName, subTaskKey, status, sessionId = '') {
+        const res = await axios.post(`${this.baseUrl}/updateAiSubTask`, { taskName, subTaskKey, status, sessionId });
         return res.data;
     }
     async deleteTask(taskNames) {

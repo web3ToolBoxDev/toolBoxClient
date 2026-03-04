@@ -15,6 +15,10 @@ class WebSocketManager {
         this._heartbeatTimer = null;
         this._reconnectTimer = null;
         this._lastCallbacks = null;
+        this._messageListeners = new Set();
+        this._closeListeners = new Set();
+        this._outboundQueue = [];
+        this._outboundQueueLimit = 100;
         if (typeof window !== 'undefined') {
           window.__wsManager = this;
         }
@@ -81,6 +85,12 @@ class WebSocketManager {
       this.wss = socket;
       const isCurrent = () => this.wss === socket;
       this.messageQueue = []; // 存储消息的队列
+      if (typeof messageCallback === 'function') {
+        this._messageListeners.add(messageCallback);
+      }
+      if (typeof closeCallback === 'function') {
+        this._closeListeners.add(closeCallback);
+      }
       this._lastCallbacks = { messageCallback, closeCallback };
       let connectTimer = null;
   
@@ -97,6 +107,7 @@ class WebSocketManager {
         this.wss.onopen = () => {
           if (!isCurrent()) return;
           this.startHeartbeat();
+          this.flushOutboundQueue();
           resolve(true);
         };
 
@@ -116,8 +127,13 @@ class WebSocketManager {
           }
           if (!isCurrent()) return;
           this.pushToQueue(message);
-          // 使用回调函数处理消息，为防止遗漏,使用this.popFromQueue()获取消息
-          messageCallback();
+          this._messageListeners.forEach((listener) => {
+            try {
+              listener(message);
+            } catch (error) {
+              console.warn('WebSocket message listener failed:', error);
+            }
+          });
         };
   
         this.wss.onclose = async(event) => {
@@ -127,7 +143,13 @@ class WebSocketManager {
             connectTimer = null;
           }
           this.stopHeartbeat();
-          closeCallback(event);
+          this._closeListeners.forEach((listener) => {
+            try {
+              listener(event);
+            } catch (error) {
+              console.warn('WebSocket close listener failed:', error);
+            }
+          });
           const reason = String(event?.reason || '').toLowerCase();
           if (reason.includes('duplicate frontend connection')) {
             // An older socket is kept by server; avoid reconnect loop
@@ -191,9 +213,21 @@ class WebSocketManager {
     
     async connect(messageCallback,closeCallback,tryCount=5){ 
       if (this.wss && this.wss.readyState === WebSocket.OPEN) {
+        if (typeof messageCallback === 'function') {
+          this._messageListeners.add(messageCallback);
+        }
+        if (typeof closeCallback === 'function') {
+          this._closeListeners.add(closeCallback);
+        }
         return true;
       }
       if (this.wss && this.wss.readyState === WebSocket.CONNECTING && this._connecting) {
+        if (typeof messageCallback === 'function') {
+          this._messageListeners.add(messageCallback);
+        }
+        if (typeof closeCallback === 'function') {
+          this._closeListeners.add(closeCallback);
+        }
         return await this._connecting;
       }
       if (this._connecting) {
@@ -228,9 +262,55 @@ class WebSocketManager {
       return this.messageQueue.length;
     }
     sendMessage(message){
-        if(this.wss && this.wss.readyState === 1){
+        if (this.wss && this.wss.readyState === 1) {
             this.wss.send(message);
+            return true;
         }
+        this.enqueueOutbound(message);
+        return false;
+    }
+    enqueueOutbound(message) {
+      if (!this._outboundQueue) {
+        this._outboundQueue = [];
+      }
+      this._outboundQueue.push(message);
+      if (this._outboundQueue.length > this._outboundQueueLimit) {
+        this._outboundQueue.splice(0, this._outboundQueue.length - this._outboundQueueLimit);
+      }
+    }
+    flushOutboundQueue() {
+      if (!this.wss || this.wss.readyState !== 1 || !Array.isArray(this._outboundQueue) || this._outboundQueue.length === 0) {
+        return;
+      }
+      const queued = this._outboundQueue.slice();
+      this._outboundQueue = [];
+      queued.forEach((item) => {
+        try {
+          this.wss.send(item);
+        } catch (error) {
+          this.enqueueOutbound(item);
+        }
+      });
+    }
+    addMessageListener(listener) {
+      if (typeof listener === 'function') {
+        this._messageListeners.add(listener);
+      }
+    }
+    removeMessageListener(listener) {
+      if (typeof listener === 'function') {
+        this._messageListeners.delete(listener);
+      }
+    }
+    addCloseListener(listener) {
+      if (typeof listener === 'function') {
+        this._closeListeners.add(listener);
+      }
+    }
+    removeCloseListener(listener) {
+      if (typeof listener === 'function') {
+        this._closeListeners.delete(listener);
+      }
     }
     //检查连接状态
     checkConnection(){
@@ -252,6 +332,9 @@ class WebSocketManager {
         clearTimeout(this._reconnectTimer);
         this._reconnectTimer = null;
       }
+      this._messageListeners.clear();
+      this._closeListeners.clear();
+      this._outboundQueue = [];
     }
   }
   

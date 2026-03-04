@@ -1,6 +1,7 @@
 const { app, BrowserWindow, utilityProcess, ipcMain, dialog, Menu } = require('electron');
 const { t } = require('i18next');
 const path = require('path');
+const fs = require('fs');
 const shell = require('electron').shell;
 if (!process.env.APP_USER_DATA) {
   try {
@@ -30,6 +31,39 @@ async function chooseDirectory() {
 }
 async function openLink(url) {
   await shell.openExternal(url);
+}
+
+async function revealInFolder(payload = {}) {
+  const inputPath = typeof payload === 'string' ? payload : payload?.filePath;
+  const basePath = typeof payload === 'object' ? payload?.basePath : '';
+  const fallbackOpenPath = typeof payload === 'object' ? payload?.fallbackOpenPath : '';
+  const raw = String(inputPath || '').trim();
+  const base = String(basePath || '').trim();
+  const fallback = String(fallbackOpenPath || '').trim();
+  const targetPath = raw
+    ? (path.isAbsolute(raw) ? raw : (base ? path.resolve(base, raw) : path.resolve(raw)))
+    : '';
+  try {
+    if (targetPath && fs.existsSync(targetPath)) {
+      const stat = fs.statSync(targetPath);
+      if (stat.isFile()) {
+        shell.showItemInFolder(targetPath);
+        return { success: true, mode: 'select-file', path: targetPath };
+      }
+      if (stat.isDirectory()) {
+        await shell.openPath(targetPath);
+        return { success: true, mode: 'open-dir', path: targetPath };
+      }
+    }
+    const openDir = fallback || (targetPath ? path.dirname(targetPath) : '');
+    if (openDir && fs.existsSync(openDir)) {
+      await shell.openPath(openDir);
+      return { success: true, mode: 'open-dir', path: openDir };
+    }
+    return { success: false, message: 'Path not found', path: targetPath || openDir };
+  } catch (error) {
+    return { success: false, message: error?.message || 'Failed to reveal path', path: targetPath };
+  }
 }
 
 
@@ -111,6 +145,7 @@ app.whenReady().then(() => {
   ipcMain.handle('dialog:openFile', handleFileOpen)
   ipcMain.handle('dialog:chooseDirectory', chooseDirectory)
   ipcMain.handle('dialog:openLink', (event, url) => openLink(url))
+  ipcMain.handle('dialog:revealInFolder', (event, payload) => revealInFolder(payload))
   if (mainWindow === null) {
     createWindow();
     // createBackendProcess();
