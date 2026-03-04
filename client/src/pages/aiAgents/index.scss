@@ -1,0 +1,121 @@
+@import '../../index.scss';
+
+.ai-agents-page {
+	min-height: 100vh;
+	padding: 0.75rem clamp(0.75rem, 2vw, 2rem) 1rem;
+	display: flex;
+	flex-direction: column;
+
+	h1 {
+		font-size: 1.2rem;
+		font-weight: 600;
+		text-align: center;
+		margin-top: 0.25rem;
+		margin-bottom: 0.8rem;
+		color: $clr-page-text;
+	}
+
+	.agent-grid {
+		max-width: $page-card-max-width;
+		width: 100%;
+		margin: 0 auto;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+		gap: 1rem;
+	}
+
+	.agent-card {
+		background: #fff;
+		border: 1px solid $clr-sidebar-border;
+		border-radius: 10px;
+		box-shadow: 0 2px 8px 0 rgba(0,0,0,0.03);
+		padding: 1.2rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		transition: box-shadow 0.2s, border-color 0.2s;
+
+		&:hover {
+			box-shadow: 0 4px 16px 0 rgba(90,103,216,0.10);
+			border-color: $clr-btn-primary;
+		}
+
+		.agent-header {
+			display: flex;
+			align-items: center;
+			gap: 0.75rem;
+
+			.agent-icon {
+				width: 42px;
+				height: 42px;
+				border-radius: 10px;
+				background: rgba(90, 103, 216, 0.12);
+				border: 1px solid $clr-btn-primary;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				font-size: 1.3rem;
+				flex-shrink: 0;
+			}
+
+			.agent-info {
+				flex: 1;
+				min-width: 0;
+
+				.agent-name {
+					font-size: 1rem;
+					font-weight: 600;
+					color: $clr-page-text;
+					white-space: nowrap;
+					overflow: hidden;
+					text-overflow: ellipsis;
+				}
+
+				.agent-provider {
+					font-size: 0.78rem;
+					color: $clr-link-text;
+					margin-top: 2px;
+				}
+			}
+		}
+
+		.agent-meta {
+			font-size: 0.8rem;
+			color: $clr-link-text;
+			display: flex;
+			gap: 0.75rem;
+			flex-wrap: wrap;
+
+			.meta-tag {
+				background: rgba(90,103,216,0.08);
+				border-radius: 4px;
+				padding: 2px 8px;
+			}
+		}
+
+		.agent-actions {
+			display: flex;
+			gap: 0.5rem;
+			margin-top: 0.3rem;
+
+			.btn {
+				flex: 1;
+				font-size: 0.85rem;
+				padding: 0.35rem 0.6rem;
+			}
+		}
+	}
+
+	.empty-state {
+		text-align: center;
+		padding: 3rem 1rem;
+		color: $clr-link-text;
+		font-size: 0.95rem;
+		max-width: $page-card-max-width;
+		width: 100%;
+		margin: 0 auto;
+		background: #fff;
+		border: 1px solid $clr-sidebar-border;
+		border-radius: 10px;
+	}
+}

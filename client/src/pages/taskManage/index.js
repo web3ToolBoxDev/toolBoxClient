@@ -22,7 +22,7 @@ const TaskManage = () => {
   const [walletConfigModalProp,setWalletConfigModalProp] = useState({show:false});
   const [taskList, setTaskList] = useState([]);
   const loadTasks = () => {
-    apiManager.getAllTasks().then((res) => {
+    apiManager.getAllTasks(false).then((res) => {
       setTaskList(res);
     });
   };

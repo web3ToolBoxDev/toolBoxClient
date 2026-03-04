@@ -90,15 +90,13 @@ router.post('/importTask', async(req, res) => {
 });
 router.get('/getAllTasks', async(req, res) => {
   let defaultTask = req.query.defaultTask;
-  //转化为boolean，未传参时返回全部任务
-  if (defaultTask === 'true') {
-    defaultTask = true;
-  } else if (defaultTask === 'false') {
-    defaultTask = false;
-  } else {
-    defaultTask = undefined;
-  }
+  //转化为boolean
+  defaultTask = defaultTask === 'true';
   const message = await taskService.getAllTasks(defaultTask);
+  res.send(message);
+});
+router.get('/getAgentTasks', async(req, res) => {
+  const message = await taskService.getAgentTasks();
   res.send(message);
 });
 router.post('/execTask', async(req, res) => {

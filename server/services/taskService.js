@@ -295,12 +295,23 @@ class TaskService {
     }
     async getAllTasks(defaultTask) {
         return new Promise((resolve, reject) => {
-            const query = (defaultTask === undefined || defaultTask === null) ? {} : { defaultTask };
-            config.getTaskDb().find(query, (err, docs) => {
+            config.getTaskDb().find({ defaultTask }, (err, docs) => {
                 if (err) {
                     reject(err);
                 } else {
                     // 过滤掉空/无 taskName 的脏数据
+                    const clean = (docs || []).filter(d => d && d.taskName);
+                    resolve(clean);
+                }
+            });
+        });
+    }
+    async getAgentTasks() {
+        return new Promise((resolve, reject) => {
+            config.getTaskDb().find({ taskType: 'ai' }, (err, docs) => {
+                if (err) {
+                    reject(err);
+                } else {
                     const clean = (docs || []).filter(d => d && d.taskName);
                     resolve(clean);
                 }

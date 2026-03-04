@@ -12,7 +12,8 @@ const menuItems = [
   { name: 'chromeManage', link: '#/chromeManager', icon: '🌐' },
   { name: 'walletManage', link: '#/walletManage', icon: '👛' },
   { name: 'syncFunction', link: '#/syncFunction', icon: '🔄' },
-  { name: 'taskManage', link: '#/taskManage', icon: '✅' }
+  { name: 'taskManage', link: '#/taskManage', icon: '✅' },
+  { name: 'aiAgents', link: '#/aiAgents', icon: '🤖' }
 ];
 const langOptions = [
   { code: 'zh-CN', label: '中文' },
