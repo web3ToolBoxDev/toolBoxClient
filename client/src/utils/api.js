@@ -86,7 +86,8 @@ class APIManager {
         return res.data;
     }
     async getAllTasks(defaultTask) {
-        const res = await axios.get(`${this.baseUrl}/getAllTasks?defaultTask=${defaultTask}`);
+        const params = (defaultTask === undefined || defaultTask === null) ? '' : `?defaultTask=${defaultTask}`;
+        const res = await axios.get(`${this.baseUrl}/getAllTasks${params}`);
         return res.data;
     }
     async execTask(taskName,taskData = null) {

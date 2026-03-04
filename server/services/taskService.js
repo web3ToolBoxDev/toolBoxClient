@@ -295,7 +295,8 @@ class TaskService {
     }
     async getAllTasks(defaultTask) {
         return new Promise((resolve, reject) => {
-            config.getTaskDb().find({ defaultTask }, (err, docs) => {
+            const query = (defaultTask === undefined || defaultTask === null) ? {} : { defaultTask };
+            config.getTaskDb().find(query, (err, docs) => {
                 if (err) {
                     reject(err);
                 } else {
