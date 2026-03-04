@@ -21,6 +21,7 @@ class Config {
             this.isBuild = IS_BUILD;
             this.assetsPath = this.isBuild ? path.resolve(__dirname, '../assets') : path.resolve(__dirname, './assets');
             this.defaultScriptPath = path.join(this.assetsPath, '/scripts');
+            this.defaultAgentPath = path.join(this.assetsPath, '/agents');
 
             if (process.platform === "win32") {
                 this.platform = "win32";
@@ -158,7 +159,10 @@ class Config {
 				}
 				let taskObj = defaultTaskConfig.find((el) => el.taskName === taskName);
 				if (taskObj.scriptPath && !path.isAbsolute(taskObj.scriptPath)) {
-					taskObj.scriptPath = path.join(this.defaultScriptPath, taskObj.scriptPath);
+					const basePath = (taskObj.taskType === 'ai' || taskObj.aiEnabled)
+						? this.defaultAgentPath
+						: this.defaultScriptPath;
+					taskObj.scriptPath = path.join(basePath, taskObj.scriptPath);
 				}
 				//如果不存在则插入，存在替换
 				if (!doc) {
