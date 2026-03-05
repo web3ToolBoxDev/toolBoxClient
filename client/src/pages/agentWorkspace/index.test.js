@@ -20,7 +20,20 @@ const mockApi = {
         }
     }),
     getAllWallets: jest.fn().mockResolvedValue([{ id: 'w1', name: 'Wallet A', bindEnvId: 'env-1' }]),
-    getFingerPrints: jest.fn().mockResolvedValue({ success: true, data: { 'env-1': { id: 'env-1', name: 'Env A' } } })
+    getFingerPrints: jest.fn().mockResolvedValue({ success: true, data: { 'env-1': { id: 'env-1', name: 'Env A' } } }),
+    getProviderModels: jest.fn().mockImplementation((provider, subProvider) => {
+        const map = {
+            'codex-cli': { success: true, models: [{ value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' }, { value: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark' }] },
+            'claude-code': { success: true, models: [{ value: 'sonnet', label: 'sonnet (latest)' }, { value: 'opus', label: 'opus (latest)' }, { value: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6' }] },
+        };
+        const subMap = {
+            'openai': { success: true, models: [{ value: 'gpt-4o-mini', label: 'gpt-4o-mini' }, { value: 'gpt-4.1', label: 'gpt-4.1' }] },
+            'anthropic': { success: true, models: [{ value: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6' }, { value: 'claude-opus-4-6', label: 'claude-opus-4-6' }] },
+            'google': { success: true, models: [{ value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' }, { value: 'gemini-2.5-pro', label: 'gemini-2.5-pro' }] },
+        };
+        if (provider === 'api-key') return Promise.resolve(subMap[subProvider] || { success: false, models: [] });
+        return Promise.resolve(map[provider] || { success: false, models: [] });
+    })
 };
 
 jest.mock('../../utils/api', () => ({
@@ -349,6 +362,122 @@ describe('AgentWorkspace protocol regression', () => {
                 _suppressRunningAlert: true
             })
         );
+    });
+
+    it('shows cascading provider → sub-provider → model dropdowns', async () => {
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {}
+                }
+            });
+        });
+
+        fireEvent.click(screen.getByLabelText('toggle-runtime-settings'));
+
+        // Provider dropdown should exist
+        const providerSelect = screen.getByLabelText('session-provider');
+        expect(providerSelect).toBeInTheDocument();
+
+        // Sub-provider should NOT be visible initially (no provider selected)
+        expect(screen.queryByLabelText('session-sub-provider')).not.toBeInTheDocument();
+
+        // Select codex-cli → model should show gpt-5.3-codex (from backend mock)
+        fireEvent.change(providerSelect, { target: { value: 'codex-cli' } });
+        const modelSelect = screen.getByLabelText('session-model');
+        await waitFor(() => expect(modelSelect.value).toBe('gpt-5.3-codex'));
+        // Backend should have been called
+        expect(mockApi.getProviderModels).toHaveBeenCalledWith('codex-cli', '', '');
+        // Sub-provider still hidden for codex-cli
+        expect(screen.queryByLabelText('session-sub-provider')).not.toBeInTheDocument();
+
+        // Select claude-code → model should show sonnet (latest)
+        fireEvent.change(providerSelect, { target: { value: 'claude-code' } });
+        await waitFor(() => expect(modelSelect.value).toBe('sonnet'));
+        expect(screen.queryByLabelText('session-sub-provider')).not.toBeInTheDocument();
+
+        // Select api-key → sub-provider dropdown should appear
+        fireEvent.change(providerSelect, { target: { value: 'api-key' } });
+        const subProviderSelect = screen.getByLabelText('session-sub-provider');
+        expect(subProviderSelect).toBeInTheDocument();
+
+        // Select openai sub-provider → model should show gpt-4o-mini
+        fireEvent.change(subProviderSelect, { target: { value: 'openai' } });
+        await waitFor(() => expect(modelSelect.value).toBe('gpt-4o-mini'));
+
+        // Select anthropic sub-provider → model should switch
+        fireEvent.change(subProviderSelect, { target: { value: 'anthropic' } });
+        await waitFor(() => expect(modelSelect.value).toBe('claude-sonnet-4-6'));
+
+        // Select google sub-provider → model should switch
+        fireEvent.change(subProviderSelect, { target: { value: 'google' } });
+        await waitFor(() => expect(modelSelect.value).toBe('gemini-2.5-flash'));
+    });
+
+    it('sends provider and subProvider in apply model payload', async () => {
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {}
+                }
+            });
+        });
+
+        fireEvent.click(screen.getByLabelText('toggle-runtime-settings'));
+
+        // Select api-key → openai → gpt-4o-mini, then apply
+        fireEvent.change(screen.getByLabelText('session-provider'), { target: { value: 'api-key' } });
+        fireEvent.change(screen.getByLabelText('session-sub-provider'), { target: { value: 'openai' } });
+
+        mockWsManager.sendMessage.mockClear();
+        fireEvent.click(screen.getByRole('button', { name: 'Apply Model' }));
+
+        await waitFor(() => {
+            expectSent((msg) => (
+                msg.type === 'agent_session_context_update'
+                && msg.payload?.runtimeContext?.provider === 'api-key'
+                && msg.payload?.runtimeContext?.subProvider === 'openai'
+                && msg.payload?.runtimeContext?.model === 'gpt-4o-mini'
+            ));
+        });
     });
 
     it('navigates back to task manage when ai task stops', async () => {

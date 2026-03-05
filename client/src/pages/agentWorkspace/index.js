@@ -6,6 +6,7 @@ import APIManager from '../../utils/api';
 import WebSocketManager from '../../utils/webSocket';
 import AITaskPanel from '../../components/taskOffcanvas/AITaskPanel';
 import { resolveTaskDisplayName } from '../../utils/taskI18n';
+import { PROVIDER_MODEL_MAP, getModelsForProvider, getSubProviders } from '../../config/providerModels';
 import './index.scss';
 
 function AgentWorkspace() {
@@ -38,6 +39,8 @@ function AgentWorkspace() {
     const [availableModels, setAvailableModels] = useState([]);
     const [defaultModel, setDefaultModel] = useState('');
     const [selectedModel, setSelectedModel] = useState('');
+    const [selectedProvider, setSelectedProvider] = useState('');
+    const [selectedSubProvider, setSelectedSubProvider] = useState('');
     const [runtimeExpanded, setRuntimeExpanded] = useState(false);
     const [taskMeta, setTaskMeta] = useState(() => ({
         taskName,
@@ -52,6 +55,54 @@ function AgentWorkspace() {
         }
         return ctx;
     }, [location?.state?.runtimeContext]);
+
+    const [filteredModels, setFilteredModels] = useState([]);
+
+    const fetchProviderModels = useCallback(async (provider, subProvider) => {
+        // Immediately show default models as placeholder
+        const defaults = getModelsForProvider(provider, subProvider);
+        setFilteredModels(defaults);
+        if (!provider) return defaults;
+        try {
+            const result = await apiRef.current.getProviderModels(provider, subProvider, '');
+            if (result?.success && Array.isArray(result.models) && result.models.length) {
+                setFilteredModels(result.models);
+                // If current selectedModel is not in the new list, select the first
+                setSelectedModel((prev) => {
+                    const inList = result.models.some((m) => m.value === prev);
+                    return inList ? prev : (result.models[0]?.value || '');
+                });
+                return result.models;
+            }
+        } catch { /* fall back to defaults */ }
+        return defaults;
+    }, []);
+
+    useEffect(() => {
+        if (!selectedProvider) {
+            setFilteredModels([]);
+            return;
+        }
+        // For api-key provider, only fetch when subProvider is also selected
+        if (selectedProvider === 'api-key' && !selectedSubProvider) {
+            setFilteredModels([]);
+            return;
+        }
+        fetchProviderModels(selectedProvider, selectedSubProvider);
+    }, [selectedProvider, selectedSubProvider, fetchProviderModels]);
+
+    const providerOptions = useMemo(() => {
+        const lang = i18n?.resolvedLanguage || i18n?.language || 'en';
+        const isZh = lang.startsWith('zh');
+        return Object.entries(PROVIDER_MODEL_MAP).map(([key, val]) => ({
+            value: key,
+            label: isZh && val.labelZh ? val.labelZh : val.label
+        }));
+    }, [i18n?.resolvedLanguage, i18n?.language]);
+
+    const subProviderOptions = useMemo(() => {
+        return getSubProviders(selectedProvider);
+    }, [selectedProvider]);
 
     const applySnapshot = useCallback((data = {}) => {
         const nextSessions = Array.isArray(data.sessions) ? data.sessions : [];
@@ -173,10 +224,12 @@ function AgentWorkspace() {
                 ...(payload && typeof payload === 'object' ? payload : {}),
                 language,
                 apiKeyConfigured: typeof payload?.apiKeyConfigured === 'boolean' ? payload.apiKeyConfigured : apiKeyConfigured,
-                ...(selectedModel ? { model: selectedModel } : {})
+                ...(selectedModel ? { model: selectedModel } : {}),
+                ...(selectedProvider ? { provider: selectedProvider } : {}),
+                ...(selectedSubProvider ? { subProvider: selectedSubProvider } : {})
             }
         }));
-    }, [apiKeyConfigured, i18n?.language, i18n?.resolvedLanguage, selectedModel, taskName]);
+    }, [apiKeyConfigured, i18n?.language, i18n?.resolvedLanguage, selectedModel, selectedProvider, selectedSubProvider, taskName]);
 
     useEffect(() => {
         let mounted = true;
@@ -293,9 +346,11 @@ function AgentWorkspace() {
                 ? t('agentWorkspace.bindWallet', 'Wallet')
                 : t('agentWorkspace.bindEnv', 'Environment'))
             : t('agentWorkspace.unbound', 'Unbound');
+        const providerKey = activeRuntimeContext?.provider || selectedProvider || '';
+        const providerLabel = PROVIDER_MODEL_MAP[providerKey]?.label || providerKey || '-';
         const modelText = activeRuntimeContext?.model || selectedModel || defaultModel || '-';
-        return `${t('agentWorkspace.current', 'Current')}: ${bindText} | ${t('agentWorkspace.model', 'Model')}: ${modelText} | ${t('agentWorkspace.executionState', 'Execution')}: ${executionStateLabel}`;
-    }, [activeRuntimeContext, defaultModel, executionStateLabel, selectedModel, t]);
+        return `${t('agentWorkspace.current', 'Current')}: ${bindText} | ${t('agentWorkspace.provider', 'Provider')}: ${providerLabel} | ${t('agentWorkspace.model', 'Model')}: ${modelText} | ${t('agentWorkspace.executionState', 'Execution')}: ${executionStateLabel}`;
+    }, [activeRuntimeContext, defaultModel, executionStateLabel, selectedModel, selectedProvider, t]);
     const workspaceTitle = useMemo(() => {
         const localized = resolveTaskDisplayName(taskMeta, {
             language: i18n?.resolvedLanguage || i18n?.language || 'en'
@@ -320,6 +375,8 @@ function AgentWorkspace() {
             setSelectedWalletId(Array.isArray(ctx.walletIds) ? (ctx.walletIds[0] || '') : '');
         }
         setSelectedModel(String(ctx.model || defaultModel || availableModels[0]?.value || '').trim());
+        if (ctx.provider) setSelectedProvider(ctx.provider);
+        if (ctx.subProvider) setSelectedSubProvider(ctx.subProvider);
     }, [activeSessionId, availableModels, defaultModel, sessionRuntimeContexts]);
 
     const handleCreateSession = () => {
@@ -446,7 +503,9 @@ function AgentWorkspace() {
             mode: current.mode || 'ai',
             envIds: Array.isArray(current.envIds) ? current.envIds : [],
             walletIds: Array.isArray(current.walletIds) ? current.walletIds : [],
-            model: selectedModel || defaultModel || availableModels[0]?.value || ''
+            model: selectedModel || defaultModel || availableModels[0]?.value || '',
+            provider: selectedProvider || '',
+            subProvider: selectedSubProvider || ''
         };
         setSessionRuntimeContexts((prev) => ({ ...prev, [activeSessionId]: nextContext }));
         sendAgent('agent_session_context_update', { sessionId: activeSessionId, runtimeContext: nextContext });
@@ -602,25 +661,69 @@ function AgentWorkspace() {
                                     </Button>
                                 </div>
 
+                                <div className="runtime-row runtime-row--provider">
+                                    <Form.Select
+                                        size="sm"
+                                        value={selectedProvider}
+                                        onChange={(e) => {
+                                            const prov = e.target.value;
+                                            setSelectedProvider(prov);
+                                            setSelectedSubProvider('');
+                                            // Set initial model from defaults; useEffect will fetch from backend
+                                            const defaults = getModelsForProvider(prov, '');
+                                            setSelectedModel(defaults[0]?.value || '');
+                                        }}
+                                        aria-label="session-provider"
+                                        disabled={!isTaskRunning}
+                                    >
+                                        <option value="">{t('agentWorkspace.selectProvider', 'Select Provider')}</option>
+                                        {providerOptions.map((opt) => (
+                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                        ))}
+                                    </Form.Select>
+                                    {selectedProvider === 'api-key' && subProviderOptions.length > 0 ? (
+                                        <Form.Select
+                                            size="sm"
+                                            value={selectedSubProvider}
+                                            onChange={(e) => {
+                                                const sub = e.target.value;
+                                                setSelectedSubProvider(sub);
+                                                // Set initial model from defaults; useEffect will fetch from backend
+                                                const defaults = getModelsForProvider(selectedProvider, sub);
+                                                setSelectedModel(defaults[0]?.value || '');
+                                            }}
+                                            aria-label="session-sub-provider"
+                                            disabled={!isTaskRunning}
+                                        >
+                                            <option value="">{t('agentWorkspace.selectSubProvider', 'Select Sub-Provider')}</option>
+                                            {subProviderOptions.map((opt) => (
+                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                            ))}
+                                        </Form.Select>
+                                    ) : null}
+                                </div>
+
                                 <div className="runtime-row runtime-row--model">
                                     <Form.Select
                                         size="sm"
                                         value={selectedModel}
                                         onChange={(e) => setSelectedModel(e.target.value)}
                                         aria-label="session-model"
-                                        disabled={!isTaskRunning || !availableModels.length || !apiKeyConfigured}
+                                        disabled={!isTaskRunning || !filteredModels.length || (PROVIDER_MODEL_MAP[selectedProvider]?.requiresApiKey && !apiKeyConfigured)}
                                     >
-                                        {availableModels.map((model) => (
+                                        {filteredModels.length ? filteredModels.map((model) => (
                                             <option key={model.value} value={model.value}>
                                                 {model.label}
                                             </option>
-                                        ))}
+                                        )) : (
+                                            <option value="">{t('agentWorkspace.selectProvider', 'Select Provider')}</option>
+                                        )}
                                     </Form.Select>
                                     <Button
                                         size="sm"
                                         variant="outline-light"
                                         onClick={handleApplyModel}
-                                        disabled={!isTaskRunning || !activeSessionId || !apiKeyConfigured || !selectedModel}
+                                        disabled={!isTaskRunning || !activeSessionId || !selectedModel || !selectedProvider}
                                     >
                                         {t('agentWorkspace.applyModel', 'Apply Model')}
                                     </Button>

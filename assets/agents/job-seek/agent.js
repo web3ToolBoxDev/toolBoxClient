@@ -66,6 +66,8 @@ const state = {
     taskName: 'jobSeekAgent',
     language: 'en',
     currentModel: 'gpt-4o-mini',
+    currentProvider: '',
+    currentSubProvider: '',
     apiKeyConfiguredHint: null,
     activeSessionId: '',
     sessions: [],
@@ -388,6 +390,9 @@ function isCliAvailable(name) {
 }
 
 function getConfiguredProvider() {
+    if (state.currentProvider) {
+        return String(state.currentProvider).trim().toLowerCase();
+    }
     const cfg = taskData?.taskConfig || {};
     return String(
         cfg?.default?.provider ||
@@ -942,17 +947,23 @@ function handleSessionContextUpdate(payload = {}) {
     }
     const runtimeContext = (payload.runtimeContext && typeof payload.runtimeContext === 'object') ? payload.runtimeContext : {};
     updateModel(payload?.model || runtimeContext?.model);
+    const nextProvider = String(payload?.provider || runtimeContext?.provider || '').trim();
+    const nextSubProvider = String(payload?.subProvider || runtimeContext?.subProvider || '').trim();
+    if (nextProvider) state.currentProvider = nextProvider;
+    if (nextSubProvider) state.currentSubProvider = nextSubProvider;
     state.runtimeContexts[sessionId] = runtimeContext;
+    const providerDisplay = state.currentProvider || 'auto';
+    const modelDisplay = runtimeContext.model || state.currentModel;
     appendConversation(
         sessionId,
         'assistant',
         isZh()
-            ? `\u4F1A\u8BDD\u4E0A\u4E0B\u6587\u5DF2\u66F4\u65B0\uFF1Amode=${runtimeContext.mode || 'unknown'}, env=${(runtimeContext.envIds || []).length}, wallet=${(runtimeContext.walletIds || []).length}, model=${runtimeContext.model || state.currentModel}`
-            : `Session context updated: mode=${runtimeContext.mode || 'unknown'}, env=${(runtimeContext.envIds || []).length}, wallet=${(runtimeContext.walletIds || []).length}, model=${runtimeContext.model || state.currentModel}`
+            ? `会话上下文已更新：mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=${(runtimeContext.envIds || []).length}, wallet=${(runtimeContext.walletIds || []).length}, model=${modelDisplay}`
+            : `Session context updated: mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=${(runtimeContext.envIds || []).length}, wallet=${(runtimeContext.walletIds || []).length}, model=${modelDisplay}`
     );
     appendRuntimeLog(
         sessionId,
-        `session_context_updated -> mode=${runtimeContext.mode || 'unknown'}, env=${(runtimeContext.envIds || []).length}, wallet=${(runtimeContext.walletIds || []).length}, model=${runtimeContext.model || state.currentModel}`,
+        `session_context_updated -> mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=${(runtimeContext.envIds || []).length}, wallet=${(runtimeContext.walletIds || []).length}, model=${modelDisplay}`,
         { source: 'context' }
     );
     sendSnapshot();

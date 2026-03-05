@@ -322,5 +322,14 @@ class APIManager {
         const res = await axios.post(`${this.baseUrl}/resetSyncScriptDirectory`);
         return res.data;
     }
+
+    async getProviderModels(provider, subProvider, apiKey) {
+        const params = new URLSearchParams();
+        if (provider) params.append('provider', provider);
+        if (subProvider) params.append('subProvider', subProvider);
+        if (apiKey) params.append('apiKey', apiKey);
+        const res = await axios.get(`${this.baseUrl}/getProviderModels?${params.toString()}`);
+        return res.data;
+    }
 }
 export default APIManager;

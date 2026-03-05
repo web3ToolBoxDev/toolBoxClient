@@ -165,6 +165,10 @@
     grid-template-columns: 180px minmax(220px, 1fr) auto;
   }
 
+  .runtime-row--provider {
+    grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr);
+  }
+
   .runtime-row--model {
     grid-template-columns: minmax(220px, 1fr) 180px;
   }
@@ -199,6 +203,10 @@
 
     .runtime-row--bind {
       grid-template-columns: 120px minmax(0, 1fr) auto;
+    }
+
+    .runtime-row--provider {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
 
     .runtime-row--model {

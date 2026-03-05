@@ -298,4 +298,16 @@ router.post('/resetSyncScriptDirectory', async (req, res) => {
 });
 
 
+const providerModelService = require('./services/providerModelService');
+
+router.get('/getProviderModels', async (req, res) => {
+  const { provider, subProvider, apiKey } = req.query;
+  const result = await providerModelService.getProviderModels(
+    String(provider || '').trim(),
+    String(subProvider || '').trim(),
+    String(apiKey || '').trim()
+  );
+  res.send(result);
+});
+
 module.exports = router;
