@@ -376,6 +376,7 @@
     "agentWorkspace.provider": "Provider",
     "agentWorkspace.selectProvider": "Select Provider",
     "agentWorkspace.selectSubProvider": "Select Sub-Provider",
+    "agentWorkspace.apiKeyPlaceholder": "Enter API Key",
     "agentWorkspace.model": "Model",
     "agentWorkspace.applyModel": "Apply Model",
     "agentWorkspace.executionState": "Execution",

@@ -166,7 +166,7 @@
   }
 
   .runtime-row--provider {
-    grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   }
 
   .runtime-row--model {
@@ -206,7 +206,7 @@
     }
 
     .runtime-row--provider {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     }
 
     .runtime-row--model {

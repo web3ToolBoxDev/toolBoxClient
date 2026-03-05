@@ -41,6 +41,7 @@ function AgentWorkspace() {
     const [selectedModel, setSelectedModel] = useState('');
     const [selectedProvider, setSelectedProvider] = useState('');
     const [selectedSubProvider, setSelectedSubProvider] = useState('');
+    const [runtimeApiKey, setRuntimeApiKey] = useState('');
     const [runtimeExpanded, setRuntimeExpanded] = useState(false);
     const [taskMeta, setTaskMeta] = useState(() => ({
         taskName,
@@ -58,13 +59,13 @@ function AgentWorkspace() {
 
     const [filteredModels, setFilteredModels] = useState([]);
 
-    const fetchProviderModels = useCallback(async (provider, subProvider) => {
+    const fetchProviderModels = useCallback(async (provider, subProvider, apiKey) => {
         // Immediately show default models as placeholder
         const defaults = getModelsForProvider(provider, subProvider);
         setFilteredModels(defaults);
         if (!provider) return defaults;
         try {
-            const result = await apiRef.current.getProviderModels(provider, subProvider, '');
+            const result = await apiRef.current.getProviderModels(provider, subProvider, apiKey || '');
             if (result?.success && Array.isArray(result.models) && result.models.length) {
                 setFilteredModels(result.models);
                 // If current selectedModel is not in the new list, select the first
@@ -88,8 +89,8 @@ function AgentWorkspace() {
             setFilteredModels([]);
             return;
         }
-        fetchProviderModels(selectedProvider, selectedSubProvider);
-    }, [selectedProvider, selectedSubProvider, fetchProviderModels]);
+        fetchProviderModels(selectedProvider, selectedSubProvider, runtimeApiKey);
+    }, [selectedProvider, selectedSubProvider, fetchProviderModels]); // runtimeApiKey intentionally excluded to avoid refetch on every keystroke
 
     const providerOptions = useMemo(() => {
         const lang = i18n?.resolvedLanguage || i18n?.language || 'en';
@@ -495,8 +496,12 @@ function AgentWorkspace() {
         sendAgent('agent_session_context_update', { sessionId: activeSessionId, runtimeContext: nextContext });
     };
 
-    const handleApplyModel = () => {
+    const handleApplyModel = async () => {
         if (!activeSessionId || !isTaskRunning) return;
+        // Re-fetch models with apiKey if provider is api-key (user may have just entered it)
+        if (selectedProvider === 'api-key' && runtimeApiKey && selectedSubProvider) {
+            await fetchProviderModels(selectedProvider, selectedSubProvider, runtimeApiKey);
+        }
         const current = sessionRuntimeContexts[activeSessionId] || { mode: 'ai', envIds: [], walletIds: [] };
         const nextContext = {
             ...current,
@@ -505,7 +510,8 @@ function AgentWorkspace() {
             walletIds: Array.isArray(current.walletIds) ? current.walletIds : [],
             model: selectedModel || defaultModel || availableModels[0]?.value || '',
             provider: selectedProvider || '',
-            subProvider: selectedSubProvider || ''
+            subProvider: selectedSubProvider || '',
+            ...(selectedProvider === 'api-key' && runtimeApiKey ? { apiKey: runtimeApiKey } : {})
         };
         setSessionRuntimeContexts((prev) => ({ ...prev, [activeSessionId]: nextContext }));
         sendAgent('agent_session_context_update', { sessionId: activeSessionId, runtimeContext: nextContext });
@@ -701,6 +707,17 @@ function AgentWorkspace() {
                                             ))}
                                         </Form.Select>
                                     ) : null}
+                                    {selectedProvider === 'api-key' ? (
+                                        <Form.Control
+                                            size="sm"
+                                            type="password"
+                                            value={runtimeApiKey}
+                                            onChange={(e) => setRuntimeApiKey(e.target.value)}
+                                            placeholder={t('agentWorkspace.apiKeyPlaceholder', 'Enter API Key')}
+                                            aria-label="session-api-key"
+                                            disabled={!isTaskRunning}
+                                        />
+                                    ) : null}
                                 </div>
 
                                 <div className="runtime-row runtime-row--model">
@@ -709,7 +726,7 @@ function AgentWorkspace() {
                                         value={selectedModel}
                                         onChange={(e) => setSelectedModel(e.target.value)}
                                         aria-label="session-model"
-                                        disabled={!isTaskRunning || !filteredModels.length || (PROVIDER_MODEL_MAP[selectedProvider]?.requiresApiKey && !apiKeyConfigured)}
+                                        disabled={!isTaskRunning || !filteredModels.length || (PROVIDER_MODEL_MAP[selectedProvider]?.requiresApiKey && !apiKeyConfigured && !runtimeApiKey)}
                                     >
                                         {filteredModels.length ? filteredModels.map((model) => (
                                             <option key={model.value} value={model.value}>

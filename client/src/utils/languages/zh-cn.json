@@ -376,6 +376,7 @@
     "agentWorkspace.provider": "\u63d0\u4f9b\u65b9",
     "agentWorkspace.selectProvider": "\u9009\u62e9\u63d0\u4f9b\u65b9",
     "agentWorkspace.selectSubProvider": "\u9009\u62e9\u5b50\u63d0\u4f9b\u65b9",
+    "agentWorkspace.apiKeyPlaceholder": "\u8f93\u5165 API Key",
     "agentWorkspace.model": "\u6a21\u578b",
     "agentWorkspace.applyModel": "\u5e94\u7528\u6a21\u578b",
     "agentWorkspace.executionState": "\u6267\u884c\u72b6\u6001",

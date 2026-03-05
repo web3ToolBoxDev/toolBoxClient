@@ -480,6 +480,71 @@ describe('AgentWorkspace protocol regression', () => {
         });
     });
 
+    it('shows API Key input when api-key provider is selected and sends it in apply', async () => {
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {}
+                }
+            });
+        });
+
+        fireEvent.click(screen.getByLabelText('toggle-runtime-settings'));
+
+        // API key input should NOT be visible initially
+        expect(screen.queryByLabelText('session-api-key')).not.toBeInTheDocument();
+
+        // Select api-key provider
+        fireEvent.change(screen.getByLabelText('session-provider'), { target: { value: 'api-key' } });
+
+        // API key input should now be visible
+        const apiKeyInput = screen.getByLabelText('session-api-key');
+        expect(apiKeyInput).toBeInTheDocument();
+
+        // Enter API key
+        fireEvent.change(apiKeyInput, { target: { value: 'sk-test-123' } });
+
+        // Select sub-provider and wait for model
+        fireEvent.change(screen.getByLabelText('session-sub-provider'), { target: { value: 'openai' } });
+        await waitFor(() => expect(screen.getByLabelText('session-model').value).toBe('gpt-4o-mini'));
+
+        // Apply and check apiKey is in the payload
+        mockWsManager.sendMessage.mockClear();
+        fireEvent.click(screen.getByRole('button', { name: 'Apply Model' }));
+
+        await waitFor(() => {
+            expectSent((msg) => (
+                msg.type === 'agent_session_context_update'
+                && msg.payload?.runtimeContext?.apiKey === 'sk-test-123'
+                && msg.payload?.runtimeContext?.provider === 'api-key'
+                && msg.payload?.runtimeContext?.subProvider === 'openai'
+            ));
+        });
+
+        // Switch to codex-cli → API key input should disappear
+        fireEvent.change(screen.getByLabelText('session-provider'), { target: { value: 'codex-cli' } });
+        expect(screen.queryByLabelText('session-api-key')).not.toBeInTheDocument();
+    });
+
     it('navigates back to task manage when ai task stops', async () => {
         render(
             <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>

@@ -68,6 +68,7 @@ const state = {
     currentModel: 'gpt-4o-mini',
     currentProvider: '',
     currentSubProvider: '',
+    runtimeApiKey: '',
     apiKeyConfiguredHint: null,
     activeSessionId: '',
     sessions: [],
@@ -403,6 +404,7 @@ function getConfiguredProvider() {
 }
 
 function getRawApiKey() {
+    if (state.runtimeApiKey) return state.runtimeApiKey;
     const cfg = taskData?.taskConfig || {};
     return String(
         cfg?.default?.apiKey ||
@@ -951,6 +953,8 @@ function handleSessionContextUpdate(payload = {}) {
     const nextSubProvider = String(payload?.subProvider || runtimeContext?.subProvider || '').trim();
     if (nextProvider) state.currentProvider = nextProvider;
     if (nextSubProvider) state.currentSubProvider = nextSubProvider;
+    const nextApiKey = String(payload?.apiKey || runtimeContext?.apiKey || '').trim();
+    if (nextApiKey) state.runtimeApiKey = nextApiKey;
     state.runtimeContexts[sessionId] = runtimeContext;
     const providerDisplay = state.currentProvider || 'auto';
     const modelDisplay = runtimeContext.model || state.currentModel;
