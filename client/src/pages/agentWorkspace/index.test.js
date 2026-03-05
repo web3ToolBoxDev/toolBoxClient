@@ -545,6 +545,56 @@ describe('AgentWorkspace protocol regression', () => {
         expect(screen.queryByLabelText('session-api-key')).not.toBeInTheDocument();
     });
 
+    it('refetches models after API key is entered (debounced)', async () => {
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {}
+                }
+            });
+        });
+
+        fireEvent.click(screen.getByLabelText('toggle-runtime-settings'));
+
+        // Select api-key provider → openai sub-provider (no API key yet)
+        fireEvent.change(screen.getByLabelText('session-provider'), { target: { value: 'api-key' } });
+        fireEvent.change(screen.getByLabelText('session-sub-provider'), { target: { value: 'openai' } });
+
+        // Wait for initial model fetch (without API key)
+        await waitFor(() => expect(screen.getByLabelText('session-model').value).toBe('gpt-4o-mini'));
+
+        // Clear call history to track the debounced refetch
+        mockApi.getProviderModels.mockClear();
+
+        // Now enter API key — the debounced effect should refetch after 600ms
+        const apiKeyInput = screen.getByLabelText('session-api-key');
+        fireEvent.change(apiKeyInput, { target: { value: 'sk-my-key-123' } });
+
+        // Wait for the debounced refetch to fire (600ms + processing)
+        await waitFor(() => {
+            expect(mockApi.getProviderModels).toHaveBeenCalledWith('api-key', 'openai', 'sk-my-key-123');
+        }, { timeout: 3000 });
+    });
+
     it('navigates back to task manage when ai task stops', async () => {
         render(
             <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>

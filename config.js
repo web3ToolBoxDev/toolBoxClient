@@ -25,7 +25,7 @@ class Config {
 
             if (process.platform === "win32") {
                 this.platform = "win32";
-                this.defaultExecPath = path.join(this.assetsPath, '/node_for_win/node-v21.6.2-win/node.exe');
+                this.defaultExecPath = path.join(this.assetsPath, '/node_for_win/node-v22.22.0-win/node.exe');
             } else if (process.platform === "darwin") {
                 this.platform = "darwin";
                 this.defaultExecPath = path.join(this.assetsPath, '/node_for_mac/node-v21.6.2-mac/bin/node');

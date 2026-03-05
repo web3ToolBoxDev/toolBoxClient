@@ -90,7 +90,16 @@ function AgentWorkspace() {
             return;
         }
         fetchProviderModels(selectedProvider, selectedSubProvider, runtimeApiKey);
-    }, [selectedProvider, selectedSubProvider, fetchProviderModels]); // runtimeApiKey intentionally excluded to avoid refetch on every keystroke
+    }, [selectedProvider, selectedSubProvider, fetchProviderModels]);
+
+    // Debounced refetch when runtimeApiKey changes (api-key provider only)
+    useEffect(() => {
+        if (selectedProvider !== 'api-key' || !selectedSubProvider || !runtimeApiKey) return;
+        const timer = setTimeout(() => {
+            fetchProviderModels(selectedProvider, selectedSubProvider, runtimeApiKey);
+        }, 600);
+        return () => clearTimeout(timer);
+    }, [runtimeApiKey, selectedProvider, selectedSubProvider, fetchProviderModels]);
 
     const providerOptions = useMemo(() => {
         const lang = i18n?.resolvedLanguage || i18n?.language || 'en';
