@@ -450,7 +450,9 @@ function resolveProvider() {
 function invokeCliAsync(provider, prompt) {
     return new Promise((resolve, reject) => {
         const cmd = provider === 'codex-cli' ? 'codex' : 'claude';
-        const args = ['-p', prompt];
+        // Codex CLI: `codex exec <prompt>` for non-interactive mode
+        // Claude Code: `claude -p <prompt>` for non-interactive print mode
+        const args = provider === 'codex-cli' ? ['exec', prompt] : ['-p', prompt];
         let stdout = '';
         let stderr = '';
         const child = spawn(cmd, args, {
