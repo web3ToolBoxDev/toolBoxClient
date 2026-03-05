@@ -66,7 +66,7 @@ const appendAttachmentQuestionToPrompt = (sessionId, kinds = []) => {
 const state = {
     taskName: 'jobSeekAgent',
     language: 'en',
-    currentModel: 'gpt-4o-mini',
+    currentModel: 'default',
     currentProvider: '',
     currentSubProvider: '',
     runtimeApiKey: '',
@@ -496,7 +496,7 @@ function getRuntimeContext() {
 
 function updateModel(nextModel) {
     const model = String(nextModel || '').trim();
-    if (!model || model === 'default') return;
+    if (!model) return;
     state.currentModel = model;
 }
 
@@ -525,7 +525,7 @@ function announceRuntimeContext() {
     const mode = String(context?.mode || taskData?.taskDataFromFront?.mode || 'unknown');
     const envCount = Array.isArray(context?.envIds) ? context.envIds.length : 0;
     const walletCount = Array.isArray(context?.walletIds) ? context.walletIds.length : 0;
-    const model = String(context?.model || state.currentModel || 'gpt-4o-mini');
+    const model = String(context?.model || state.currentModel || 'default');
     const walletPath = context?.walletExtensionPath ? `, metamaskPath=${context.walletExtensionPath}` : '';
     const { provider, reason } = resolveProvider();
     const providerInfo = provider ? `${provider} (${reason})` : `none (${reason})`;
@@ -587,7 +587,7 @@ async function handleUserInput(payload = {}) {
     }
     const text = String(payload.text || '').trim();
     const runtimeContext = payload.runtimeContext || state.runtimeContexts[sessionId] || {};
-    const model = String(payload.model || runtimeContext?.model || state.currentModel || 'gpt-4o-mini');
+    const model = String(payload.model || runtimeContext?.model || state.currentModel || 'default');
     updateModel(model);
     if (!text) return;
 
@@ -660,7 +660,7 @@ function handleUserOption(payload = {}) {
     const optionLabel = String(payload.optionLabel || optionId || '').trim();
     const questionId = String(payload.questionId || '').trim();
     const runtimeContext = payload.runtimeContext || state.runtimeContexts[sessionId] || {};
-    const model = String(payload.model || runtimeContext?.model || state.currentModel || 'gpt-4o-mini');
+    const model = String(payload.model || runtimeContext?.model || state.currentModel || 'default');
     updateModel(model);
     if (!optionLabel || !optionId) return;
     appendConversation(sessionId, 'user', `[option] ${optionLabel}`);
