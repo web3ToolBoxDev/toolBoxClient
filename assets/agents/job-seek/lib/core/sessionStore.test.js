@@ -34,6 +34,12 @@ describe('sessionStore', () => {
             currentProvider: 'claude-code',
             currentSubProvider: '',
             language: 'zh-CN',
+            envs: [{ id: 'env1', name: 'Test Env' }],
+            wallets: [{ id: 'w1', name: 'Wallet1', bindEnvId: 'env1' }],
+            envsData: { env1: { user_agent: 'Mozilla/5.0', audio: '0.123' } },
+            chromePath: 'C:/chrome.exe',
+            savePath: 'C:/save',
+            walletExtensionPath: 'C:/metamask',
             // Transient keys that should NOT be persisted:
             runtimeLogs: { s1: ['log1'] },
             executionStates: { s1: { paused: false, canceled: false } },
@@ -52,6 +58,12 @@ describe('sessionStore', () => {
         expect(loaded.runtimeContexts.s1.provider).toBe('claude-code');
         expect(loaded.currentModel).toBe('sonnet');
         expect(loaded.language).toBe('zh-CN');
+        expect(loaded.envs).toEqual([{ id: 'env1', name: 'Test Env' }]);
+        expect(loaded.wallets).toHaveLength(1);
+        expect(loaded.envsData.env1.user_agent).toBe('Mozilla/5.0');
+        expect(loaded.chromePath).toBe('C:/chrome.exe');
+        expect(loaded.savePath).toBe('C:/save');
+        expect(loaded.walletExtensionPath).toBe('C:/metamask');
         // Transient keys should NOT be saved
         expect(loaded.runtimeLogs).toBeUndefined();
         expect(loaded.executionStates).toBeUndefined();

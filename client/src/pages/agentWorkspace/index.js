@@ -117,13 +117,29 @@ function AgentWorkspace() {
     const applySnapshot = useCallback((data = {}) => {
         const nextSessions = Array.isArray(data.sessions) ? data.sessions : [];
         setSessions(nextSessions);
-        setActiveSessionId(data.activeSessionId || nextSessions[0]?.id || '');
+        const nextActiveId = data.activeSessionId || nextSessions[0]?.id || '';
+        setActiveSessionId(nextActiveId);
         setConversations(data.conversations || {});
         setSubtasks(data.subtasks || {});
         setArtifacts(data.artifacts || {});
         setRuntimeLogs(data.runtimeLogs || {});
         setPrompts(data.prompts || {});
         setExecutionStates(data.executionStates || {});
+        if (data.runtimeContexts && typeof data.runtimeContexts === 'object') {
+            setSessionRuntimeContexts(data.runtimeContexts);
+            // Restore form fields from persisted runtime context
+            const ctx = data.runtimeContexts[nextActiveId] || {};
+            if (ctx.mode === 'wallet') {
+                setBindMode('wallet');
+            } else if (ctx.mode === 'env') {
+                setBindMode('env');
+            }
+            if (Array.isArray(ctx.envIds) && ctx.envIds[0]) setSelectedEnvId(ctx.envIds[0]);
+            if (Array.isArray(ctx.walletIds) && ctx.walletIds[0]) setSelectedWalletId(ctx.walletIds[0]);
+            if (ctx.provider) setSelectedProvider(ctx.provider);
+            if (ctx.subProvider) setSelectedSubProvider(ctx.subProvider);
+            if (ctx.model && ctx.model !== 'default') setSelectedModel(ctx.model);
+        }
     }, []);
 
     const handleTaskStopped = useCallback((reason = 'AI task stopped') => {
@@ -491,17 +507,28 @@ function AgentWorkspace() {
                 alert(t('agentWorkspace.selectEnvAlert', 'Please select an environment'));
                 return;
             }
-            nextContext = { mode: 'env', envIds: [selectedEnvId], walletIds: [], model: selectedModel || defaultModel || '' };
+            const selectedEnv = envList.find((e) => (e.id || e._id || e.name) === selectedEnvId);
+            nextContext = {
+                mode: 'env',
+                envIds: [selectedEnvId],
+                walletIds: [],
+                envs: selectedEnv ? [selectedEnv] : [],
+                wallets: [],
+                model: selectedModel || defaultModel || ''
+            };
         } else {
             if (!selectedWalletId) {
                 alert(t('agentWorkspace.selectWalletAlert', 'Please select a wallet'));
                 return;
             }
             const wallet = walletList.find((item) => item.id === selectedWalletId);
+            const boundEnv = wallet?.bindEnvId ? envList.find((e) => (e.id || e._id || e.name) === wallet.bindEnvId) : null;
             nextContext = {
                 mode: 'wallet',
                 walletIds: [selectedWalletId],
                 envIds: wallet?.bindEnvId ? [wallet.bindEnvId] : [],
+                wallets: wallet ? [wallet] : [],
+                envs: boundEnv ? [boundEnv] : [],
                 model: selectedModel || defaultModel || ''
             };
         }

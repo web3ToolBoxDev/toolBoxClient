@@ -11,6 +11,7 @@ const {
 const { callAPI } = require('./lib/aiClient');
 const memoryClient = require('./lib/core/memoryClient');
 const sessionStore = require('./lib/core/sessionStore');
+const browserLauncher = require('./lib/core/browserLauncher');
 
 // Persistent data directory for this agent
 const _dataDir = path.join(__dirname, 'data');
@@ -96,8 +97,18 @@ const state = {
     selectedAnswers: {},
     runtimeContexts: {},
     executionStates: {},
-    attachmentKinds: {}
+    attachmentKinds: {},
+    envs: [],
+    wallets: [],
+    envsData: {},
+    chromePath: '',
+    savePath: '',
+    walletExtensionPath: ''
 };
+
+// Track active browser instances (not persisted)
+const _activeBrowsers = {};
+
 
 // --------------- persistence (core) ---------------
 
@@ -170,7 +181,10 @@ function sendSnapshot() {
         runtimeLogs: state.runtimeLogs,
         prompts: state.prompts,
         runtimeContexts: state.runtimeContexts,
-        executionStates: state.executionStates
+        executionStates: state.executionStates,
+        envs: state.envs,
+        wallets: state.wallets,
+        activeBrowserEnvIds: Object.keys(_activeBrowsers)
     });
 }
 
@@ -394,7 +408,7 @@ function ensureDirSync(targetDir) {
 }
 
 function buildArtifactFile(sessionId, type = 'artifact', title = 'artifact') {
-    const saveRoot = taskData?.savePath || taskData?.runtimeContext?.savePath || '';
+    const saveRoot = state.savePath || taskData?.savePath || taskData?.runtimeContext?.savePath || '';
     if (!saveRoot) {
         return { filePath: '', relativePath: '' };
     }
@@ -592,22 +606,44 @@ function updateLanguage(nextLang) {
     }
 }
 
+/**
+ * Extract and persist env/wallet data from the runtime context.
+ * Called when taskData arrives or session context is updated.
+ */
+function extractEnvWalletData(runtimeContext) {
+    if (!runtimeContext || typeof runtimeContext !== 'object') return;
+    if (Array.isArray(runtimeContext.envs) && runtimeContext.envs.length) {
+        state.envs = runtimeContext.envs;
+    }
+    if (Array.isArray(runtimeContext.wallets) && runtimeContext.wallets.length) {
+        state.wallets = runtimeContext.wallets;
+    }
+    if (runtimeContext.envsData && typeof runtimeContext.envsData === 'object' && Object.keys(runtimeContext.envsData).length) {
+        state.envsData = runtimeContext.envsData;
+    }
+    if (runtimeContext.chromePath) state.chromePath = runtimeContext.chromePath;
+    if (runtimeContext.savePath) state.savePath = runtimeContext.savePath;
+    if (runtimeContext.walletExtensionPath) state.walletExtensionPath = runtimeContext.walletExtensionPath;
+}
+
 function announceRuntimeContext() {
     if (runtimeContextAnnounced || !state.activeSessionId) return;
     const context = getRuntimeContext();
     const mode = String(context?.mode || taskData?.taskDataFromFront?.mode || 'unknown');
-    const envCount = Array.isArray(context?.envIds) ? context.envIds.length : 0;
-    const walletCount = Array.isArray(context?.walletIds) ? context.walletIds.length : 0;
+    const envNames = state.envs.map((e) => e.name || e.id || '?').join(', ') || 'none';
+    const walletNames = state.wallets.map((w) => w.name || w.id || '?').join(', ') || 'none';
+    const envCount = state.envs.length;
+    const walletCount = state.wallets.length;
     const model = String(context?.model || state.currentModel || 'default');
-    const walletPath = context?.walletExtensionPath ? `, metamaskPath=${context.walletExtensionPath}` : '';
+    const walletPath = state.walletExtensionPath ? `, metamaskPath=${state.walletExtensionPath}` : '';
     const { provider, reason } = resolveProvider();
     const providerInfo = provider ? `${provider} (${reason})` : `none (${reason})`;
     appendConversation(
         state.activeSessionId,
         'assistant',
         isZh()
-            ? `\u8FD0\u884C\u4E0A\u4E0B\u6587\u5DF2\u52A0\u8F7D\uFF1Aprovider=${providerInfo}, mode=${mode}, env=${envCount}, wallet=${walletCount}, model=${model}${walletPath}`
-            : `Runtime context loaded: provider=${providerInfo}, mode=${mode}, env=${envCount}, wallet=${walletCount}, model=${model}${walletPath}`
+            ? `运行上下文已加载：provider=${providerInfo}, mode=${mode}, env=[${envNames}](${envCount}), wallet=[${walletNames}](${walletCount}), model=${model}${walletPath}`
+            : `Runtime context loaded: provider=${providerInfo}, mode=${mode}, env=[${envNames}](${envCount}), wallet=[${walletNames}](${walletCount}), model=${model}${walletPath}`
     );
     appendRuntimeLog(
         state.activeSessionId,
@@ -1101,22 +1137,115 @@ function handleSessionContextUpdate(payload = {}) {
     const nextApiKey = String(payload?.apiKey || runtimeContext?.apiKey || '').trim();
     if (nextApiKey) state.runtimeApiKey = nextApiKey;
     state.runtimeContexts[sessionId] = runtimeContext;
+    extractEnvWalletData(runtimeContext);
     const providerDisplay = state.currentProvider || 'auto';
     const modelDisplay = runtimeContext.model || state.currentModel;
+    const envNames = state.envs.map((e) => e.name || e.id || '?').join(', ') || 'none';
+    const walletNames = state.wallets.map((w) => w.name || w.id || '?').join(', ') || 'none';
     appendConversation(
         sessionId,
         'assistant',
         isZh()
-            ? `会话上下文已更新：mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=${(runtimeContext.envIds || []).length}, wallet=${(runtimeContext.walletIds || []).length}, model=${modelDisplay}`
-            : `Session context updated: mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=${(runtimeContext.envIds || []).length}, wallet=${(runtimeContext.walletIds || []).length}, model=${modelDisplay}`
+            ? `会话上下文已更新：mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=[${envNames}](${state.envs.length}), wallet=[${walletNames}](${state.wallets.length}), model=${modelDisplay}`
+            : `Session context updated: mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=[${envNames}](${state.envs.length}), wallet=[${walletNames}](${state.wallets.length}), model=${modelDisplay}`
     );
     appendRuntimeLog(
         sessionId,
-        `session_context_updated -> mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=${(runtimeContext.envIds || []).length}, wallet=${(runtimeContext.walletIds || []).length}, model=${modelDisplay}`,
+        `session_context_updated -> mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=${state.envs.length}, wallet=${state.wallets.length}, model=${modelDisplay}`,
         { source: 'context' }
     );
     sendSnapshot();
     scheduleSave();
+}
+
+// --------------- browser launch ---------------
+
+async function handleLaunchBrowser(payload = {}) {
+    const sessionId = payload.sessionId || state.activeSessionId;
+    if (!sessionId || !state.conversations[sessionId]) {
+        emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
+        return;
+    }
+
+    const envId = payload.envId || (state.envs[0] && (state.envs[0].id || state.envs[0]._id));
+    if (!envId) {
+        appendConversation(sessionId, 'assistant', isZh() ? '没有可用的环境配置，请先在运行时设置中选择环境。' : 'No env available. Please select an env in runtime settings first.');
+        return;
+    }
+
+    // Find env data
+    const env = state.envs.find((e) => (e.id || e._id) === envId) || (state.envsData[envId] ? { id: envId, ...state.envsData[envId] } : null);
+    if (!env) {
+        appendConversation(sessionId, 'assistant', isZh() ? `环境 ${envId} 未找到。` : `Env ${envId} not found.`);
+        return;
+    }
+
+    const chromePath = state.chromePath || taskData?.chromePath;
+    const savePath = state.savePath || taskData?.savePath;
+    if (!chromePath || !savePath) {
+        appendConversation(sessionId, 'assistant', isZh() ? 'Chrome路径或保存路径未配置。' : 'Chrome path or save path not configured.');
+        return;
+    }
+
+    // Check if browser already open for this env
+    if (_activeBrowsers[envId]) {
+        appendConversation(sessionId, 'assistant', isZh() ? `环境 ${env.name || envId} 的浏览器已经打开。` : `Browser for env ${env.name || envId} is already open.`);
+        return;
+    }
+
+    const withWallet = payload.withWallet !== false;
+    const wallet = withWallet ? state.wallets.find((w) => w.bindEnvId === envId) : null;
+
+    appendConversation(sessionId, 'assistant', isZh()
+        ? `正在启动浏览器：env=${env.name || envId}${wallet ? ', wallet=yes' : ''}...`
+        : `Launching browser: env=${env.name || envId}${wallet ? ', wallet=yes' : ''}...`);
+    appendRuntimeLog(sessionId, `launch_browser -> env=${envId}, wallet=${!!wallet}`, { source: 'browser' });
+
+    try {
+        const { browser } = await browserLauncher.launchBrowser({
+            chromePath,
+            savePath,
+            env,
+            wallet,
+            walletExtensionPath: state.walletExtensionPath,
+            onLog: (msg) => appendRuntimeLog(sessionId, `[browser] ${msg}`, { source: 'browser' })
+        });
+
+        _activeBrowsers[envId] = browser;
+        browser.on('disconnected', () => {
+            delete _activeBrowsers[envId];
+            appendRuntimeLog(sessionId, `browser disconnected: env=${envId}`, { source: 'browser' });
+            appendConversation(sessionId, 'assistant', isZh()
+                ? `浏览器已关闭：env=${env.name || envId}`
+                : `Browser closed: env=${env.name || envId}`);
+            sendSnapshot();
+        });
+
+        appendConversation(sessionId, 'assistant', isZh()
+            ? `浏览器已启动：env=${env.name || envId}${wallet ? ', MetaMask已加载' : ''}`
+            : `Browser launched: env=${env.name || envId}${wallet ? ', MetaMask loaded' : ''}`);
+        sendSnapshot();
+    } catch (err) {
+        appendConversation(sessionId, 'assistant', isZh()
+            ? `浏览器启动失败：${err.message}`
+            : `Browser launch failed: ${err.message}`);
+        appendRuntimeLog(sessionId, `launch_browser_error: ${err.message}`, { source: 'browser' });
+    }
+}
+
+async function handleCloseBrowser(payload = {}) {
+    const sessionId = payload.sessionId || state.activeSessionId;
+    const envId = payload.envId || (state.envs[0] && (state.envs[0].id || state.envs[0]._id));
+    if (!envId || !_activeBrowsers[envId]) {
+        appendConversation(sessionId, 'assistant', isZh() ? '没有打开的浏览器可以关闭。' : 'No open browser to close.');
+        return;
+    }
+    try {
+        await _activeBrowsers[envId].close();
+    } catch (_) {}
+    delete _activeBrowsers[envId];
+    appendConversation(sessionId, 'assistant', isZh() ? '浏览器已关闭。' : 'Browser closed.');
+    sendSnapshot();
 }
 
 // --------------- heartbeat & WebSocket ---------------
@@ -1159,6 +1288,8 @@ function initWebSocket() {
                     taskData?.taskConfig?.model
                 );
                 state.taskName = taskData?.taskName || state.taskName;
+                extractEnvWalletData(taskData?.runtimeContext);
+                scheduleSave();
                 if (!state.sessions.length) {
                     createSession('');
                 } else {
@@ -1227,8 +1358,19 @@ function initWebSocket() {
                 updateApiKeyConfiguredHint(data?.payload?.apiKeyConfigured);
                 handleExecutionControl(data?.payload || {});
                 break;
+            case 'agent_launch_browser':
+                handleLaunchBrowser(data?.payload || {});
+                break;
+            case 'agent_close_browser':
+                handleCloseBrowser(data?.payload || {});
+                break;
             case 'terminate_process':
                 terminated = true;
+                // Close all active browsers before exiting
+                for (const [eid, br] of Object.entries(_activeBrowsers)) {
+                    try { br.close(); } catch (_) {}
+                    delete _activeBrowsers[eid];
+                }
                 saveState();
                 send({
                     type: 'task_completed',

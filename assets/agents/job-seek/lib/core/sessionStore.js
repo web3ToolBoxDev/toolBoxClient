@@ -23,7 +23,13 @@ const PERSIST_KEYS = [
     'currentModel',
     'currentProvider',
     'currentSubProvider',
-    'language'
+    'language',
+    'envs',
+    'wallets',
+    'envsData',
+    'chromePath',
+    'savePath',
+    'walletExtensionPath'
 ];
 
 /**
