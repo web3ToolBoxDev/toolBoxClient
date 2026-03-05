@@ -491,7 +491,7 @@ function getRuntimeContext() {
 
 function updateModel(nextModel) {
     const model = String(nextModel || '').trim();
-    if (!model) return;
+    if (!model || model === 'default') return;
     state.currentModel = model;
 }
 

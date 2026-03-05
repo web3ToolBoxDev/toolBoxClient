@@ -23,8 +23,8 @@ const mockApi = {
     getFingerPrints: jest.fn().mockResolvedValue({ success: true, data: { 'env-1': { id: 'env-1', name: 'Env A' } } }),
     getProviderModels: jest.fn().mockImplementation((provider, subProvider) => {
         const map = {
-            'codex-cli': { success: true, models: [{ value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' }, { value: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark' }] },
-            'claude-code': { success: true, models: [{ value: 'sonnet', label: 'sonnet (latest)' }, { value: 'opus', label: 'opus (latest)' }, { value: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6' }] },
+            'codex-cli': { success: true, models: [{ value: 'default', label: 'Default (CLI default)' }, { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' }] },
+            'claude-code': { success: true, models: [{ value: 'default', label: 'Default (CLI default)' }, { value: 'sonnet', label: 'sonnet (latest)' }, { value: 'opus', label: 'opus (latest)' }] },
         };
         const subMap = {
             'openai': { success: true, models: [{ value: 'gpt-4o-mini', label: 'gpt-4o-mini' }, { value: 'gpt-4.1', label: 'gpt-4.1' }] },
@@ -401,18 +401,18 @@ describe('AgentWorkspace protocol regression', () => {
         // Sub-provider should NOT be visible initially (no provider selected)
         expect(screen.queryByLabelText('session-sub-provider')).not.toBeInTheDocument();
 
-        // Select codex-cli → model should show gpt-5.3-codex (from backend mock)
+        // Select codex-cli → model should default to 'default' (CLI default)
         fireEvent.change(providerSelect, { target: { value: 'codex-cli' } });
         const modelSelect = screen.getByLabelText('session-model');
-        await waitFor(() => expect(modelSelect.value).toBe('gpt-5.3-codex'));
+        await waitFor(() => expect(modelSelect.value).toBe('default'));
         // Backend should have been called
         expect(mockApi.getProviderModels).toHaveBeenCalledWith('codex-cli', '', '');
         // Sub-provider still hidden for codex-cli
         expect(screen.queryByLabelText('session-sub-provider')).not.toBeInTheDocument();
 
-        // Select claude-code → model should show sonnet (latest)
+        // Select claude-code → model should default to 'default' (CLI default)
         fireEvent.change(providerSelect, { target: { value: 'claude-code' } });
-        await waitFor(() => expect(modelSelect.value).toBe('sonnet'));
+        await waitFor(() => expect(modelSelect.value).toBe('default'));
         expect(screen.queryByLabelText('session-sub-provider')).not.toBeInTheDocument();
 
         // Select api-key → sub-provider dropdown should appear

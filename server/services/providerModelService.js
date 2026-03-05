@@ -6,6 +6,7 @@ const http = require('http');
 
 const KNOWN_MODELS = {
     'codex-cli': [
+        { value: 'default', label: 'Default (CLI default)' },
         { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
         { value: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark' },
         { value: 'gpt-5.2-codex', label: 'gpt-5.2-codex' },
@@ -15,6 +16,7 @@ const KNOWN_MODELS = {
         { value: 'gpt-5-codex-mini', label: 'gpt-5-codex-mini' },
     ],
     'claude-code': [
+        { value: 'default', label: 'Default (CLI default)' },
         { value: 'sonnet', label: 'sonnet (latest)' },
         { value: 'opus', label: 'opus (latest)' },
         { value: 'haiku', label: 'haiku (latest)' },

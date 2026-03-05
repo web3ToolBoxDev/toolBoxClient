@@ -4,6 +4,7 @@ export const PROVIDER_MODEL_MAP = {
         labelZh: 'Codex CLI (订阅)',
         requiresApiKey: false,
         models: [
+            { value: 'default', label: 'Default (CLI default)' },
             { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
             { value: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark' },
             { value: 'gpt-5.2-codex', label: 'gpt-5.2-codex' },
@@ -18,6 +19,7 @@ export const PROVIDER_MODEL_MAP = {
         labelZh: 'Claude Code (订阅)',
         requiresApiKey: false,
         models: [
+            { value: 'default', label: 'Default (CLI default)' },
             { value: 'sonnet', label: 'sonnet (latest)' },
             { value: 'opus', label: 'opus (latest)' },
             { value: 'haiku', label: 'haiku (latest)' },
