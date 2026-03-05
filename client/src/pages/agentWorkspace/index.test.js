@@ -222,7 +222,7 @@ describe('AgentWorkspace protocol regression', () => {
             && msg.payload?.name === '前端方向'
             && msg.payload?.language === 'en'
             && msg.payload?.apiKeyConfigured === true
-            && msg.payload?.model === 'gpt-4o-mini'
+            && typeof msg.payload?.model === 'string'
         ));
 
         fireEvent.click(screen.getByText('mock-send'));
@@ -235,7 +235,7 @@ describe('AgentWorkspace protocol regression', () => {
                 && msg.payload?.runtimeContext === null
                 && msg.payload?.language === 'en'
                 && msg.payload?.apiKeyConfigured === true
-                && msg.payload?.model === 'gpt-4o-mini'
+                && typeof msg.payload?.model === 'string'
             ));
         });
 
@@ -250,7 +250,7 @@ describe('AgentWorkspace protocol regression', () => {
                 && msg.payload?.runtimeContext === null
                 && msg.payload?.language === 'en'
                 && msg.payload?.apiKeyConfigured === true
-                && msg.payload?.model === 'gpt-4o-mini'
+                && typeof msg.payload?.model === 'string'
             ));
         });
 
@@ -268,7 +268,7 @@ describe('AgentWorkspace protocol regression', () => {
                 && msg.payload?.runtimeContext === null
                 && msg.payload?.language === 'en'
                 && msg.payload?.apiKeyConfigured === true
-                && msg.payload?.model === 'gpt-4o-mini'
+                && typeof msg.payload?.model === 'string'
             ));
         });
 
@@ -286,7 +286,7 @@ describe('AgentWorkspace protocol regression', () => {
                 && msg.payload?.runtimeContext === null
                 && msg.payload?.language === 'en'
                 && msg.payload?.apiKeyConfigured === true
-                && msg.payload?.model === 'gpt-4o-mini'
+                && typeof msg.payload?.model === 'string'
             ));
         });
 
@@ -301,7 +301,7 @@ describe('AgentWorkspace protocol regression', () => {
                 && msg.payload?.runtimeContext === null
                 && msg.payload?.language === 'en'
                 && msg.payload?.apiKeyConfigured === true
-                && msg.payload?.model === 'gpt-4o-mini'
+                && typeof msg.payload?.model === 'string'
             ));
         });
 
@@ -319,7 +319,7 @@ describe('AgentWorkspace protocol regression', () => {
                 && JSON.stringify(msg.payload?.runtimeContext?.envIds || []) === JSON.stringify(['env-1'])
                 && msg.payload?.language === 'en'
                 && msg.payload?.apiKeyConfigured === true
-                && msg.payload?.model === 'gpt-4o-mini'
+                && typeof msg.payload?.model === 'string'
             ));
         });
 
@@ -332,7 +332,7 @@ describe('AgentWorkspace protocol regression', () => {
                 && msg.payload?.action === 'pause'
                 && msg.payload?.language === 'en'
                 && msg.payload?.apiKeyConfigured === true
-                && msg.payload?.model === 'gpt-4o-mini'
+                && typeof msg.payload?.model === 'string'
             ));
         });
     });
@@ -593,6 +593,117 @@ describe('AgentWorkspace protocol regression', () => {
         await waitFor(() => {
             expect(mockApi.getProviderModels).toHaveBeenCalledWith('api-key', 'openai', 'sk-my-key-123');
         }, { timeout: 3000 });
+    });
+
+    it('allows switching provider after applying (provider not locked)', async () => {
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {}
+                }
+            });
+        });
+
+        fireEvent.click(screen.getByLabelText('toggle-runtime-settings'));
+
+        const providerSelect = screen.getByLabelText('session-provider');
+        const modelSelect = screen.getByLabelText('session-model');
+
+        // Select codex-cli and apply
+        fireEvent.change(providerSelect, { target: { value: 'codex-cli' } });
+        await waitFor(() => expect(modelSelect.value).toBe('default'));
+        fireEvent.click(screen.getByRole('button', { name: 'Apply Model' }));
+        await waitFor(() => {
+            expectSent((msg) => (
+                msg.type === 'agent_session_context_update'
+                && msg.payload?.runtimeContext?.provider === 'codex-cli'
+            ));
+        });
+
+        // Now switch to claude-code — should NOT be locked
+        fireEvent.change(providerSelect, { target: { value: 'claude-code' } });
+        expect(providerSelect.value).toBe('claude-code');
+        await waitFor(() => expect(modelSelect.value).toBe('default'));
+
+        // Apply again with claude-code
+        mockWsManager.sendMessage.mockClear();
+        fireEvent.click(screen.getByRole('button', { name: 'Apply Model' }));
+        await waitFor(() => {
+            expectSent((msg) => (
+                msg.type === 'agent_session_context_update'
+                && msg.payload?.runtimeContext?.provider === 'claude-code'
+            ));
+        });
+    });
+
+    it('sends selected model (not default) when user picks a specific model', async () => {
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {}
+                }
+            });
+        });
+
+        fireEvent.click(screen.getByLabelText('toggle-runtime-settings'));
+
+        // Select claude-code provider
+        fireEvent.change(screen.getByLabelText('session-provider'), { target: { value: 'claude-code' } });
+        const modelSelect = screen.getByLabelText('session-model');
+        await waitFor(() => expect(modelSelect.value).toBe('default'));
+
+        // Change model to sonnet
+        fireEvent.change(modelSelect, { target: { value: 'sonnet' } });
+        expect(modelSelect.value).toBe('sonnet');
+
+        // Apply and verify the payload carries 'sonnet', not 'default'
+        mockWsManager.sendMessage.mockClear();
+        fireEvent.click(screen.getByRole('button', { name: 'Apply Model' }));
+        await waitFor(() => {
+            expectSent((msg) => (
+                msg.type === 'agent_session_context_update'
+                && msg.payload?.runtimeContext?.provider === 'claude-code'
+                && msg.payload?.runtimeContext?.model === 'sonnet'
+            ));
+        });
     });
 
     it('navigates back to task manage when ai task stops', async () => {

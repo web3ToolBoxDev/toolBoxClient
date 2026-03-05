@@ -19,7 +19,7 @@ function startDbService() {
     if (dbProcess || isStarting) return;
     isStarting = true;
 
-    const execPath = config.getExecPath();
+    const execPath = config.getDefaultExecPath();
     const isBuild = config.getIsBuild();
     const dbservicePath = isBuild
         ? path.resolve(__dirname, '../../dbservice/index.js')

@@ -11,6 +11,13 @@ const {
 const { callAPI } = require('./lib/aiClient');
 const memoryClient = require('./lib/memoryClient');
 
+// Ensure workspace dir has git init (required by Codex CLI)
+const _workspaceDir = path.join(__dirname, 'workspace');
+if (!fs.existsSync(path.join(_workspaceDir, '.git'))) {
+    fs.mkdirSync(_workspaceDir, { recursive: true });
+    try { execSync('git init', { cwd: _workspaceDir, stdio: 'ignore' }); } catch {}
+}
+
 const url = process.argv[2];
 let ws = null;
 let taskData = null;
@@ -21,7 +28,8 @@ let runtimeContextAnnounced = false;
 
 const now = () => Date.now();
 const genId = (prefix = 'id') => `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-const getMemoryNamespace = (sessionId) => `job-seek:${sessionId}`;
+// Use agent-level namespace so memories persist across all sessions
+const getMemoryNamespace = () => 'job-seek';
 
 // --------------- language helpers ---------------
 
@@ -449,18 +457,35 @@ function resolveProvider() {
 /**
  * Invoke CLI (codex or claude) with a prompt. Returns Promise<string>.
  */
-function invokeCliAsync(provider, prompt) {
+function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default') {
     return new Promise((resolve, reject) => {
-        const cmd = provider === 'codex-cli' ? 'codex' : 'claude';
-        // Codex CLI: `codex exec <prompt>` for non-interactive mode
-        // Claude Code: `claude -p <prompt>` for non-interactive print mode
-        const args = provider === 'codex-cli' ? ['exec', prompt] : ['-p', prompt];
+        const escaped = prompt.replace(/"/g, '\\"');
+        let fullCmd;
+        // Both CLIs: prepend memory as context directly in the prompt
+        const memPrefix = memoryContext
+            ? `[What you remember about this user from previous conversations]\\n- ${memoryContext}\\n\\n[User message]\\n`
+            : '';
+        const modelFlag = (model && model !== 'default') ? ` --model ${model}` : '';
+        if (provider === 'codex-cli') {
+            fullCmd = `codex exec${modelFlag} "${memPrefix}${escaped}"`;
+        } else {
+            fullCmd = `claude -p "${memPrefix}${escaped}"${modelFlag}`;
+        }
+        console.log(`[agent:cli] CMD (${provider}): ${fullCmd.slice(0, 200)}...`);
         let stdout = '';
         let stderr = '';
-        const child = spawn(cmd, args, {
+        // Spawn in job-seek workspace dir with CLAUDE.md/AGENTS.md that define
+        // the assistant role. This is a git repo so Codex is happy, and the
+        // CLI reads the workspace CLAUDE.md (job-seek assistant, not coding tool).
+        const workspaceDir = path.join(__dirname, 'workspace');
+        const cleanEnv = { ...process.env };
+        delete cleanEnv.CLAUDECODE; // Allow nested Claude Code invocation
+        const child = spawn(fullCmd, [], {
             stdio: ['ignore', 'pipe', 'pipe'],
             timeout: 120000,
-            shell: process.platform === 'win32'
+            shell: true,
+            cwd: workspaceDir,
+            env: cleanEnv
         });
         child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
         child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
@@ -468,11 +493,13 @@ function invokeCliAsync(provider, prompt) {
             if (code === 0) {
                 resolve(stdout.trim());
             } else {
-                reject(new Error(`${cmd} exited with code ${code}: ${stderr.trim()}`));
+                const cliName = provider === 'codex-cli' ? 'codex' : 'claude';
+                reject(new Error(`${cliName} exited with code ${code}: ${stderr.trim()}`));
             }
         });
         child.on('error', (err) => {
-            reject(new Error(`${cmd} spawn failed: ${err.message}`));
+            const cliName = provider === 'codex-cli' ? 'codex' : 'claude';
+            reject(new Error(`${cliName} spawn failed: ${err.message}`));
         });
     });
 }
@@ -603,23 +630,27 @@ async function handleUserInput(payload = {}) {
 
     try {
         // Search relevant memories to inject as context
-        const ns = getMemoryNamespace(sessionId);
+        const ns = getMemoryNamespace();
         let memoryContext = '';
         try {
+            console.log(`[agent:memory] SEARCH ns=${ns}, query="${text.slice(0, 80)}"`);
             const memories = await memoryClient.search(ns, text, 3);
+            console.log(`[agent:memory] SEARCH result: found ${memories.length} memories`, memories);
+            appendRuntimeLog(sessionId, `memory_search -> ns=${ns}, query="${text.slice(0, 50)}", found=${memories.length}`, { source: 'memory' });
             if (memories.length > 0) {
                 memoryContext = memories.join('\n- ');
                 appendRuntimeLog(sessionId, `memory_recall -> found ${memories.length} relevant memories`, { source: 'memory' });
             }
-        } catch { /* memory unavailable, continue without it */ }
+        } catch (memErr) {
+            console.error(`[agent:memory] SEARCH ERROR:`, memErr);
+            appendRuntimeLog(sessionId, `memory_error -> ${memErr.message || memErr}`, { source: 'memory' });
+        }
 
         let reply = '';
 
         if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
-            const memoryPrefix = memoryContext
-                ? (isZh() ? `[相关记忆]\n- ${memoryContext}\n\n` : `[Relevant memories]\n- ${memoryContext}\n\n`)
-                : '';
-            reply = await invokeCliAsync(activeProvider, memoryPrefix + text);
+            // CLI spawned in temp dir (no repo context) with memory injected
+            reply = await invokeCliAsync(activeProvider, text, memoryContext, model);
         } else if (activeProvider === 'api-key') {
             const subProvider = state.currentSubProvider || 'openai';
             const apiKey = getRawApiKey();
@@ -647,16 +678,28 @@ async function handleUserInput(payload = {}) {
         appendConversation(sessionId, 'assistant', reply || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)'));
         appendRuntimeLog(sessionId, `ai_reply -> ${(reply || '').slice(0, 120)}`, { source: 'ai' });
 
-        // Store user message and AI reply in memory (fire-and-forget)
+        // Store user message in memory — only if it contains factual info (not just questions)
         const llmConfig = activeProvider === 'api-key' ? {
             apiKey: getRawApiKey(),
             model: state.currentModel,
             provider: state.currentSubProvider || 'openai'
         } : {};
-        memoryClient.store(ns, text, { role: 'user', llmConfig }).catch(() => {});
-        if (reply) {
-            memoryClient.store(ns, reply, { role: 'assistant', llmConfig }).catch(() => {});
+        const isQuestion = /^[^.]{0,80}[?？]$/.test(text.trim()) || text.trim().length < 15;
+        if (!isQuestion) {
+            console.log(`[agent:memory] STORE user msg to ns=${ns}, text="${text.slice(0, 80)}"`);
+            memoryClient.store(ns, text, { role: 'user', llmConfig })
+                .then((r) => {
+                    console.log(`[agent:memory] STORE user msg SUCCESS:`, JSON.stringify(r));
+                    appendRuntimeLog(sessionId, `memory_store -> user msg stored to ${ns}`, { source: 'memory' });
+                })
+                .catch((e) => {
+                    console.error(`[agent:memory] STORE user msg ERROR:`, e);
+                    appendRuntimeLog(sessionId, `memory_store_error -> ${e.message || e}`, { source: 'memory' });
+                });
+        } else {
+            console.log(`[agent:memory] SKIP storing question: "${text.slice(0, 80)}"`);
         }
+        // Skip storing AI replies — they're verbose and pollute search results
     } catch (err) {
         const errorMsg = String(err?.message || err || 'Unknown error').slice(0, 500);
         appendConversation(sessionId, 'assistant', isZh() ? `\u274C AI \u8C03\u7528\u5931\u8D25\uFF1A${errorMsg}` : `\u274C AI call failed: ${errorMsg}`);

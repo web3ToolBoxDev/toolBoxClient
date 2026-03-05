@@ -58,7 +58,21 @@ async function search(namespace, query, topK = 5) {
             topK
         });
         const memories = result?.results?.results || result?.results || [];
-        return memories.map((m) => m.memory || m.text || '').filter(Boolean);
+        // Filter by minimum relevance score and deduplicate
+        const MIN_SCORE = 0.05;
+        const seen = new Set();
+        return memories
+            .filter((m) => (m.score || 0) >= MIN_SCORE)
+            .map((m) => {
+                const text = m.memory || m.text || '';
+                console.log(`[memoryClient] result: score=${(m.score || 0).toFixed(4)} text="${text.slice(0, 60)}"`);
+                return text;
+            })
+            .filter((text) => {
+                if (!text || seen.has(text)) return false;
+                seen.add(text);
+                return true;
+            });
     } catch (err) {
         console.error('[memoryClient] search failed:', err.message);
         return [];

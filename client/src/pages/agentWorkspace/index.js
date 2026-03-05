@@ -281,7 +281,7 @@ function AgentWorkspace() {
                 })
                 .filter(Boolean);
             const configuredModel = String(cfg?.default?.model || cfg?.model || '').trim();
-            const fallbackModel = configuredModel || normalizedModels[0]?.value || 'gpt-4o-mini';
+            const fallbackModel = configuredModel || normalizedModels[0]?.value || 'default';
             const nextModels = normalizedModels.length
                 ? normalizedModels
                 : [{ value: fallbackModel, label: fallbackModel }];
@@ -368,6 +368,8 @@ function AgentWorkspace() {
         return localized || taskMeta?.taskDisplayName || taskName || 'AI Workspace';
     }, [i18n?.language, i18n?.resolvedLanguage, taskMeta, taskName]);
 
+    // Restore UI selections when switching sessions (NOT when context updates within same session)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         if (!activeSessionId) {
             setSelectedEnvId('');
@@ -384,10 +386,12 @@ function AgentWorkspace() {
             setSelectedEnvId(Array.isArray(ctx.envIds) ? (ctx.envIds[0] || '') : '');
             setSelectedWalletId(Array.isArray(ctx.walletIds) ? (ctx.walletIds[0] || '') : '');
         }
-        setSelectedModel(String(ctx.model || defaultModel || availableModels[0]?.value || '').trim());
+        // Only restore model/provider from session context if it has been explicitly set;
+        // otherwise preserve current UI selections so switching sessions doesn't reset them.
+        if (ctx.model) setSelectedModel(String(ctx.model).trim());
         if (ctx.provider) setSelectedProvider(ctx.provider);
         if (ctx.subProvider) setSelectedSubProvider(ctx.subProvider);
-    }, [activeSessionId, availableModels, defaultModel, sessionRuntimeContexts]);
+    }, [activeSessionId]);
 
     const handleCreateSession = () => {
         if (!isTaskRunning) return;
