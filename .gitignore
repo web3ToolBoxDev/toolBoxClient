@@ -12,3 +12,4 @@ client/coverage/
 *.db
 dbservice/node_modules/
 assets/agents/*/workspace/.git/
+assets/agents/*/data/

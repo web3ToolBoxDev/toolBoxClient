@@ -24,7 +24,7 @@ function request(method, urlPath, body) {
 }
 
 /**
- * Store a memory for a given namespace (e.g., "job-seek:sessionId").
+ * Store a memory for a given namespace.
  * @param {string} namespace - Unique namespace for isolation
  * @param {string} text - Text to store
  * @param {object} [options] - Optional: role, metadata, llmConfig
@@ -58,7 +58,6 @@ async function search(namespace, query, topK = 5) {
             topK
         });
         const memories = result?.results?.results || result?.results || [];
-        // Filter by minimum relevance score and deduplicate
         const MIN_SCORE = 0.05;
         const seen = new Set();
         return memories

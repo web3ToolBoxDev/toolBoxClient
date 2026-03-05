@@ -9,7 +9,11 @@ const {
     buildAttachmentActionQuestion
 } = require('./lib/prompts');
 const { callAPI } = require('./lib/aiClient');
-const memoryClient = require('./lib/memoryClient');
+const memoryClient = require('./lib/core/memoryClient');
+const sessionStore = require('./lib/core/sessionStore');
+
+// Persistent data directory for this agent
+const _dataDir = path.join(__dirname, 'data');
 
 // Ensure workspace dir has git init (required by Codex CLI)
 const _workspaceDir = path.join(__dirname, 'workspace');
@@ -94,6 +98,44 @@ const state = {
     executionStates: {},
     attachmentKinds: {}
 };
+
+// --------------- persistence (core) ---------------
+
+function restoreState() {
+    const saved = sessionStore.load(_dataDir);
+    if (!saved) return false;
+    for (const key of sessionStore.PERSIST_KEYS) {
+        if (saved[key] !== undefined) {
+            state[key] = saved[key];
+        }
+    }
+    // Reset transient per-session state
+    for (const sid of Object.keys(state.conversations)) {
+        if (!state.runtimeLogs[sid]) state.runtimeLogs[sid] = [];
+        if (!state.executionStates[sid]) state.executionStates[sid] = { paused: false, canceled: false };
+    }
+    console.log(`[agent] Restored ${state.sessions.length} sessions`);
+    return state.sessions.length > 0;
+}
+
+function saveState() {
+    sessionStore.save(_dataDir, state);
+}
+
+// Restore on startup
+restoreState();
+
+// Debounced auto-save: triggers after state mutations, avoids excessive writes
+let _saveTimer = null;
+function scheduleSave() {
+    if (_saveTimer) clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(() => { _saveTimer = null; saveState(); }, 2000);
+}
+
+// Save on exit
+process.on('SIGTERM', () => { saveState(); process.exit(0); });
+process.on('SIGINT', () => { saveState(); process.exit(0); });
+process.on('exit', () => { saveState(); });
 
 // --------------- transport ---------------
 
@@ -183,6 +225,7 @@ function createSession(name = '') {
     appendRuntimeLog(session.id, 'Session created', { source: 'system' });
     emitSessionList();
     sendSnapshot();
+    scheduleSave();
 }
 
 function deleteSession(sessionId) {
@@ -208,6 +251,7 @@ function deleteSession(sessionId) {
     }
     emitSessionList();
     sendSnapshot();
+    scheduleSave();
 }
 
 function switchSession(sessionId) {
@@ -677,6 +721,7 @@ async function handleUserInput(payload = {}) {
 
         appendConversation(sessionId, 'assistant', reply || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)'));
         appendRuntimeLog(sessionId, `ai_reply -> ${(reply || '').slice(0, 120)}`, { source: 'ai' });
+        scheduleSave();
 
         // Store user message in memory — only if it contains factual info (not just questions)
         const llmConfig = activeProvider === 'api-key' ? {
@@ -1071,6 +1116,7 @@ function handleSessionContextUpdate(payload = {}) {
         { source: 'context' }
     );
     sendSnapshot();
+    scheduleSave();
 }
 
 // --------------- heartbeat & WebSocket ---------------
@@ -1183,6 +1229,7 @@ function initWebSocket() {
                 break;
             case 'terminate_process':
                 terminated = true;
+                saveState();
                 send({
                     type: 'task_completed',
                     taskName: state.taskName,
