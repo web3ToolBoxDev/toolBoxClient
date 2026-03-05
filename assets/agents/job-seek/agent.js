@@ -8,6 +8,7 @@ const {
     buildPresetPrompt,
     buildAttachmentActionQuestion
 } = require('./lib/prompts');
+const { callAPI } = require('./lib/aiClient');
 
 const url = process.argv[2];
 let ws = null;
@@ -552,7 +553,17 @@ function announceRuntimeContext() {
 
 // --------------- message handlers ---------------
 
-function handleUserInput(payload = {}) {
+/**
+ * Build conversation history for AI context (only user/assistant messages, no system messages).
+ */
+function getConversationForAI(sessionId) {
+    const msgs = state.conversations[sessionId] || [];
+    return msgs
+        .filter((m) => m.role === 'user' || (m.role === 'assistant' && !m._system))
+        .map((m) => ({ role: m.role, text: m.content || '' }));
+}
+
+async function handleUserInput(payload = {}) {
     const sessionId = payload.sessionId || state.activeSessionId;
     if (!sessionId || !state.conversations[sessionId]) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
@@ -577,34 +588,50 @@ function handleUserInput(payload = {}) {
     const model = String(payload.model || runtimeContext?.model || state.currentModel || 'gpt-4o-mini');
     updateModel(model);
     if (!text) return;
+
     appendConversation(sessionId, 'user', text);
     appendRuntimeLog(sessionId, `user_input -> ${text.slice(0, 120)}`, { source: 'user' });
-    appendConversation(sessionId, 'assistant', isZh() ? `\u6536\u5230\u4F60\u7684\u8F93\u5165\uFF1A${text}` : `Received your input: ${text}`);
-    if (runtimeContext && (runtimeContext.mode || (Array.isArray(runtimeContext.envIds) && runtimeContext.envIds.length) || (Array.isArray(runtimeContext.walletIds) && runtimeContext.walletIds.length))) {
-        appendConversation(
-            sessionId,
-            'assistant',
-            isZh()
-                ? `\u5F53\u524D\u4F1A\u8BDD\u4E0A\u4E0B\u6587\uFF1Amode=${runtimeContext.mode || 'unknown'}, env=${(runtimeContext.envIds || []).length}, wallet=${(runtimeContext.walletIds || []).length}, model=${model}`
-                : `Session context: mode=${runtimeContext.mode || 'unknown'}, env=${(runtimeContext.envIds || []).length}, wallet=${(runtimeContext.walletIds || []).length}, model=${model}`
-        );
-    }
+
     const { provider: activeProvider } = resolveProvider();
-    appendConversation(sessionId, 'assistant', isZh() ? `AI \u5DF2\u5904\u7406\u4F60\u7684\u8F93\u5165 [${activeProvider}]\uFF0C\u6B63\u5728\u751F\u6210\u4E0B\u4E00\u6B65\u5EFA\u8BAE\u3002` : `AI processed your input [${activeProvider}] and is preparing next suggestions.`);
-    appendConversation(
-        sessionId,
-        'assistant',
-        isZh() ? '\u8BF7\u9009\u62E9\u6267\u884C\u65B9\u5F0F\uFF1A' : 'Choose execution mode:',
-        {
-            questionId: 'q_execute_mode',
-            questionText: isZh() ? '\u8BF7\u9009\u62E9\u6267\u884C\u65B9\u5F0F' : 'Choose execution mode',
-            selectedOptionId: '',
-            options: [
-                { id: 'exec_now', label: isZh() ? '\u7ACB\u5373\u6267\u884C' : 'Run now' },
-                { id: 'exec_schedule', label: isZh() ? '\u5B9A\u65F6\u6267\u884C' : 'Schedule' }
-            ]
+    // Show thinking indicator
+    const thinkingMsg = isZh() ? `\u2728 \u6B63\u5728\u601D\u8003\u4E2D [${activeProvider}]...` : `\u2728 Thinking [${activeProvider}]...`;
+    appendConversation(sessionId, 'assistant', thinkingMsg, { _system: true, _thinking: true });
+
+    try {
+        let reply = '';
+
+        if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
+            // CLI providers — invoke CLI with full user message
+            reply = await invokeCliAsync(activeProvider, text);
+        } else if (activeProvider === 'api-key') {
+            // API Key provider — call REST API with conversation history
+            const subProvider = state.currentSubProvider || 'openai';
+            const apiKey = getRawApiKey();
+            const conversationHistory = getConversationForAI(sessionId);
+            const result = await callAPI({
+                subProvider,
+                apiKey,
+                model: state.currentModel,
+                conversationHistory,
+                systemPrompt: isZh()
+                    ? '\u4F60\u662F\u4E00\u4E2A\u6709\u7528\u7684 AI \u52A9\u624B\u3002\u8BF7\u7528\u4E0E\u7528\u6237\u76F8\u540C\u7684\u8BED\u8A00\u56DE\u590D\u3002'
+                    : 'You are a helpful AI assistant. Reply in the same language as the user.'
+            });
+            reply = result.content || '';
+            if (result.usage) {
+                appendRuntimeLog(sessionId, `token_usage -> ${JSON.stringify(result.usage)}`, { source: 'ai' });
+            }
+        } else {
+            reply = isZh() ? '\u672A\u77E5\u7684 Provider\u3002' : 'Unknown provider.';
         }
-    );
+
+        appendConversation(sessionId, 'assistant', reply || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)'));
+        appendRuntimeLog(sessionId, `ai_reply -> ${(reply || '').slice(0, 120)}`, { source: 'ai' });
+    } catch (err) {
+        const errorMsg = String(err?.message || err || 'Unknown error').slice(0, 500);
+        appendConversation(sessionId, 'assistant', isZh() ? `\u274C AI \u8C03\u7528\u5931\u8D25\uFF1A${errorMsg}` : `\u274C AI call failed: ${errorMsg}`);
+        appendRuntimeLog(sessionId, `ai_error -> ${errorMsg}`, { source: 'error' });
+    }
 }
 
 function handleUserOption(payload = {}) {
