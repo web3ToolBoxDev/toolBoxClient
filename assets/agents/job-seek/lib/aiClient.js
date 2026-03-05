@@ -50,10 +50,49 @@ function buildMessages(conversationHistory, systemPrompt) {
     return messages;
 }
 
+/**
+ * Build a multimodal user message with text + optional image.
+ * @param {string} text - Text prompt
+ * @param {string} [imageDataUri] - data:image/...;base64,... URI
+ * @param {string} [imageMimeType] - e.g. 'image/png'
+ * @returns {{ openai: object, anthropic: object, google: object }} Provider-specific content
+ */
+function buildMultimodalContent(text, imageDataUri, imageMimeType) {
+    const base64 = imageDataUri ? imageDataUri.replace(/^data:[^;]+;base64,/, '') : '';
+    const mime = imageMimeType || 'image/png';
+    return {
+        openai: base64
+            ? [
+                { type: 'text', text },
+                { type: 'image_url', image_url: { url: imageDataUri } }
+            ]
+            : text,
+        anthropic: base64
+            ? [
+                { type: 'image', source: { type: 'base64', media_type: mime, data: base64 } },
+                { type: 'text', text }
+            ]
+            : text,
+        google: base64
+            ? [
+                { text },
+                { inline_data: { mime_type: mime, data: base64 } }
+            ]
+            : [{ text }]
+    };
+}
+
 // --------------- OpenAI ---------------
 
-async function callOpenAI({ apiKey, model, conversationHistory, systemPrompt }) {
+async function callOpenAI({ apiKey, model, conversationHistory, systemPrompt, imageContent }) {
     const messages = buildMessages(conversationHistory, systemPrompt);
+    // If the last user message needs image content, replace its content with multimodal
+    if (imageContent && messages.length) {
+        const last = messages[messages.length - 1];
+        if (last.role === 'user') {
+            last.content = imageContent.openai;
+        }
+    }
     const body = JSON.stringify({
         model: model || 'gpt-4o-mini',
         messages,
@@ -76,12 +115,19 @@ async function callOpenAI({ apiKey, model, conversationHistory, systemPrompt }) 
 
 // --------------- Anthropic ---------------
 
-async function callAnthropic({ apiKey, model, conversationHistory, systemPrompt }) {
+async function callAnthropic({ apiKey, model, conversationHistory, systemPrompt, imageContent }) {
     // Anthropic uses a different message format — system is a top-level field
     const messages = [];
     for (const msg of conversationHistory) {
         if (msg.role === 'user' || msg.role === 'assistant') {
             messages.push({ role: msg.role, content: msg.text || msg.content || '' });
+        }
+    }
+    // Replace last user message content with multimodal if image provided
+    if (imageContent && messages.length) {
+        const last = messages[messages.length - 1];
+        if (last.role === 'user') {
+            last.content = imageContent.anthropic;
         }
     }
     const body = {
@@ -110,7 +156,7 @@ async function callAnthropic({ apiKey, model, conversationHistory, systemPrompt 
 
 // --------------- Google Gemini ---------------
 
-async function callGoogle({ apiKey, model, conversationHistory, systemPrompt }) {
+async function callGoogle({ apiKey, model, conversationHistory, systemPrompt, imageContent }) {
     const geminiModel = model || 'gemini-2.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
 
@@ -121,6 +167,13 @@ async function callGoogle({ apiKey, model, conversationHistory, systemPrompt }) 
             contents.push({ role: 'user', parts: [{ text: msg.text || msg.content || '' }] });
         } else if (msg.role === 'assistant') {
             contents.push({ role: 'model', parts: [{ text: msg.text || msg.content || '' }] });
+        }
+    }
+    // Replace last user message parts with multimodal if image provided
+    if (imageContent && contents.length) {
+        const last = contents[contents.length - 1];
+        if (last.role === 'user') {
+            last.parts = imageContent.google;
         }
     }
     const body = { contents };
@@ -152,14 +205,14 @@ async function callGoogle({ apiKey, model, conversationHistory, systemPrompt }) 
  * @param {string} [opts.systemPrompt]
  * @returns {Promise<{ content: string, finishReason: string, usage: object|null }>}
  */
-async function callAPI({ subProvider, apiKey, model, conversationHistory, systemPrompt }) {
+async function callAPI({ subProvider, apiKey, model, conversationHistory, systemPrompt, imageContent }) {
     switch (subProvider) {
         case 'openai':
-            return callOpenAI({ apiKey, model, conversationHistory, systemPrompt });
+            return callOpenAI({ apiKey, model, conversationHistory, systemPrompt, imageContent });
         case 'anthropic':
-            return callAnthropic({ apiKey, model, conversationHistory, systemPrompt });
+            return callAnthropic({ apiKey, model, conversationHistory, systemPrompt, imageContent });
         case 'google':
-            return callGoogle({ apiKey, model, conversationHistory, systemPrompt });
+            return callGoogle({ apiKey, model, conversationHistory, systemPrompt, imageContent });
         default:
             throw new Error(`Unsupported sub-provider: ${subProvider}`);
     }
@@ -171,5 +224,6 @@ module.exports = {
     callAnthropic,
     callGoogle,
     buildMessages,
+    buildMultimodalContent,
     httpRequest
 };

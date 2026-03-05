@@ -127,18 +127,10 @@ function AgentWorkspace() {
         setExecutionStates(data.executionStates || {});
         if (data.runtimeContexts && typeof data.runtimeContexts === 'object') {
             setSessionRuntimeContexts(data.runtimeContexts);
-            // Restore form fields from persisted runtime context
-            const ctx = data.runtimeContexts[nextActiveId] || {};
-            if (ctx.mode === 'wallet') {
-                setBindMode('wallet');
-            } else if (ctx.mode === 'env') {
-                setBindMode('env');
-            }
-            if (Array.isArray(ctx.envIds) && ctx.envIds[0]) setSelectedEnvId(ctx.envIds[0]);
-            if (Array.isArray(ctx.walletIds) && ctx.walletIds[0]) setSelectedWalletId(ctx.walletIds[0]);
-            if (ctx.provider) setSelectedProvider(ctx.provider);
-            if (ctx.subProvider) setSelectedSubProvider(ctx.subProvider);
-            if (ctx.model && ctx.model !== 'default') setSelectedModel(ctx.model);
+            // Form fields (provider, model, env, wallet) are restored by the
+            // useEffect on activeSessionId — no need to set them here.
+            // Setting them here would overwrite the user's in-progress dropdown
+            // selections whenever a snapshot arrives (e.g., after Apply Model).
         }
     }, []);
 
@@ -250,9 +242,9 @@ function AgentWorkspace() {
                 ...(payload && typeof payload === 'object' ? payload : {}),
                 language,
                 apiKeyConfigured: typeof payload?.apiKeyConfigured === 'boolean' ? payload.apiKeyConfigured : apiKeyConfigured,
-                ...(selectedModel ? { model: selectedModel } : {}),
-                ...(selectedProvider ? { provider: selectedProvider } : {}),
-                ...(selectedSubProvider ? { subProvider: selectedSubProvider } : {})
+                model: selectedModel || '',
+                provider: selectedProvider || '',
+                subProvider: selectedSubProvider || ''
             }
         }));
     }, [apiKeyConfigured, i18n?.language, i18n?.resolvedLanguage, selectedModel, selectedProvider, selectedSubProvider, taskName]);
@@ -402,11 +394,12 @@ function AgentWorkspace() {
             setSelectedEnvId(Array.isArray(ctx.envIds) ? (ctx.envIds[0] || '') : '');
             setSelectedWalletId(Array.isArray(ctx.walletIds) ? (ctx.walletIds[0] || '') : '');
         }
-        // Only restore model/provider from session context if it has been explicitly set;
-        // otherwise preserve current UI selections so switching sessions doesn't reset them.
-        if (ctx.model) setSelectedModel(String(ctx.model).trim());
-        if (ctx.provider) setSelectedProvider(ctx.provider);
-        if (ctx.subProvider) setSelectedSubProvider(ctx.subProvider);
+        // Always restore model/provider/subProvider from session context.
+        // Reset to empty if the session has no applied model — prevents leaking from other sessions.
+        setSelectedProvider(ctx.provider || '');
+        setSelectedSubProvider(ctx.subProvider || '');
+        setSelectedModel(ctx.model ? String(ctx.model).trim() : '');
+        setRuntimeApiKey(ctx.apiKey || '');
     }, [activeSessionId]);
 
     const handleCreateSession = () => {
@@ -538,6 +531,10 @@ function AgentWorkspace() {
 
     const handleApplyModel = async () => {
         if (!activeSessionId || !isTaskRunning) return;
+        if (!activeExecutionState.paused) {
+            alert(t('agentWorkspace.pauseBeforeApply', 'Please pause the session before changing the model.'));
+            return;
+        }
         // Re-fetch models with apiKey if provider is api-key (user may have just entered it)
         if (selectedProvider === 'api-key' && runtimeApiKey && selectedSubProvider) {
             await fetchProviderModels(selectedProvider, selectedSubProvider, runtimeApiKey);

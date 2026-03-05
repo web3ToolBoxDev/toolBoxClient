@@ -8,8 +8,10 @@ const {
     buildPresetPrompt,
     buildAttachmentActionQuestion
 } = require('./lib/prompts');
-const { callAPI } = require('./lib/aiClient');
+const { callAPI, buildMultimodalContent } = require('./lib/aiClient');
 const memoryClient = require('./lib/core/memoryClient');
+const knowledgeClient = require('./lib/core/knowledgeClient');
+const fileParser = require('./lib/core/fileParser');
 const sessionStore = require('./lib/core/sessionStore');
 const browserLauncher = require('./lib/core/browserLauncher');
 
@@ -71,7 +73,7 @@ const appendAttachmentQuestionToPrompt = (sessionId, kinds = []) => {
     }
     state.prompts[sessionId] = {
         text: base.text || (isZh() ? '\u8BF7\u9009\u62E9\u9884\u8BBE\u95EE\u9898\u5E76\u56DE\u7B54' : 'Select preset questions and answer'),
-        attachmentPolicy: base.attachmentPolicy || { maxSizeMB: 4, allowedKinds: ['image', 'pdf', 'sheet', 'text'] },
+        attachmentPolicy: base.attachmentPolicy || { maxSizeMB: 4, allowedKinds: ['image', 'pdf', 'doc', 'sheet', 'text'] },
         questions
     };
 };
@@ -103,7 +105,8 @@ const state = {
     envsData: {},
     chromePath: '',
     savePath: '',
-    walletExtensionPath: ''
+    walletExtensionPath: '',
+    resumeProfile: ''
 };
 
 // Track active browser instances (not persisted)
@@ -124,6 +127,10 @@ function restoreState() {
     for (const sid of Object.keys(state.conversations)) {
         if (!state.runtimeLogs[sid]) state.runtimeLogs[sid] = [];
         if (!state.executionStates[sid]) state.executionStates[sid] = { paused: false, canceled: false };
+        // Refresh attachment policy in existing prompts to pick up newly supported kinds
+        if (state.prompts[sid] && state.prompts[sid].attachmentPolicy) {
+            state.prompts[sid].attachmentPolicy.allowedKinds = ['image', 'pdf', 'doc', 'sheet', 'text'];
+        }
     }
     console.log(`[agent] Restored ${state.sessions.length} sessions`);
     return state.sessions.length > 0;
@@ -310,13 +317,29 @@ function appendConversation(sessionId, role, content, extra = {}) {
     });
 }
 
+/**
+ * Sanitize text before storing in mem0 memory.
+ * BridgeLLM (offline fact extractor) splits on periods as sentence boundaries,
+ * so "Vue.js" becomes "Vue" + "js". Strip markdown and neutralize mid-word dots.
+ */
+function sanitizeForMemory(text) {
+    return text
+        .replace(/^[-*\u2022\s]+/, '')                       // strip leading bullets/spaces
+        .replace(/\*+/g, '')                                 // remove all asterisks (markdown bold/italic)
+        .replace(/`/g, '')                                   // remove backticks (markdown code)
+        .replace(/\.(?=js|ts|py|css|html|net|io)\b/gi, ' ') // .js/.ts etc → space (prevent period splitting)
+        .replace(/\s{2,}/g, ' ')                             // collapse whitespace
+        .trim();
+}
+
 function inferAttachmentKind(item = {}) {
     const mime = String(item?.mimeType || '').toLowerCase();
     const name = String(item?.name || '').toLowerCase();
     if (mime.startsWith('image/') || /\.(png|jpg|jpeg|webp|gif|bmp)$/.test(name)) return 'image';
     if (mime.includes('pdf') || /\.pdf$/.test(name)) return 'pdf';
+    if (mime.includes('wordprocessingml') || mime.includes('msword') || /\.docx?$/.test(name)) return 'doc';
     if (mime.includes('spreadsheet') || /\.(xlsx|xls|csv)$/.test(name)) return 'sheet';
-    if (mime.startsWith('text/') || /\.(txt|md|json)$/.test(name)) return 'text';
+    if (mime.startsWith('text/') || /\.(txt|md|json|html?)$/.test(name)) return 'text';
     return 'file';
 }
 
@@ -514,28 +537,34 @@ function resolveProvider() {
 
 /**
  * Invoke CLI (codex or claude) with a prompt. Returns Promise<string>.
+ * When memoryContext is provided, writes it to a temp file to avoid shell escaping issues.
  */
 function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default') {
     return new Promise((resolve, reject) => {
         const escaped = prompt.replace(/"/g, '\\"');
         let fullCmd;
-        // Both CLIs: prepend memory as context directly in the prompt
-        const memPrefix = memoryContext
-            ? `[What you remember about this user from previous conversations]\\n- ${memoryContext}\\n\\n[User message]\\n`
-            : '';
         const modelFlag = (model && model !== 'default') ? ` --model ${model}` : '';
+        const workspaceDir = path.join(__dirname, 'workspace');
+
+        // Write memory context to temp file if present (avoids shell escaping issues with newlines/special chars)
+        let contextFilePath = '';
+        if (memoryContext) {
+            contextFilePath = path.join(workspaceDir, `_context_${Date.now()}.txt`);
+            fs.writeFileSync(contextFilePath, memoryContext, 'utf-8');
+        }
+
+        const contextInstruction = contextFilePath
+            ? `First, read the context file at ${contextFilePath} - it contains important background information about this user. Use that information to answer the following question. `
+            : '';
+
         if (provider === 'codex-cli') {
-            fullCmd = `codex exec${modelFlag} "${memPrefix}${escaped}"`;
+            fullCmd = `codex exec${modelFlag} "${contextInstruction}${escaped}"`;
         } else {
-            fullCmd = `claude -p "${memPrefix}${escaped}"${modelFlag}`;
+            fullCmd = `claude -p "${contextInstruction}${escaped}"${modelFlag}`;
         }
         console.log(`[agent:cli] CMD (${provider}): ${fullCmd.slice(0, 200)}...`);
         let stdout = '';
         let stderr = '';
-        // Spawn in job-seek workspace dir with CLAUDE.md/AGENTS.md that define
-        // the assistant role. This is a git repo so Codex is happy, and the
-        // CLI reads the workspace CLAUDE.md (job-seek assistant, not coding tool).
-        const workspaceDir = path.join(__dirname, 'workspace');
         const cleanEnv = { ...process.env };
         delete cleanEnv.CLAUDECODE; // Allow nested Claude Code invocation
         const child = spawn(fullCmd, [], {
@@ -547,7 +576,11 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default')
         });
         child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
         child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+        const cleanupContext = () => {
+            if (contextFilePath) try { fs.unlinkSync(contextFilePath); } catch (_) {}
+        };
         child.on('close', (code) => {
+            cleanupContext();
             if (code === 0) {
                 resolve(stdout.trim());
             } else {
@@ -556,6 +589,7 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default')
             }
         });
         child.on('error', (err) => {
+            cleanupContext();
             const cliName = provider === 'codex-cli' ? 'codex' : 'claude';
             reject(new Error(`${cliName} spawn failed: ${err.message}`));
         });
@@ -709,21 +743,39 @@ async function handleUserInput(payload = {}) {
     appendConversation(sessionId, 'assistant', thinkingMsg, { _system: true, _thinking: true });
 
     try {
-        // Search relevant memories to inject as context
-        const ns = getMemoryNamespace();
+        // Build context: knowledge store (FTS + expand) → mem0 fallback → state fallback
         let memoryContext = '';
         try {
-            console.log(`[agent:memory] SEARCH ns=${ns}, query="${text.slice(0, 80)}"`);
+            console.log(`[agent:knowledge] Searching for: "${text.slice(0, 80)}"`);
+            const { docs, source } = await knowledgeClient.searchAndExpand(text);
+            if (docs.length > 0) {
+                memoryContext = docs.map(d => {
+                    const label = d.subType ? `${d.type}/${d.subType}` : d.type;
+                    return `[${label}]\n${d.content}`;
+                }).join('\n\n');
+                console.log(`[agent:knowledge] Found ${docs.length} docs via ${source}`);
+                appendRuntimeLog(sessionId, `knowledge_search -> query="${text.slice(0, 50)}", found=${docs.length} docs via ${source}`, { source: 'knowledge' });
+            }
+        } catch (ksErr) {
+            console.error('[agent:knowledge] search error:', ksErr.message);
+        }
+
+        // Fallback to state.resumeProfile if knowledge store returned nothing
+        if (!memoryContext && state.resumeProfile) {
+            memoryContext = state.resumeProfile;
+            console.log(`[agent:knowledge] Fallback to state.resumeProfile (${memoryContext.length} chars)`);
+        }
+
+        // Supplement with mem0 for conversational memories
+        try {
+            const ns = getMemoryNamespace();
             const memories = await memoryClient.search(ns, text, 3);
-            console.log(`[agent:memory] SEARCH result: found ${memories.length} memories`, memories);
-            appendRuntimeLog(sessionId, `memory_search -> ns=${ns}, query="${text.slice(0, 50)}", found=${memories.length}`, { source: 'memory' });
             if (memories.length > 0) {
-                memoryContext = memories.join('\n- ');
-                appendRuntimeLog(sessionId, `memory_recall -> found ${memories.length} relevant memories`, { source: 'memory' });
+                const extra = memories.join('\n- ');
+                memoryContext = memoryContext ? `${memoryContext}\n\nAdditional context:\n- ${extra}` : extra;
             }
         } catch (memErr) {
-            console.error(`[agent:memory] SEARCH ERROR:`, memErr);
-            appendRuntimeLog(sessionId, `memory_error -> ${memErr.message || memErr}`, { source: 'memory' });
+            // mem0 is supplementary, don't block on failure
         }
 
         let reply = '';
@@ -736,7 +788,7 @@ async function handleUserInput(payload = {}) {
             const apiKey = getRawApiKey();
             const conversationHistory = getConversationForAI(sessionId);
             const memorySuffix = memoryContext
-                ? (isZh() ? `\n\n你对这个用户的了解：\n- ${memoryContext}` : `\n\nWhat you know about this user:\n- ${memoryContext}`)
+                ? (isZh() ? `\n\nIMPORTANT: 你已经知道这个用户的以下信息，请在回答时使用：\n${memoryContext}` : `\n\nIMPORTANT: You already know the following facts about this user. Use this information when answering:\n${memoryContext}`)
                 : '';
             const result = await callAPI({
                 subProvider,
@@ -765,10 +817,15 @@ async function handleUserInput(payload = {}) {
             model: state.currentModel,
             provider: state.currentSubProvider || 'openai'
         } : {};
-        const isQuestion = /^[^.]{0,80}[?？]$/.test(text.trim()) || text.trim().length < 15;
+        const trimmed = text.trim();
+        const isQuestion = /[?？]$/.test(trimmed)
+            || trimmed.length < 15
+            || /^(who|what|where|when|why|how|can you|do you|tell me|based on)\b/i.test(trimmed)
+            || /^(谁|什么|哪|怎么|为什么|可以|告诉|请问|帮我)\b/.test(trimmed);
         if (!isQuestion) {
-            console.log(`[agent:memory] STORE user msg to ns=${ns}, text="${text.slice(0, 80)}"`);
-            memoryClient.store(ns, text, { role: 'user', llmConfig })
+            const sanitized = sanitizeForMemory(text);
+            console.log(`[agent:memory] STORE user msg to ns=${ns}, text="${sanitized.slice(0, 80)}"`);
+            memoryClient.store(ns, sanitized, { role: 'user', llmConfig })
                 .then((r) => {
                     console.log(`[agent:memory] STORE user msg SUCCESS:`, JSON.stringify(r));
                     appendRuntimeLog(sessionId, `memory_store -> user msg stored to ${ns}`, { source: 'memory' });
@@ -1055,6 +1112,15 @@ function handleUserAttachment(payload = {}) {
                 : 'Image detected. I can run OCR or structured parsing next.'
         );
     }
+    if (uniqueKinds.includes('doc')) {
+        appendConversation(
+            sessionId,
+            'assistant',
+            isZh()
+                ? '检测到文档文件（DOC/DOCX），将自动提取内容并分析。'
+                : 'Document file (DOC/DOCX) detected. Will auto-extract content and analyze.'
+        );
+    }
     if (uniqueKinds.includes('sheet')) {
         appendConversation(
             sessionId,
@@ -1064,15 +1130,277 @@ function handleUserAttachment(payload = {}) {
                 : 'Spreadsheet detected. I can provide field mapping and filtering suggestions.'
         );
     }
-    appendConversation(
-        sessionId,
-        'assistant',
-        isZh()
-            ? '\u4F60\u53EF\u4EE5\u7EE7\u7EED\u8F93\u5165\u5904\u7406\u8981\u6C42\uFF0C\u6216\u4ECE\u9884\u8BBE\u95EE\u9898\u4E2D\u9009\u62E9\u4E0B\u4E00\u6B65\u3002'
-            : 'You can continue with processing instructions, or choose next step from preset questions.'
-    );
     appendAttachmentQuestionToPrompt(sessionId, uniqueKinds);
     sendSnapshot();
+
+    // Auto-extract resume content from attachments
+    if (attachments.length && hasBackend()) {
+        extractResumeFromAttachments(sessionId, attachments);
+    }
+}
+
+// --------------- resume extraction ---------------
+
+const RESUME_EXTRACT_PROMPT_ZH = `请从以下简历内容中提取关键信息，严格按以下分区格式返回（每个分区用 [SECTION:xxx] 标记）：
+
+[SECTION:basic]
+姓名、地点、联系方式（邮箱/电话）
+
+[SECTION:skills]
+技能列表
+
+[SECTION:experience]
+工作经历（公司、职位、时间段、主要职责）
+
+[SECTION:education]
+教育背景
+
+[SECTION:highlights]
+其他亮点（证书、语言能力、求职意向等）
+
+如果某个分区信息缺失，跳过该分区即可。请用中文回复。
+
+简历内容：
+`;
+
+const RESUME_EXTRACT_PROMPT_EN = `Extract key information from the following resume content. Use EXACTLY this section format:
+
+[SECTION:basic]
+Full name, location, contact info (email/phone)
+
+[SECTION:skills]
+Skills list
+
+[SECTION:experience]
+Work experience (company, role, duration, key responsibilities)
+
+[SECTION:education]
+Education background
+
+[SECTION:highlights]
+Other highlights (certifications, languages, career objective, etc.)
+
+Skip any section where info is missing. Reply in English.
+
+Resume content:
+`;
+
+/**
+ * Parse AI extraction reply into sections keyed by subType.
+ * Tries [SECTION:xxx] format first, then auto-detects from common heading patterns.
+ */
+function parseResumeSections(reply) {
+    // Strategy 1: explicit [SECTION:xxx] markers
+    const sections = {};
+    const sectionRegex = /\[SECTION:(\w+)\]\s*([\s\S]*?)(?=\[SECTION:|\s*$)/gi;
+    let match;
+    while ((match = sectionRegex.exec(reply)) !== null) {
+        const key = match[1].toLowerCase().trim();
+        const content = match[2].trim();
+        if (content) sections[key] = content;
+    }
+    if (Object.keys(sections).length >= 2) return sections;
+
+    // Strategy 2: auto-detect from heading patterns (bold, colon, ##, etc.)
+    const HEADING_MAP = [
+        { pattern: /(?:name|full\s*name|姓名|联系|contact|location|地[点址]|电话|phone|email)/i, key: 'basic' },
+        { pattern: /(?:skill|技[能术]|proficien|tech.*stack|工具|framework)/i, key: 'skills' },
+        { pattern: /(?:experience|work|employment|工作|经[历验]|职[位业]|company|公司)/i, key: 'experience' },
+        { pattern: /(?:education|学[历历]|degree|university|大学|college|school|学校)/i, key: 'education' },
+        { pattern: /(?:highlight|certif|award|language|语言|证书|项目|project|other|其[他它]|亮点|objective|意向)/i, key: 'highlights' },
+    ];
+
+    const lines = reply.split('\n');
+    let currentKey = 'basic';
+    const autoSections = {};
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        // Detect heading: "**Skills:**", "## Skills", "Skills:", "- **Skills**" etc.
+        const isHeading = /^(?:#+\s*|[-*•]\s*)?(?:\*{1,2})?[\w\u4e00-\u9fff].*?(?:\*{1,2})?[:：]\s*$/i.test(trimmed)
+            || /^#{1,3}\s+/.test(trimmed);
+
+        if (isHeading) {
+            for (const { pattern, key } of HEADING_MAP) {
+                if (pattern.test(trimmed)) {
+                    currentKey = key;
+                    break;
+                }
+            }
+            // Don't add the heading line itself to content (it's just a label)
+            continue;
+        }
+
+        // Check if this line IS a heading+content combo like "Name: Zhang Ying"
+        let matched = false;
+        for (const { pattern, key } of HEADING_MAP) {
+            if (pattern.test(trimmed)) {
+                if (!autoSections[key]) autoSections[key] = '';
+                autoSections[key] += (autoSections[key] ? '\n' : '') + trimmed;
+                matched = true;
+                currentKey = key;
+                break;
+            }
+        }
+        if (!matched) {
+            if (!autoSections[currentKey]) autoSections[currentKey] = '';
+            autoSections[currentKey] += (autoSections[currentKey] ? '\n' : '') + trimmed;
+        }
+    }
+
+    // Use auto-detected sections if we got more than just 'basic'
+    if (Object.keys(autoSections).length >= 2) return autoSections;
+
+    // Final fallback: store everything as 'basic'
+    if (reply.trim()) {
+        return { basic: reply.trim() };
+    }
+    return {};
+}
+
+async function extractResumeFromAttachments(sessionId, attachments) {
+    const { provider: activeProvider } = resolveProvider();
+    if (!activeProvider) return;
+
+    for (const attachment of attachments) {
+        try {
+            const parsed = await fileParser.extractText(
+                attachment.contentBase64,
+                attachment.mimeType,
+                attachment.name
+            );
+
+            appendRuntimeLog(sessionId, `file_parse -> ${attachment.name}: kind=${parsed.kind}, textLen=${(parsed.text || '').length}`, { source: 'extraction' });
+
+            if (!parsed.text && parsed.kind !== 'image') {
+                appendConversation(sessionId, 'assistant', isZh()
+                    ? `无法从 ${attachment.name} 提取文本内容。`
+                    : `Could not extract text from ${attachment.name}.`);
+                continue;
+            }
+
+            appendConversation(sessionId, 'assistant', isZh()
+                ? `\u2728 正在解析 ${attachment.name}...`
+                : `\u2728 Parsing ${attachment.name}...`,
+                { _system: true, _thinking: true });
+
+            const extractPrompt = isZh() ? RESUME_EXTRACT_PROMPT_ZH : RESUME_EXTRACT_PROMPT_EN;
+            let reply = '';
+            const model = state.currentModel || 'default';
+
+            if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
+                // Write content to temp file to avoid shell escaping issues with long text
+                const workspaceDir = path.join(__dirname, 'workspace');
+                const tmpName = `resume_upload_${Date.now()}`;
+                // CLI prompt: tell it to read the file first, then give extraction instructions
+                const cliExtractInstructions = isZh()
+                    ? '这个文件包含一份简历。请提取以下关键信息并以要点格式返回：姓名和联系方式、技能列表、工作经历（公司/职位/时间/职责）、教育背景、其他亮点。如信息缺失则跳过。'
+                    : 'This file contains a resume. Read it carefully and extract: full name and contact info, skills list, work experience (company/role/duration/responsibilities), education, and other highlights. Return in concise bullet points. Skip missing fields.';
+
+                if (parsed.kind === 'image') {
+                    const imgPath = path.join(workspaceDir, `${tmpName}.png`);
+                    const imgBuffer = Buffer.from(fileParser.stripDataUriPrefix(attachment.contentBase64), 'base64');
+                    fs.writeFileSync(imgPath, imgBuffer);
+                    reply = await invokeCliAsync(activeProvider, `Look at the resume image at ${imgPath}. ${cliExtractInstructions}`, '', model);
+                    try { fs.unlinkSync(imgPath); } catch (_) {}
+                } else {
+                    const txtPath = path.join(workspaceDir, `${tmpName}.txt`);
+                    fs.writeFileSync(txtPath, parsed.text.slice(0, 12000), 'utf-8');
+                    reply = await invokeCliAsync(activeProvider, `Read the resume file at ${txtPath}. ${cliExtractInstructions}`, '', model);
+                    try { fs.unlinkSync(txtPath); } catch (_) {}
+                }
+            } else if (activeProvider === 'api-key') {
+                const subProvider = state.currentSubProvider || 'openai';
+                const apiKey = getRawApiKey();
+
+                let imageContent = null;
+                let promptText = extractPrompt;
+                if (parsed.kind === 'image') {
+                    promptText += '\n[See attached image]';
+                    imageContent = buildMultimodalContent(promptText, parsed.dataUri, parsed.mimeType);
+                } else {
+                    promptText += '\n' + parsed.text.slice(0, 12000);
+                }
+
+                const result = await callAPI({
+                    subProvider,
+                    apiKey,
+                    model: state.currentModel,
+                    conversationHistory: [{ role: 'user', text: promptText }],
+                    systemPrompt: isZh()
+                        ? '你是一个专业的简历分析助手。请准确提取简历中的关键信息。'
+                        : 'You are a professional resume analysis assistant. Extract key information accurately.',
+                    imageContent
+                });
+                reply = result.content || '';
+            }
+
+            if (reply) {
+                appendConversation(sessionId, 'assistant', isZh()
+                    ? `📄 ${attachment.name} 简历解析结果：\n\n${reply}`
+                    : `📄 Resume analysis for ${attachment.name}:\n\n${reply}`);
+                appendRuntimeLog(sessionId, `resume_extracted -> ${attachment.name}, len=${reply.length}`, { source: 'extraction' });
+
+                // Store full resume profile in state (quick access)
+                state.resumeProfile = reply;
+
+                // Parse into sections and store in knowledge store (persistent, searchable)
+                try {
+                    const sections = parseResumeSections(reply);
+                    const sectionKeys = Object.keys(sections);
+                    console.log(`[agent:knowledge] Parsed ${sectionKeys.length} sections: ${sectionKeys.join(', ')}`);
+
+                    // Clear old profile docs before storing new ones
+                    await knowledgeClient.remove({ type: 'profile' });
+
+                    let stored = 0;
+                    for (const [subType, content] of Object.entries(sections)) {
+                        const summary = sanitizeForMemory(content.split('\n')[0] || '').slice(0, 100);
+                        const result = await knowledgeClient.upsert({
+                            refId: `profile_${subType}`,
+                            type: 'profile',
+                            subType,
+                            content,
+                            summary,
+                            source: attachment.name,
+                            tags: ['resume', subType]
+                        });
+                        if (result?.success) stored++;
+                        console.log(`[agent:knowledge] Stored profile/${subType} (${content.length} chars)`);
+                    }
+
+                    // Also store a summary in mem0 for semantic search (lightweight pointer)
+                    const ns = getMemoryNamespace();
+                    const summaryText = sectionKeys.map(k => sections[k].split('\n')[0]).join('. ');
+                    const sanitizedSummary = sanitizeForMemory(summaryText);
+                    memoryClient.store(ns, sanitizedSummary, { role: 'user' }).catch(() => {});
+
+                    appendRuntimeLog(sessionId, `knowledge_store -> ${stored}/${sectionKeys.length} profile sections from ${attachment.name}`, { source: 'knowledge' });
+                    appendConversation(sessionId, 'assistant', isZh()
+                        ? `\u2705 \u5DF2\u5C06 ${stored} \u4E2A\u7B80\u5386\u5206\u533A\u5B58\u5165\u77E5\u8BC6\u5E93\uFF0C\u540E\u7EED\u5BF9\u8BDD\u4E2D\u6211\u4F1A\u8BB0\u4F4F\u8FD9\u4E9B\u4FE1\u606F\u3002`
+                        : `Done! ${stored} resume sections stored in knowledge base. I will remember this in future conversations.`);
+                } catch (memErr) {
+                    console.error('[agent:knowledge] store error:', memErr);
+                    appendRuntimeLog(sessionId, `knowledge_store_error -> ${memErr.message}`, { source: 'knowledge' });
+                }
+            } else {
+                appendConversation(sessionId, 'assistant', isZh()
+                    ? `未能从 ${attachment.name} 中提取有效信息。`
+                    : `Could not extract valid info from ${attachment.name}.`);
+            }
+
+            sendSnapshot();
+            scheduleSave();
+        } catch (err) {
+            console.error(`[agent] Resume extraction failed for ${attachment.name}:`, err);
+            appendConversation(sessionId, 'assistant', isZh()
+                ? `解析 ${attachment.name} 时出错：${err.message}`
+                : `Error parsing ${attachment.name}: ${err.message}`);
+            appendRuntimeLog(sessionId, `extraction_error -> ${attachment.name}: ${err.message}`, { source: 'extraction' });
+        }
+    }
 }
 
 function handleExecutionControl(payload = {}) {

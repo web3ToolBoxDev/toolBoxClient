@@ -110,7 +110,7 @@ const buildPresetPrompt = (isZh, selectedMap = {}, questionTemplates) => ({
     text: isZh ? '\u8BF7\u9009\u62E9\u9884\u8BBE\u95EE\u9898\u5E76\u56DE\u7B54' : 'Select preset questions and answer',
     attachmentPolicy: {
         maxSizeMB: 4,
-        allowedKinds: ['image', 'pdf', 'sheet', 'text']
+        allowedKinds: ['image', 'pdf', 'doc', 'sheet', 'text']
     },
     questions: questionTemplates.map((q) => ({
         ...q,

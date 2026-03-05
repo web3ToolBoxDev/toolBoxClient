@@ -5,7 +5,9 @@
   "description": "Job Seek AI Agent for Web3 Toolbox",
   "main": "agent.js",
   "dependencies": {
-    "ws": "^8.16.0",
-    "axios": "^1.6.8"
+    "axios": "^1.6.8",
+    "mammoth": "^1.11.0",
+    "pdf-parse": "^2.4.5",
+    "ws": "^8.16.0"
   }
 }

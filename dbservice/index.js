@@ -5,6 +5,8 @@ const path = require('path');
 const { TransformersEmbedder } = require('./lib/transformersEmbedder');
 const { BridgeLLM } = require('./lib/bridgeLLM');
 
+const knowledgeStore = require('./lib/knowledgeStore');
+
 const PORT = parseInt(process.env.DBSERVICE_PORT || '30002', 10);
 const SAVE_PATH = process.env.DBSERVICE_SAVE_PATH || '';
 
@@ -168,6 +170,94 @@ async function handleHealth(req, res) {
     });
 }
 
+// --------------- knowledge store routes ---------------
+
+async function handleKnowledgeUpsert(req, res) {
+    const body = await readBody(req);
+    if (!body.type || !body.content) {
+        return sendJSON(res, 400, { success: false, error: 'type and content are required' });
+    }
+    try {
+        const refId = knowledgeStore.upsert(body);
+        sendJSON(res, 200, { success: true, refId });
+    } catch (err) {
+        console.error('[dbservice] knowledge upsert error:', err.message);
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleKnowledgeSearch(req, res) {
+    const body = await readBody(req);
+    if (!body.query) {
+        return sendJSON(res, 400, { success: false, error: 'query is required' });
+    }
+    try {
+        const results = knowledgeStore.search(body.query, body.types, body.limit);
+        sendJSON(res, 200, { success: true, results });
+    } catch (err) {
+        console.error('[dbservice] knowledge search error:', err.message);
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleKnowledgeFind(req, res) {
+    const body = await readBody(req);
+    try {
+        let results = [];
+        if (body.refId) {
+            const doc = knowledgeStore.findByRef(body.refId);
+            results = doc ? [doc] : [];
+        } else if (body.type) {
+            results = knowledgeStore.findByType(body.type, body.subType);
+        } else if (body.tags) {
+            results = knowledgeStore.findByTags(body.tags);
+        } else if (body.scope) {
+            results = knowledgeStore.findByScope(body.scope);
+        }
+        sendJSON(res, 200, { success: true, results });
+    } catch (err) {
+        console.error('[dbservice] knowledge find error:', err.message);
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleKnowledgeExpand(req, res) {
+    const body = await readBody(req);
+    if (!body.types || !Array.isArray(body.types)) {
+        return sendJSON(res, 400, { success: false, error: 'types array is required' });
+    }
+    try {
+        const results = knowledgeStore.expandByTypes(body.types);
+        sendJSON(res, 200, { success: true, results });
+    } catch (err) {
+        console.error('[dbservice] knowledge expand error:', err.message);
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleKnowledgeRemove(req, res) {
+    const body = await readBody(req);
+    try {
+        if (body.refId) {
+            knowledgeStore.remove(body.refId);
+        } else if (body.type) {
+            knowledgeStore.removeByType(body.type, body.scope);
+        }
+        sendJSON(res, 200, { success: true });
+    } catch (err) {
+        console.error('[dbservice] knowledge remove error:', err.message);
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleKnowledgeStats(req, res) {
+    try {
+        sendJSON(res, 200, { success: true, ...knowledgeStore.stats() });
+    } catch (err) {
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
 // --------------- server ---------------
 
 const server = http.createServer(async (req, res) => {
@@ -186,6 +276,7 @@ const server = http.createServer(async (req, res) => {
         if (url === '/health' && req.method === 'GET') {
             return await handleHealth(req, res);
         }
+        // mem0 memory routes
         if (url === '/memory/store' && req.method === 'POST') {
             return await handleStore(req, res);
         }
@@ -194,6 +285,25 @@ const server = http.createServer(async (req, res) => {
         }
         if (url === '/memory/clear' && req.method === 'DELETE') {
             return await handleClear(req, res);
+        }
+        // knowledge store routes
+        if (url === '/knowledge/upsert' && req.method === 'POST') {
+            return await handleKnowledgeUpsert(req, res);
+        }
+        if (url === '/knowledge/search' && req.method === 'POST') {
+            return await handleKnowledgeSearch(req, res);
+        }
+        if (url === '/knowledge/find' && req.method === 'POST') {
+            return await handleKnowledgeFind(req, res);
+        }
+        if (url === '/knowledge/expand' && req.method === 'POST') {
+            return await handleKnowledgeExpand(req, res);
+        }
+        if (url === '/knowledge/remove' && req.method === 'DELETE') {
+            return await handleKnowledgeRemove(req, res);
+        }
+        if (url === '/knowledge/stats' && req.method === 'GET') {
+            return await handleKnowledgeStats(req, res);
         }
         sendJSON(res, 404, { success: false, error: 'Not found' });
     } catch (err) {
@@ -206,6 +316,11 @@ server.listen(PORT, '127.0.0.1', () => {
     console.log(`[dbservice] Memory service listening on http://127.0.0.1:${PORT}`);
     // Pre-warm: start loading the embedding model in background
     getMemory({}).catch(() => {});
+    // Initialize knowledge store
+    const ksPath = SAVE_PATH ? path.join(SAVE_PATH, 'db') : path.join(__dirname, 'data');
+    knowledgeStore.init(ksPath).catch(err => {
+        console.error('[dbservice] Knowledge store init failed:', err.message);
+    });
 });
 
 process.on('SIGTERM', () => {

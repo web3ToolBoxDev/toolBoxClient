@@ -161,7 +161,13 @@ class BridgeLLM {
         const inputMatch = prompt.match(/Input:\s*\n([\s\S]+)$/);
         const userText = inputMatch ? inputMatch[1].trim() : '';
         if (userText) {
-            const sentences = userText.split(/[.!?。！？\n]+/).map(s => s.trim()).filter(Boolean);
+            // Split on real sentence boundaries, preserving mid-word dots (Vue.js, B.S., etc.)
+            // Period splits only after 2+ word chars (not after single-letter abbreviations)
+            // Also splits on !/? and CJK punctuation, and newlines
+            const sentences = userText
+                .split(/(?<=\w{2,})[.]\s+|[!?。！？]\s*|\n+/)
+                .map(s => s.trim())
+                .filter(s => s.length >= 5);
             return JSON.stringify({ facts: sentences.length > 0 ? sentences : [userText] });
         }
         return JSON.stringify({ facts: [prompt.slice(0, 500)] });

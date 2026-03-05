@@ -379,6 +379,7 @@
     "agentWorkspace.apiKeyPlaceholder": "Enter API Key",
     "agentWorkspace.model": "Model",
     "agentWorkspace.applyModel": "Apply Model",
+    "agentWorkspace.pauseBeforeApply": "Please pause the session before changing the model.",
     "agentWorkspace.executionState": "Execution",
     "agentWorkspace.stateRunning": "Running",
     "agentWorkspace.statePaused": "Paused",

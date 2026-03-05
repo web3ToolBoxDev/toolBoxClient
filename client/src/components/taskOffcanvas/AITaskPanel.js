@@ -44,8 +44,9 @@ function AITaskPanel({
         const name = String(file?.name || '').toLowerCase();
         if (mime.startsWith('image/') || /\.(png|jpg|jpeg|webp|gif|bmp)$/.test(name)) return 'image';
         if (mime.includes('pdf') || /\.pdf$/.test(name)) return 'pdf';
+        if (mime.includes('wordprocessingml') || mime.includes('msword') || /\.docx?$/.test(name)) return 'doc';
         if (mime.includes('spreadsheet') || /\.(xlsx|xls|csv)$/.test(name)) return 'sheet';
-        if (mime.startsWith('text/') || /\.(txt|md|json)$/.test(name)) return 'text';
+        if (mime.startsWith('text/') || /\.(txt|md|json|html?)$/.test(name)) return 'text';
         return 'file';
     };
 
@@ -195,6 +196,7 @@ function AITaskPanel({
         const labelMap = {
             image: t('taskLog.ai.kind.image', 'Image'),
             pdf: t('taskLog.ai.kind.pdf', 'PDF'),
+            doc: t('taskLog.ai.kind.doc', 'Document'),
             sheet: t('taskLog.ai.kind.sheet', 'Spreadsheet'),
             text: t('taskLog.ai.kind.text', 'Text'),
             file: t('taskLog.ai.kind.file', 'File')

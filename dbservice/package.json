@@ -8,7 +8,8 @@
     "start": "node index.js"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.6.0",
     "mem0ai": "^2.2.4",
-    "@huggingface/transformers": "^3.6.0"
+    "sql.js": "^1.14.1"
   }
 }

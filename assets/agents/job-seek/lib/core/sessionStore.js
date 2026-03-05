@@ -29,7 +29,8 @@ const PERSIST_KEYS = [
     'envsData',
     'chromePath',
     'savePath',
-    'walletExtensionPath'
+    'walletExtensionPath',
+    'resumeProfile'
 ];
 
 /**

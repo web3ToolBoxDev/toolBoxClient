@@ -456,7 +456,8 @@ describe('AgentWorkspace protocol regression', () => {
                     conversations: { s1: [] },
                     subtasks: {},
                     artifacts: {},
-                    prompts: {}
+                    prompts: {},
+                    executionStates: { s1: { paused: true } }
                 }
             });
         });
@@ -503,7 +504,8 @@ describe('AgentWorkspace protocol regression', () => {
                     conversations: { s1: [] },
                     subtasks: {},
                     artifacts: {},
-                    prompts: {}
+                    prompts: {},
+                    executionStates: { s1: { paused: true } }
                 }
             });
         });
@@ -618,7 +620,8 @@ describe('AgentWorkspace protocol regression', () => {
                     conversations: { s1: [] },
                     subtasks: {},
                     artifacts: {},
-                    prompts: {}
+                    prompts: {},
+                    executionStates: { s1: { paused: true } }
                 }
             });
         });
@@ -655,7 +658,73 @@ describe('AgentWorkspace protocol regression', () => {
         });
     });
 
-    it('sends selected model (not default) when user picks a specific model', async () => {
+    it('does not reset provider when snapshot arrives after apply', async () => {
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {},
+                    executionStates: { s1: { paused: true } }
+                }
+            });
+        });
+
+        fireEvent.click(screen.getByLabelText('toggle-runtime-settings'));
+
+        const providerSelect = screen.getByLabelText('session-provider');
+        const modelSelect = screen.getByLabelText('session-model');
+
+        // Apply codex-cli
+        fireEvent.change(providerSelect, { target: { value: 'codex-cli' } });
+        await waitFor(() => expect(modelSelect.value).toBe('default'));
+        fireEvent.click(screen.getByRole('button', { name: 'Apply Model' }));
+
+        // User changes provider to claude-code (before applying)
+        fireEvent.change(providerSelect, { target: { value: 'claude-code' } });
+        expect(providerSelect.value).toBe('claude-code');
+
+        // Backend sends snapshot with codex-cli still in context (from the previous apply)
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [{ id: 'm1', role: 'assistant', content: 'Context updated', createdAt: Date.now() }] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {},
+                    runtimeContexts: {
+                        s1: { mode: 'ai', provider: 'codex-cli', model: 'default', envIds: [], walletIds: [] }
+                    }
+                }
+            });
+        });
+
+        // Provider should still be claude-code (user's choice), NOT reset to codex-cli
+        expect(providerSelect.value).toBe('claude-code');
+    });
+
+    it('alerts user to pause before applying model while session is running', async () => {
         render(
             <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
                 <Routes>
@@ -685,6 +754,53 @@ describe('AgentWorkspace protocol regression', () => {
 
         fireEvent.click(screen.getByLabelText('toggle-runtime-settings'));
 
+        // Select a provider and model
+        fireEvent.change(screen.getByLabelText('session-provider'), { target: { value: 'codex-cli' } });
+        await waitFor(() => expect(screen.getByLabelText('session-model').value).toBe('default'));
+
+        // Try to apply while session is running (not paused) → should alert
+        mockWsManager.sendMessage.mockClear();
+        fireEvent.click(screen.getByRole('button', { name: 'Apply Model' }));
+        expect(window.alert).toHaveBeenCalledWith('Please pause the session before changing the model.');
+
+        // No context update should have been sent
+        const contextSent = mockWsManager.sendMessage.mock.calls.some(([raw]) => {
+            try { return JSON.parse(raw).type === 'agent_session_context_update'; } catch { return false; }
+        });
+        expect(contextSent).toBe(false);
+    });
+
+    it('sends selected model (not default) when user picks a specific model', async () => {
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {},
+                    executionStates: { s1: { paused: true } }
+                }
+            });
+        });
+
+        fireEvent.click(screen.getByLabelText('toggle-runtime-settings'));
+
         // Select claude-code provider
         fireEvent.change(screen.getByLabelText('session-provider'), { target: { value: 'claude-code' } });
         const modelSelect = screen.getByLabelText('session-model');
@@ -704,6 +820,79 @@ describe('AgentWorkspace protocol regression', () => {
                 && msg.payload?.runtimeContext?.model === 'sonnet'
             ));
         });
+    });
+
+    it('does not leak model/provider between sessions when switching', async () => {
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+
+        // Snapshot with two sessions — s1 has model applied, s2 does not
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [
+                        { id: 's1', name: 'Session A', updatedAt: Date.now() },
+                        { id: 's2', name: 'Session B', updatedAt: Date.now() - 1000 }
+                    ],
+                    activeSessionId: 's1',
+                    conversations: { s1: [], s2: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {},
+                    runtimeContexts: {
+                        s1: { mode: 'ai', provider: 'claude-code', model: 'sonnet', envIds: [], walletIds: [] },
+                        s2: { mode: 'ai', envIds: [], walletIds: [] }
+                    }
+                }
+            });
+        });
+
+        fireEvent.click(screen.getByLabelText('toggle-runtime-settings'));
+        const providerSelect = screen.getByLabelText('session-provider');
+        const modelSelect = screen.getByLabelText('session-model');
+
+        // Session A should show claude-code / sonnet
+        expect(providerSelect.value).toBe('claude-code');
+        await waitFor(() => expect(modelSelect.value).toBe('sonnet'));
+
+        // Switch to session B (no model applied)
+        const sessionItems = screen.getAllByText(/Session [AB]/);
+        const sessionBItem = sessionItems.find((el) => el.textContent === 'Session B');
+        fireEvent.click(sessionBItem);
+
+        // Provider and model should be reset to empty — NOT leak from session A
+        await waitFor(() => expect(providerSelect.value).toBe(''));
+        expect(modelSelect.value).toBe('');
+
+        // Sending a message from session B should have empty provider/model
+        mockWsManager.sendMessage.mockClear();
+        fireEvent.click(screen.getByText('mock-send'));
+        await waitFor(() => {
+            expectSent((msg) => (
+                msg.type === 'agent_user_input'
+                && msg.payload?.sessionId === 's2'
+                && msg.payload?.provider === ''
+                && msg.payload?.model === ''
+            ));
+        });
+
+        // Switch back to session A — should restore claude-code / sonnet
+        const sessionAItem = sessionItems.find((el) => el.textContent === 'Session A');
+        fireEvent.click(sessionAItem);
+        await waitFor(() => expect(providerSelect.value).toBe('claude-code'));
+        await waitFor(() => expect(modelSelect.value).toBe('sonnet'));
     });
 
     it('navigates back to task manage when ai task stops', async () => {

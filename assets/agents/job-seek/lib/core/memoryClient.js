@@ -58,7 +58,8 @@ async function search(namespace, query, topK = 5) {
             topK
         });
         const memories = result?.results?.results || result?.results || [];
-        const MIN_SCORE = 0.05;
+        const MIN_SCORE = 0.15;
+        const MIN_LENGTH = 10;
         const seen = new Set();
         return memories
             .filter((m) => (m.score || 0) >= MIN_SCORE)
@@ -68,7 +69,7 @@ async function search(namespace, query, topK = 5) {
                 return text;
             })
             .filter((text) => {
-                if (!text || seen.has(text)) return false;
+                if (!text || text.length < MIN_LENGTH || seen.has(text)) return false;
                 seen.add(text);
                 return true;
             });
