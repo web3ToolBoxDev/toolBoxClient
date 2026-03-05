@@ -9,6 +9,7 @@ const {
     buildAttachmentActionQuestion
 } = require('./lib/prompts');
 const { callAPI } = require('./lib/aiClient');
+const memoryClient = require('./lib/memoryClient');
 
 const url = process.argv[2];
 let ws = null;
@@ -20,6 +21,7 @@ let runtimeContextAnnounced = false;
 
 const now = () => Date.now();
 const genId = (prefix = 'id') => `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+const getMemoryNamespace = (sessionId) => `job-seek:${sessionId}`;
 
 // --------------- language helpers ---------------
 
@@ -600,24 +602,39 @@ async function handleUserInput(payload = {}) {
     appendConversation(sessionId, 'assistant', thinkingMsg, { _system: true, _thinking: true });
 
     try {
+        // Search relevant memories to inject as context
+        const ns = getMemoryNamespace(sessionId);
+        let memoryContext = '';
+        try {
+            const memories = await memoryClient.search(ns, text, 3);
+            if (memories.length > 0) {
+                memoryContext = memories.join('\n- ');
+                appendRuntimeLog(sessionId, `memory_recall -> found ${memories.length} relevant memories`, { source: 'memory' });
+            }
+        } catch { /* memory unavailable, continue without it */ }
+
         let reply = '';
 
         if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
-            // CLI providers — invoke CLI with full user message
-            reply = await invokeCliAsync(activeProvider, text);
+            const memoryPrefix = memoryContext
+                ? (isZh() ? `[相关记忆]\n- ${memoryContext}\n\n` : `[Relevant memories]\n- ${memoryContext}\n\n`)
+                : '';
+            reply = await invokeCliAsync(activeProvider, memoryPrefix + text);
         } else if (activeProvider === 'api-key') {
-            // API Key provider — call REST API with conversation history
             const subProvider = state.currentSubProvider || 'openai';
             const apiKey = getRawApiKey();
             const conversationHistory = getConversationForAI(sessionId);
+            const memorySuffix = memoryContext
+                ? (isZh() ? `\n\n你对这个用户的了解：\n- ${memoryContext}` : `\n\nWhat you know about this user:\n- ${memoryContext}`)
+                : '';
             const result = await callAPI({
                 subProvider,
                 apiKey,
                 model: state.currentModel,
                 conversationHistory,
-                systemPrompt: isZh()
+                systemPrompt: (isZh()
                     ? '\u4F60\u662F\u4E00\u4E2A\u6709\u7528\u7684 AI \u52A9\u624B\u3002\u8BF7\u7528\u4E0E\u7528\u6237\u76F8\u540C\u7684\u8BED\u8A00\u56DE\u590D\u3002'
-                    : 'You are a helpful AI assistant. Reply in the same language as the user.'
+                    : 'You are a helpful AI assistant. Reply in the same language as the user.') + memorySuffix
             });
             reply = result.content || '';
             if (result.usage) {
@@ -629,6 +646,17 @@ async function handleUserInput(payload = {}) {
 
         appendConversation(sessionId, 'assistant', reply || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)'));
         appendRuntimeLog(sessionId, `ai_reply -> ${(reply || '').slice(0, 120)}`, { source: 'ai' });
+
+        // Store user message and AI reply in memory (fire-and-forget)
+        const llmConfig = activeProvider === 'api-key' ? {
+            apiKey: getRawApiKey(),
+            model: state.currentModel,
+            provider: state.currentSubProvider || 'openai'
+        } : {};
+        memoryClient.store(ns, text, { role: 'user', llmConfig }).catch(() => {});
+        if (reply) {
+            memoryClient.store(ns, reply, { role: 'assistant', llmConfig }).catch(() => {});
+        }
     } catch (err) {
         const errorMsg = String(err?.message || err || 'Unknown error').slice(0, 500);
         appendConversation(sessionId, 'assistant', isZh() ? `\u274C AI \u8C03\u7528\u5931\u8D25\uFF1A${errorMsg}` : `\u274C AI call failed: ${errorMsg}`);

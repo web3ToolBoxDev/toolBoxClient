@@ -1,0 +1,14 @@
+{
+  "name": "toolbox-dbservice",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Memory DB service for Toolbox AI agents - runs as standalone process on bundled Node.js",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "mem0ai": "^2.2.4",
+    "@huggingface/transformers": "^3.6.0"
+  }
+}

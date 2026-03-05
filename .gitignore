@@ -9,3 +9,5 @@ coverage/
 client/coverage/
 .vscode/
 .claude/
+*.db
+dbservice/node_modules/

@@ -16,6 +16,10 @@ app.use('/api', router);
 app.listen(port, async () => {
   console.log(`服务器已启动，监听端口 ${port}`);
   webService.initialize(app);
+
+  // Start the memory dbservice process
+  const memoryService = require('./services/memoryService');
+  memoryService.startDbService();
 });
 
 module.exports = app

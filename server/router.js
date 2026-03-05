@@ -298,6 +298,13 @@ router.post('/resetSyncScriptDirectory', async (req, res) => {
 });
 
 
+const memoryService = require('./services/memoryService');
+
+router.get('/memory/health', memoryService.handleHealth);
+router.post('/memory/store', memoryService.handleStore);
+router.post('/memory/search', memoryService.handleSearch);
+router.delete('/memory/clear', memoryService.handleClear);
+
 const providerModelService = require('./services/providerModelService');
 
 router.get('/getProviderModels', async (req, res) => {
