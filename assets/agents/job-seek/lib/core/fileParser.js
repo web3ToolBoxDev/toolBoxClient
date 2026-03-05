@@ -81,9 +81,9 @@ function guessMimeFromName(name) {
 }
 
 async function parsePdf(base64) {
-    const pdfParse = require('pdf-parse');
+    const { PDFParse } = require('pdf-parse');
     const buffer = Buffer.from(base64, 'base64');
-    const result = await pdfParse(buffer);
+    const result = await PDFParse(buffer);
     return (result?.text || '').trim();
 }
 
