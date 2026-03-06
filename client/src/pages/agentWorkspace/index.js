@@ -27,7 +27,6 @@ function AgentWorkspace() {
     const [runtimeLogs, setRuntimeLogs] = useState({});
     const [prompts, setPrompts] = useState({});
     const [executionStates, setExecutionStates] = useState({});
-    const [onboardingComplete, setOnboardingComplete] = useState({});
     const [apiKeyConfigured, setApiKeyConfigured] = useState(true);
     const [envList, setEnvList] = useState([]);
     const [walletList, setWalletList] = useState([]);
@@ -126,7 +125,6 @@ function AgentWorkspace() {
         setRuntimeLogs(data.runtimeLogs || {});
         setPrompts(data.prompts || {});
         setExecutionStates(data.executionStates || {});
-        setOnboardingComplete(data.onboardingComplete || {});
         if (data.runtimeContexts && typeof data.runtimeContexts === 'object') {
             setSessionRuntimeContexts(data.runtimeContexts);
             // Form fields (provider, model, env, wallet) are restored by the
@@ -826,7 +824,6 @@ function AgentWorkspace() {
                             runtimeLogs={runtimeLogs[activeSessionId] || []}
                             apiKeyConfigured={apiKeyConfigured}
                             interactionDisabled={!isTaskRunning || activeExecutionState.paused || activeExecutionState.canceled}
-                            chatDisabled={!onboardingComplete[activeSessionId]}
                             onSendMessage={handleSendMessage}
                             onSelectOption={handleSelectOption}
                             onSubmitAnswer={handleSubmitAnswer}

@@ -13,7 +13,6 @@ function AITaskPanel({
     runtimeLogs = [],
     apiKeyConfigured = true,
     interactionDisabled = false,
-    chatDisabled = false,
     onSendMessage,
     onSelectOption,
     onSubmitAnswer,
@@ -607,8 +606,8 @@ function AITaskPanel({
                         <Form.Control
                             value={pendingMessage}
                             onChange={(e) => setPendingMessage(e.target.value)}
-                            placeholder={chatDisabled ? t('taskLog.ai.completeOnboarding', 'Complete onboarding questions first') : t('taskLog.ai.inputPlaceholder')}
-                            disabled={interactionDisabled || chatDisabled}
+                            placeholder={t('taskLog.ai.inputPlaceholder')}
+                            disabled={interactionDisabled}
                             onPaste={async (e) => {
                                 const clipboard = e.clipboardData;
                                 if (!clipboard) return;
@@ -652,7 +651,7 @@ function AITaskPanel({
                         </Button>
                         <Button
                             onClick={handleSend}
-                            disabled={interactionDisabled || chatDisabled || (!pendingMessage.trim() && !pendingAttachments.length && !pendingRejectedAttachments.length)}
+                            disabled={interactionDisabled || (!pendingMessage.trim() && !pendingAttachments.length && !pendingRejectedAttachments.length)}
                         >
                             {t('taskLog.ai.send')}
                         </Button>

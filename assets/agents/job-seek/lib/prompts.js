@@ -203,6 +203,56 @@ When you have enough info (at least basic info and skills), mark with [PROFILE_C
 Reply in English.`;
 };
 
+/**
+ * System prompt for onboarding phase.
+ * AI guides user to provide: job title, location, work mode.
+ * AI extracts structured answers from conversation and returns them as [ANSWER:xxx=yyy] markers.
+ */
+const buildOnboardingPrompt = (isZh, currentAnswers = {}) => {
+    const missing = [];
+    if (!currentAnswers.q_job_title) missing.push(isZh ? '目标职位名称' : 'target job title');
+    if (!currentAnswers.q_location) missing.push(isZh ? '期望工作地点' : 'preferred location');
+    if (!currentAnswers.q_work_mode) missing.push(isZh ? '工作模式（远程/混合/到岗/不限）' : 'work mode (remote/hybrid/onsite/any)');
+
+    const answered = [];
+    if (currentAnswers.q_job_title) answered.push(`Job title: ${currentAnswers.q_job_title}`);
+    if (currentAnswers.q_location) answered.push(`Location: ${currentAnswers.q_location}`);
+    if (currentAnswers.q_work_mode) answered.push(`Work mode: ${currentAnswers.q_work_mode}`);
+
+    const answeredSection = answered.length
+        ? (isZh ? `\n已收集的信息：${answered.join('，')}` : `\nAlready collected: ${answered.join(', ')}`)
+        : '';
+
+    if (isZh) {
+        return `你是一个求职助手。用户刚创建了一个新的求职会话，需要先设定求职方向。${answeredSection}
+
+还需要收集：${missing.join('、')}${!currentAnswers.q_salary ? '（可选：目标年薪K）' : ''}
+
+请友好地引导用户提供以上信息。当用户在消息中提到相关信息时，提取并在回复末尾用以下格式标记：
+[ANSWER:q_job_title=职位名称]
+[ANSWER:q_location=地点]
+[ANSWER:q_work_mode=remote|hybrid|onsite|any]
+[ANSWER:q_salary=数字]
+
+注意：工作模式必须是 remote、hybrid、onsite、any 之一。
+每条标记单独一行，放在回复最后。如果用户一次给了多个信息，可以输出多个标记。
+用中文回复。`;
+    }
+    return `You are a job search assistant. The user just created a new job search session and needs to set their direction.${answeredSection}
+
+Still needed: ${missing.join(', ')}${!currentAnswers.q_salary ? ' (optional: target annual salary in K)' : ''}
+
+Guide the user to provide this information in a friendly way. When the user mentions relevant info in their message, extract and mark at the END of your reply using:
+[ANSWER:q_job_title=job title]
+[ANSWER:q_location=location]
+[ANSWER:q_work_mode=remote|hybrid|onsite|any]
+[ANSWER:q_salary=number]
+
+Note: work mode MUST be one of: remote, hybrid, onsite, any.
+Each marker on its own line, at the very end of your reply. Multiple markers allowed if user provides multiple pieces of info.
+Reply in the same language as the user.`;
+};
+
 module.exports = {
     getPresetQuestionTemplates,
     isOnboardingComplete,
@@ -210,5 +260,6 @@ module.exports = {
     defaultSubTasks,
     buildPresetPrompt,
     buildAttachmentActionQuestion,
-    buildProfileCollectionPrompt
+    buildProfileCollectionPrompt,
+    buildOnboardingPrompt
 };

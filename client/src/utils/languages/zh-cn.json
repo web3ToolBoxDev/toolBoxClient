@@ -380,7 +380,6 @@
     "agentWorkspace.model": "\u6a21\u578b",
     "agentWorkspace.applyModel": "\u5e94\u7528\u6a21\u578b",
     "agentWorkspace.pauseBeforeApply": "\u8bf7\u5148\u6682\u505c\u4f1a\u8bdd\u518d\u66f4\u6362\u6a21\u578b\u3002",
-    "taskLog.ai.completeOnboarding": "\u8bf7\u5148\u5b8c\u6210\u5165\u804c\u95ee\u9898",
     "agentWorkspace.executionState": "\u6267\u884c\u72b6\u6001",
     "agentWorkspace.stateRunning": "\u8fd0\u884c\u4e2d",
     "agentWorkspace.statePaused": "\u5df2\u6682\u505c",

@@ -9,7 +9,8 @@ const {
     defaultSubTasks,
     buildPresetPrompt,
     buildAttachmentActionQuestion,
-    buildProfileCollectionPrompt
+    buildProfileCollectionPrompt,
+    buildOnboardingPrompt
 } = require('./lib/prompts');
 const { callAPI, buildMultimodalContent } = require('./lib/aiClient');
 const memoryClient = require('./lib/core/memoryClient');
@@ -746,14 +747,6 @@ async function handleUserInput(payload = {}) {
         return;
     }
 
-    // Onboarding gate: chat is disabled until required questions are answered
-    if (!state.onboardingComplete[sessionId]) {
-        appendConversation(sessionId, 'assistant', isZh()
-            ? '请先完成上方的必填问题（目标职位、地点、工作模式），然后才能开始对话。'
-            : 'Please complete the required onboarding questions (job title, location, work mode) before chatting.');
-        return;
-    }
-
     const text = String(payload.text || '').trim();
     const runtimeContext = payload.runtimeContext || state.runtimeContexts[sessionId] || {};
     const model = String(payload.model || runtimeContext?.model || state.currentModel || 'default');
@@ -806,14 +799,22 @@ async function handleUserInput(payload = {}) {
 
         let reply = '';
 
-        // Determine system prompt: profile collection mode vs normal
+        // Determine system prompt based on session phase
         const direction = state.selectedAnswers[sessionId] || {};
+        const onboarded = state.onboardingComplete[sessionId];
         const inProfileCollection = state.profileCollectionMode[sessionId];
-        const systemPrompt = inProfileCollection
-            ? buildProfileCollectionPrompt(isZh(), direction)
-            : (isZh()
+        let systemPrompt;
+
+        if (!onboarded) {
+            // Onboarding phase: AI guides user to answer remaining questions and extracts answers
+            systemPrompt = buildOnboardingPrompt(isZh(), direction);
+        } else if (inProfileCollection) {
+            systemPrompt = buildProfileCollectionPrompt(isZh(), direction);
+        } else {
+            systemPrompt = isZh()
                 ? '\u4F60\u662F\u4E00\u4E2A\u6709\u7528\u7684 AI \u52A9\u624B\u3002\u8BF7\u7528\u4E0E\u7528\u6237\u76F8\u540C\u7684\u8BED\u8A00\u56DE\u590D\u3002'
-                : 'You are a helpful AI assistant. Reply in the same language as the user.');
+                : 'You are a helpful AI assistant. Reply in the same language as the user.';
+        }
 
         if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
             const cliContext = inProfileCollection
@@ -845,6 +846,11 @@ async function handleUserInput(payload = {}) {
         removeThinkingMessages(sessionId);
         appendConversation(sessionId, 'assistant', reply || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)'));
         appendRuntimeLog(sessionId, `ai_reply -> ${(reply || '').slice(0, 120)}`, { source: 'ai' });
+
+        // During onboarding: extract answers from AI reply
+        if (!onboarded && reply) {
+            extractOnboardingAnswersFromReply(sessionId, reply);
+        }
 
         // Detect [PROFILE_COMPLETE] marker from AI in profile collection mode
         if (inProfileCollection && reply && reply.includes('[PROFILE_COMPLETE]')) {
@@ -1403,6 +1409,41 @@ async function extractResumeFromAttachments(sessionId, attachments) {
 }
 
 // --------------- onboarding completion & profile collection ---------------
+
+/**
+ * Extract onboarding answers from AI reply via [ANSWER:key=value] markers.
+ * Updates selectedAnswers, refreshes prompt, and checks completion.
+ */
+function extractOnboardingAnswersFromReply(sessionId, reply) {
+    const answerRegex = /\[ANSWER:(\w+)=([^\]]+)\]/g;
+    let match;
+    let extracted = 0;
+    if (!state.selectedAnswers[sessionId]) state.selectedAnswers[sessionId] = {};
+
+    while ((match = answerRegex.exec(reply)) !== null) {
+        const key = match[1].trim();
+        const value = match[2].trim();
+        if (!key || !value) continue;
+
+        // Validate work mode
+        if (key === 'q_work_mode' && !['remote', 'hybrid', 'onsite', 'any'].includes(value.toLowerCase())) {
+            continue;
+        }
+        const normalizedValue = key === 'q_work_mode' ? value.toLowerCase() : value;
+        state.selectedAnswers[sessionId][key] = normalizedValue;
+        extracted++;
+        appendRuntimeLog(sessionId, `onboarding_answer_extracted -> ${key}=${normalizedValue}`, { source: 'onboarding' });
+    }
+
+    if (extracted > 0) {
+        // Update prompt to reflect new answers
+        state.prompts[sessionId] = _buildPresetPrompt(state.selectedAnswers[sessionId]);
+        checkAndCompleteOnboarding(sessionId);
+        sendSnapshot();
+        scheduleSave();
+        console.log(`[agent:onboarding] Extracted ${extracted} answers from AI reply`);
+    }
+}
 
 /**
  * Check if required onboarding questions are answered and transition to chat mode.

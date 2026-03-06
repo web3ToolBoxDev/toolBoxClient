@@ -6,7 +6,8 @@ const {
     isProfileComplete,
     defaultSubTasks,
     buildPresetPrompt,
-    buildProfileCollectionPrompt
+    buildProfileCollectionPrompt,
+    buildOnboardingPrompt
 } = require('./prompts');
 
 describe('prompts.js', () => {
@@ -107,6 +108,29 @@ describe('prompts.js', () => {
         it('returns Chinese prompt when isZh=true', () => {
             const prompt = buildProfileCollectionPrompt(true, { q_job_title: '前端工程师' });
             expect(prompt).toContain('前端工程师');
+        });
+    });
+
+    describe('buildOnboardingPrompt', () => {
+        it('lists all missing fields when no answers given', () => {
+            const prompt = buildOnboardingPrompt(false, {});
+            expect(prompt).toContain('target job title');
+            expect(prompt).toContain('preferred location');
+            expect(prompt).toContain('work mode');
+            expect(prompt).toContain('[ANSWER:q_job_title=');
+        });
+
+        it('shows already collected info when partial answers given', () => {
+            const prompt = buildOnboardingPrompt(false, { q_job_title: 'Frontend' });
+            expect(prompt).toContain('Job title: Frontend');
+            expect(prompt).toContain('preferred location');
+            expect(prompt).not.toContain('target job title');
+        });
+
+        it('returns Chinese prompt when isZh=true', () => {
+            const prompt = buildOnboardingPrompt(true, {});
+            expect(prompt).toContain('目标职位名称');
+            expect(prompt).toContain('[ANSWER:q_job_title=');
         });
     });
 });
