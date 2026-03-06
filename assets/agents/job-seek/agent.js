@@ -733,13 +733,9 @@ function updateLanguage(nextLang) {
  */
 function extractEnvWalletData(runtimeContext) {
     if (!runtimeContext || typeof runtimeContext !== 'object') return;
-    if (Array.isArray(runtimeContext.envs) && runtimeContext.envs.length) {
-        state.envs = runtimeContext.envs;
-    }
-    if (Array.isArray(runtimeContext.wallets) && runtimeContext.wallets.length) {
-        state.wallets = runtimeContext.wallets;
-    }
-    if (runtimeContext.envsData && typeof runtimeContext.envsData === 'object' && Object.keys(runtimeContext.envsData).length) {
+    state.envs = Array.isArray(runtimeContext.envs) ? runtimeContext.envs : [];
+    state.wallets = Array.isArray(runtimeContext.wallets) ? runtimeContext.wallets : [];
+    if (runtimeContext.envsData && typeof runtimeContext.envsData === 'object') {
         state.envsData = runtimeContext.envsData;
     }
     if (runtimeContext.chromePath) state.chromePath = runtimeContext.chromePath;

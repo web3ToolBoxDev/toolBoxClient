@@ -835,7 +835,7 @@ function AgentWorkspace() {
                             subtaskLogs={subtaskLogs[activeSessionId] || {}}
                             artifacts={artifacts[activeSessionId] || []}
                             runtimeLogs={runtimeLogs[activeSessionId] || []}
-                            apiKeyConfigured={apiKeyConfigured}
+                            apiKeyConfigured={selectedProvider !== 'api-key' || apiKeyConfigured}
                             interactionDisabled={!isTaskRunning || activeExecutionState.paused || activeExecutionState.canceled}
                             onSendMessage={handleSendMessage}
                             onSelectOption={handleSelectOption}
