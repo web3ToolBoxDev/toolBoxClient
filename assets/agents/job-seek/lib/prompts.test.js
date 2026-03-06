@@ -81,11 +81,18 @@ describe('prompts.js', () => {
     });
 
     describe('defaultSubTasks', () => {
-        it('includes onboarding as first task', () => {
+        it('includes onboarding as first task with pending status', () => {
             const tasks = defaultSubTasks(Date.now());
             expect(tasks[0].key).toBe('onboarding');
-            expect(tasks[0].status).toBe('running');
+            expect(tasks[0].status).toBe('pending');
             expect(tasks[1].key).toBe('profile');
+        });
+
+        it('includes actionLabel on action subtasks', () => {
+            const tasks = defaultSubTasks(Date.now());
+            const search = tasks.find((t) => t.key === 'search');
+            expect(search.actionLabel).toBe('Start Search');
+            expect(search.actionLabelZh).toBe('开始搜索');
         });
     });
 

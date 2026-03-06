@@ -598,6 +598,122 @@
     }
   }
 
+  // --- Subtask panel ---
+  &__subtasks {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .ai-subtask-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .ai-subtask-card {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    border: 1px solid $clr-sidebar-border;
+    border-radius: 8px;
+    padding: 0.5rem 0.65rem;
+    background: rgba(0, 0, 0, 0.16);
+    color: #dfe3ff;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    text-align: left;
+
+    &:hover:not(:disabled) {
+      background: rgba(77, 124, 255, 0.12);
+      border-color: rgba(77, 124, 255, 0.4);
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    &--active {
+      border-color: #6a7eff;
+      background: rgba(77, 124, 255, 0.18);
+    }
+
+    &__badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.3rem;
+      height: 1.3rem;
+      border-radius: 50%;
+      font-size: 0.68rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    &__badge--pending {
+      background: rgba(255, 255, 255, 0.12);
+      color: #9da0c3;
+    }
+    &__badge--running {
+      background: rgba(77, 124, 255, 0.3);
+      color: #b7c7ff;
+    }
+    &__badge--done {
+      background: rgba(40, 167, 69, 0.3);
+      color: #6ce7a2;
+    }
+    &__badge--failed {
+      background: rgba(255, 107, 107, 0.3);
+      color: #ffb3b3;
+    }
+    &__badge--review {
+      background: rgba(255, 193, 7, 0.3);
+      color: #ffd369;
+    }
+
+    &__label {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    &__status {
+      flex-shrink: 0;
+      font-size: 0.7rem;
+      border-radius: 999px;
+      padding: 0.1rem 0.45rem;
+      border: 1px solid $clr-sidebar-border;
+      background: rgba(255, 255, 255, 0.06);
+      color: #aeb8e8;
+    }
+  }
+
+  .ai-chat-item--subtask-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(77, 124, 255, 0.1);
+    border: 1px dashed rgba(77, 124, 255, 0.35);
+    border-radius: 6px;
+    padding: 0.35rem 0.55rem;
+  }
+
+  .ai-chat-item--subtask-log {
+    background: rgba(0, 0, 0, 0.1);
+    border-left: 3px solid rgba(77, 124, 255, 0.4);
+    padding: 0.25rem 0.55rem;
+    font-size: 0.82rem;
+    color: #c4c8ee;
+  }
+
   .status-chip.pending {
     background-color: rgba(255, 255, 255, 0.16);
     color: #e4e7ff;

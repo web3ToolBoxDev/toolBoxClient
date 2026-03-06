@@ -14,6 +14,7 @@ const PERSIST_KEYS = [
     'activeSessionId',
     'conversations',
     'subtasks',
+    'subtaskLogs',
     'artifacts',
     'prompts',
     'stages',

@@ -23,6 +23,7 @@ function AgentWorkspace() {
     const [activeSessionId, setActiveSessionId] = useState('');
     const [conversations, setConversations] = useState({});
     const [subtasks, setSubtasks] = useState({});
+    const [subtaskLogs, setSubtaskLogs] = useState({});
     const [artifacts, setArtifacts] = useState({});
     const [runtimeLogs, setRuntimeLogs] = useState({});
     const [prompts, setPrompts] = useState({});
@@ -122,6 +123,7 @@ function AgentWorkspace() {
         setActiveSessionId(nextActiveId);
         setConversations(data.conversations || {});
         setSubtasks(data.subtasks || {});
+        setSubtaskLogs(data.subtaskLogs || {});
         setArtifacts(data.artifacts || {});
         setRuntimeLogs(data.runtimeLogs || {});
         setPrompts(data.prompts || {});
@@ -825,6 +827,7 @@ function AgentWorkspace() {
                             messages={conversations[activeSessionId] || []}
                             prompt={prompts[activeSessionId] || null}
                             subTasks={subtasks[activeSessionId] || []}
+                            subtaskLogs={subtaskLogs[activeSessionId] || {}}
                             artifacts={artifacts[activeSessionId] || []}
                             runtimeLogs={runtimeLogs[activeSessionId] || []}
                             apiKeyConfigured={apiKeyConfigured}

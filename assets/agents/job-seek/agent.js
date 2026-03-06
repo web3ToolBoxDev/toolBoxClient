@@ -95,6 +95,7 @@ const state = {
     sessions: [],
     conversations: {},
     subtasks: {},
+    subtaskLogs: {},
     artifacts: {},
     runtimeLogs: {},
     prompts: {},
@@ -136,10 +137,13 @@ function restoreState() {
         if (state.onboardingComplete[sid] === undefined) state.onboardingComplete[sid] = false;
         if (!state.profileSections[sid]) state.profileSections[sid] = {};
         if (state.profileCollectionMode[sid] === undefined) state.profileCollectionMode[sid] = false;
+        if (!state.subtaskLogs[sid]) state.subtaskLogs[sid] = {};
         // Refresh prompts from current templates to pick up newly supported kinds / text changes
         if (state.prompts[sid]) {
             state.prompts[sid] = _buildPresetPrompt(state.selectedAnswers[sid] || {});
         }
+        // Restore running subtasks — keep their status so they can resume
+        // (subtasks are already persisted; no reset needed)
     }
     console.log(`[agent] Restored ${state.sessions.length} sessions`);
     return state.sessions.length > 0;
@@ -193,6 +197,7 @@ function sendSnapshot() {
         sessions: state.sessions,
         conversations: state.conversations,
         subtasks: state.subtasks,
+        subtaskLogs: state.subtaskLogs,
         artifacts: state.artifacts,
         runtimeLogs: state.runtimeLogs,
         prompts: state.prompts,
@@ -227,6 +232,7 @@ function createSession(name = '') {
     state.activeSessionId = session.id;
     state.conversations[session.id] = [];
     state.subtasks[session.id] = defaultSubTasks(now());
+    state.subtaskLogs[session.id] = {};
     state.artifacts[session.id] = [];
     state.runtimeLogs[session.id] = [];
     state.prompts[session.id] = _buildPresetPrompt(selectedMap);
@@ -256,6 +262,7 @@ function deleteSession(sessionId) {
     state.sessions = state.sessions.filter((item) => item.id !== id);
     delete state.conversations[id];
     delete state.subtasks[id];
+    delete state.subtaskLogs[id];
     delete state.artifacts[id];
     delete state.runtimeLogs[id];
     delete state.prompts[id];
@@ -382,6 +389,17 @@ function appendRuntimeLog(sessionId, text, extra = {}) {
 
 // --------------- sub-task progression ---------------
 
+function appendSubtaskLog(sessionId, subtaskKey, text, extra = {}) {
+    if (!state.subtaskLogs[sessionId]) state.subtaskLogs[sessionId] = {};
+    if (!state.subtaskLogs[sessionId][subtaskKey]) state.subtaskLogs[sessionId][subtaskKey] = [];
+    const entry = { id: genId('stlog'), time: now(), text, ...extra };
+    state.subtaskLogs[sessionId][subtaskKey].push(entry);
+    // Keep max 200 logs per subtask
+    if (state.subtaskLogs[sessionId][subtaskKey].length > 200) {
+        state.subtaskLogs[sessionId][subtaskKey] = state.subtaskLogs[sessionId][subtaskKey].slice(-200);
+    }
+}
+
 function updateSubTasks(sessionId, updater) {
     const source = state.subtasks[sessionId] || defaultSubTasks(now());
     const next = updater(source.map((item) => ({ ...item })));
@@ -393,11 +411,13 @@ function updateSubTasks(sessionId, updater) {
     emit('agent_subtask_update', { sessionId, items: next });
     next.forEach((item) => {
         if (prevStatusMap[item.key] !== item.status) {
+            const logText = `${item.key} -> ${item.status}`;
             appendRuntimeLog(
                 sessionId,
-                `${item.key} -> ${item.status}`,
+                logText,
                 { key: item.key, status: item.status, updatedAt: item.updatedAt || now(), source: 'subtask' }
             );
+            appendSubtaskLog(sessionId, item.key, logText, { level: 'info', status: item.status });
         }
     });
 }
@@ -1598,6 +1618,7 @@ function handleExecutionControl(payload = {}) {
     }
     if (action === 'retry') {
         state.subtasks[sessionId] = defaultSubTasks(now());
+        state.subtaskLogs[sessionId] = {};
         state.selectedAnswers[sessionId] = {};
         state.prompts[sessionId] = _buildPresetPrompt({});
         state.executionStates[sessionId] = { paused: true, canceled: false, started: false };
@@ -1650,6 +1671,15 @@ function handleSessionContextUpdate(payload = {}) {
     const execState = getExecutionState(sessionId);
     if (!execState.started) {
         setExecutionState(sessionId, { paused: false, canceled: false, started: true });
+        // Start onboarding subtask
+        updateSubTasks(sessionId, (items) => {
+            const ob = items.find((i) => i.key === 'onboarding');
+            if (ob && ob.status === 'pending') {
+                ob.status = 'running';
+                ob.updatedAt = now();
+            }
+            return items;
+        });
         const questionCount = _getTemplates().length;
         appendConversation(sessionId, 'assistant', isZh()
             ? `会话已启动！有 ${questionCount} 个预设问题帮助设定你的求职方向，你可以随时修改。开始求职功能前需要完成必填项。`

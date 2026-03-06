@@ -255,19 +255,20 @@ describe('AITaskPanel structured prompt regression', () => {
         expect(screen.queryByText(/Rejected Attachments/i)).not.toBeInTheDocument();
     });
 
-    it('prefers protocol runtime logs over derived logs', () => {
+    it('renders subtask cards with correct status badges', () => {
         render(
             <AITaskPanel
                 activeTask={{ displayName: 'AI Task' }}
                 messages={[]}
                 prompt={null}
                 subTasks={[
-                    { key: 'profile', status: 'running', updatedAt: 1 }
+                    { key: 'onboarding', status: 'pending', updatedAt: 1 },
+                    { key: 'profile', status: 'running', updatedAt: 2 },
+                    { key: 'search', status: 'done', updatedAt: 3 }
                 ]}
+                subtaskLogs={{}}
                 artifacts={[]}
-                runtimeLogs={[
-                    { id: 'l1', time: Date.now(), text: 'custom runtime log entry', level: 'error', source: 'execution' }
-                ]}
+                runtimeLogs={[]}
                 onSendMessage={jest.fn()}
                 onSelectOption={jest.fn()}
                 onSubmitAnswer={jest.fn()}
@@ -276,10 +277,19 @@ describe('AITaskPanel structured prompt regression', () => {
             />
         );
 
-        expect(screen.getByText('custom runtime log entry')).toBeInTheDocument();
-        expect(screen.getByText('ERROR')).toBeInTheDocument();
-        expect(screen.getByText('execution')).toBeInTheDocument();
-        expect(screen.queryByText(/Profile Collection/i)).not.toBeInTheDocument();
+        expect(screen.getByText('AI Subtasks')).toBeInTheDocument();
+        // Subtask cards render — find by class + check disabled state
+        const buttons = document.querySelectorAll('.ai-subtask-card');
+        expect(buttons.length).toBe(3);
+        // Pending subtask button should be disabled
+        expect(buttons[0]).toBeDisabled();
+        expect(buttons[0].className).toContain('pending');
+        // Running subtask button should be enabled
+        expect(buttons[1]).not.toBeDisabled();
+        expect(buttons[1].className).toContain('running');
+        // Done subtask button should be enabled
+        expect(buttons[2]).not.toBeDisabled();
+        expect(buttons[2].className).toContain('done');
     });
 
     it('supports upload question and dispatches attachments with question context', async () => {
