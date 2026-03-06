@@ -127,10 +127,7 @@ const isProfileComplete = (profileSections = {}) => {
 const defaultSubTasks = (now) => ([
     { key: 'onboarding', status: 'pending', updatedAt: now },
     { key: 'profile', status: 'pending', actionLabel: 'Collect Profile', actionLabelZh: '收集档案', updatedAt: now },
-    { key: 'search', status: 'pending', actionLabel: 'Start Search', actionLabelZh: '开始搜索', updatedAt: now },
-    { key: 'match', status: 'pending', actionLabel: 'Match Jobs', actionLabelZh: '匹配岗位', updatedAt: now },
-    { key: 'resume', status: 'pending', actionLabel: 'Generate Resume', actionLabelZh: '生成简历', updatedAt: now },
-    { key: 'coverLetter', status: 'pending', actionLabel: 'Write Cover Letter', actionLabelZh: '撰写求职信', updatedAt: now }
+    { key: 'search', status: 'pending', actionLabel: 'Start Search', actionLabelZh: '开始搜索', updatedAt: now }
 ]);
 
 const buildPresetPrompt = (isZh, selectedMap = {}, questionTemplates) => ({

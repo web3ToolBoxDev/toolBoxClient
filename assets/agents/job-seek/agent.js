@@ -699,6 +699,10 @@ function buildDashboard(sessionId) {
         `<tr><td>${statusIcon(t.status)}</td><td>${t.key}</td><td>${t.status}</td></tr>`
     ).join('\n');
 
+    const sections = state.profileSections[sessionId] || {};
+    const skillsSummary = (sections.skills || '').trim().split('\n').slice(0, 5).join(', ') || '—';
+    const expSummary = (sections.experience || '').trim().split('\n').slice(0, 3).join(' | ') || '—';
+
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -706,6 +710,7 @@ function buildDashboard(sessionId) {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Job Search Dashboard</title>
 <style>
+  * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1b2e; color: #dfe3ff; padding: 2rem; margin: 0; }
   h1 { color: #8b9aff; border-bottom: 2px solid #2d2f4a; padding-bottom: 0.5rem; }
   h2 { color: #6a7eff; margin-top: 2rem; }
@@ -719,11 +724,21 @@ function buildDashboard(sessionId) {
   .direction-item label { display: block; color: #9da0c3; font-size: 0.8rem; margin-bottom: 0.25rem; }
   .direction-item span { font-size: 1.1rem; font-weight: 500; }
   .meta { color: #7a7fa8; font-size: 0.8rem; margin-top: 0.5rem; }
+  .feature-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 0.5rem; }
+  .feature-card { background: #2d2f4a; border: 1px dashed #3d4060; border-radius: 8px; padding: 1.2rem; text-align: center; }
+  .feature-card .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+  .feature-card h4 { color: #8b9aff; margin: 0 0 0.4rem 0; }
+  .feature-card p { color: #9da0c3; font-size: 0.85rem; margin: 0; }
+  .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; background: rgba(106,126,255,0.2); color: #8b9aff; margin-top: 0.5rem; }
+  .profile-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .profile-summary .item { background: #2d2f4a; border-radius: 6px; padding: 0.75rem; }
+  .profile-summary .item label { display: block; color: #9da0c3; font-size: 0.8rem; margin-bottom: 0.25rem; }
+  .profile-summary .item p { margin: 0; font-size: 0.9rem; color: #c4c8ee; }
 </style>
 </head>
 <body>
-<h1>🎯 Job Search Dashboard</h1>
-<p class="meta">Session: ${sessionId} | Intent v${intent?.version || 1} | Built: ${intent?.builtAt ? intent.builtAt.replace('T', ' ').slice(0, 19) : 'N/A'}</p>
+<h1>Job Search Dashboard</h1>
+<p class="meta">Session: ${sessionId.slice(0, 8)} | Intent v${intent?.version || 1} | Built: ${intent?.builtAt ? intent.builtAt.replace('T', ' ').slice(0, 19) : 'N/A'}</p>
 
 <h2>Direction</h2>
 <div class="card">
@@ -735,20 +750,46 @@ function buildDashboard(sessionId) {
   </div>
 </div>
 
-<h2>Subtask Progress</h2>
+<h2>Profile</h2>
+<div class="card">
+  <div class="profile-summary">
+    <div class="item"><label>Key Skills</label><p>${skillsSummary}</p></div>
+    <div class="item"><label>Experience</label><p>${expSummary}</p></div>
+  </div>
+</div>
+
+<h2>Workflow Progress</h2>
 <div class="card">
   <table>
-    <thead><tr><th></th><th>Subtask</th><th>Status</th></tr></thead>
+    <thead><tr><th></th><th>Step</th><th>Status</th></tr></thead>
     <tbody>
 ${subtaskRows}
     </tbody>
   </table>
 </div>
 
-<h2>Profile Summary</h2>
-<div class="card">
-  <p>${intent ? 'Intent file generated. Open <strong>intent.md</strong> for full profile details.' : 'No intent file yet.'}</p>
+<h2>Job Search Tools</h2>
+<div class="feature-grid">
+  <div class="feature-card">
+    <div class="icon">🔍</div>
+    <h4>Match Jobs</h4>
+    <p>Score and rank job postings against your profile and preferences</p>
+    <span class="badge">Coming Soon</span>
+  </div>
+  <div class="feature-card">
+    <div class="icon">📄</div>
+    <h4>Resume Builder</h4>
+    <p>Generate tailored resumes for each job target</p>
+    <span class="badge">Coming Soon</span>
+  </div>
+  <div class="feature-card">
+    <div class="icon">✉️</div>
+    <h4>Cover Letter</h4>
+    <p>Write customized cover letters per application</p>
+    <span class="badge">Coming Soon</span>
+  </div>
 </div>
+
 </body>
 </html>`;
 
