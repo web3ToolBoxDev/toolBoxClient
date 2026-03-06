@@ -1982,6 +1982,13 @@ function handleSessionContextUpdate(payload = {}) {
             : `Session started! There are ${questionCount} preset questions to set your job search direction. You can change them any time. Required fields must be completed before using job search features.`);
         // Tell frontend to auto-open preset modal
         emit('agent_auto_open_preset', { sessionId });
+    } else {
+        // On subsequent Apply Model, auto-open preset if required answers are still empty
+        const selectedMap = state.selectedAnswers[sessionId] || {};
+        const templates = _getTemplates();
+        if (!isOnboardingComplete(selectedMap, templates)) {
+            emit('agent_auto_open_preset', { sessionId });
+        }
     }
 
     sendSnapshot();
