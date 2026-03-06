@@ -292,6 +292,37 @@ describe('AITaskPanel structured prompt regression', () => {
         expect(buttons[2].className).toContain('done');
     });
 
+    it('opens subtask detail modal when clicking a non-pending subtask card', () => {
+        render(
+            <AITaskPanel
+                activeTask={{ displayName: 'AI Task' }}
+                messages={[]}
+                prompt={null}
+                subTasks={[
+                    { key: 'onboarding', status: 'running', updatedAt: 1 },
+                    { key: 'search', status: 'done', actionLabel: 'Start Search', updatedAt: 2 }
+                ]}
+                subtaskLogs={{ search: [{ id: 'log1', time: Date.now(), text: 'Search started' }] }}
+                artifacts={[]}
+                runtimeLogs={[]}
+                onSendMessage={jest.fn()}
+                onSelectOption={jest.fn()}
+                onSubmitAnswer={jest.fn()}
+                onSendAttachments={jest.fn()}
+                onOpenArtifact={jest.fn()}
+                onSubtaskAction={jest.fn()}
+            />
+        );
+
+        const cards = document.querySelectorAll('.ai-subtask-card');
+        // Click the second card (search, status=done)
+        fireEvent.click(cards[1]);
+
+        // Modal should appear with the subtask label and log entry
+        expect(document.querySelector('.ai-subtask-modal')).toBeInTheDocument();
+        expect(screen.getByText(/Search started/)).toBeInTheDocument();
+    });
+
     it('supports upload question and dispatches attachments with question context', async () => {
         const onSendAttachments = jest.fn();
         const originalFileReader = global.FileReader;

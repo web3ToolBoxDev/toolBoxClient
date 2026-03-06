@@ -708,22 +708,86 @@
     }
   }
 
-  .ai-chat-item--subtask-header {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    background: rgba(77, 124, 255, 0.1);
-    border: 1px dashed rgba(77, 124, 255, 0.35);
-    border-radius: 6px;
-    padding: 0.35rem 0.55rem;
-  }
+  .ai-subtask-modal {
+    .modal-content {
+      background: $clr-sidebar-bg;
+      color: #dfe3ff;
+      border: 1px solid $clr-sidebar-border;
+    }
 
-  .ai-chat-item--subtask-log {
-    background: rgba(0, 0, 0, 0.1);
-    border-left: 3px solid rgba(77, 124, 255, 0.4);
-    padding: 0.25rem 0.55rem;
-    font-size: 0.82rem;
-    color: #c4c8ee;
+    .modal-header {
+      border-bottom: 1px solid $clr-sidebar-border;
+    }
+
+    .modal-footer {
+      border-top: 1px solid $clr-sidebar-border;
+    }
+
+    &__title {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 1rem;
+    }
+
+    &__status {
+      font-size: 0.72rem;
+      border-radius: 999px;
+      padding: 0.1rem 0.45rem;
+      border: 1px solid $clr-sidebar-border;
+      background: rgba(255, 255, 255, 0.06);
+      color: #aeb8e8;
+
+      &--running { color: #b7c7ff; border-color: rgba(77, 124, 255, 0.4); }
+      &--done    { color: #6ce7a2; border-color: rgba(40, 167, 69, 0.4); }
+      &--failed  { color: #ffb3b3; border-color: rgba(255, 107, 107, 0.4); }
+      &--pending { color: #9da0c3; }
+    }
+
+    &__logs {
+      max-height: 50vh;
+      overflow-y: auto;
+
+      .placeholder {
+        text-align: center;
+        padding: 2rem 0;
+        color: #9da0c3;
+        font-size: 0.85rem;
+      }
+    }
+
+    &__log-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    &__log-item {
+      display: flex;
+      gap: 0.6rem;
+      padding: 0.3rem 0.45rem;
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.15);
+      font-size: 0.82rem;
+      align-items: flex-start;
+    }
+
+    &__log-time {
+      flex-shrink: 0;
+      color: #7a7fa8;
+      font-size: 0.75rem;
+      min-width: 5.5rem;
+      padding-top: 0.05rem;
+    }
+
+    &__log-text {
+      flex: 1 1 auto;
+      color: #c4c8ee;
+      word-break: break-word;
+    }
   }
 
   .status-chip.pending {

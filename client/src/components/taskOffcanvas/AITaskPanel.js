@@ -402,7 +402,7 @@ function AITaskPanel({
                 clearTimeout(delayedTimer);
             }
         };
-    }, [chatMessages, prompt, expandedSubtaskLogEntries.length, artifacts.length]);
+    }, [chatMessages, prompt, artifacts.length]);
 
     return (
         <div className="ai-task-panel">
@@ -434,22 +434,8 @@ function AITaskPanel({
                             await sendFiles(dropped, 'drag');
                         }}
                     >
-                        {chatMessages.length || expandedSubtaskLogEntries.length ? (
+                        {chatMessages.length ? (
                             <ul ref={chatListRef} className="ai-chat-list">
-                                {expandedSubtaskLogEntries.length > 0 && (
-                                    <li className="ai-chat-item ai-chat-item--subtask-header">
-                                        <span className="ai-chat-item__tag subtask">{t(`taskLog.ai.subTask.${expandedSubtask}`, expandedSubtask)}</span>
-                                        <span className="ai-chat-item__content">{t('taskLog.ai.subtaskLogsHint', 'Showing logs for this subtask')}</span>
-                                        <Button size="sm" variant="outline-secondary" onClick={() => setExpandedSubtask(null)} className="ms-2">
-                                            &times;
-                                        </Button>
-                                    </li>
-                                )}
-                                {expandedSubtaskLogEntries.map((entry) => (
-                                    <li key={entry.id} className="ai-chat-item ai-chat-item--subtask-log">
-                                        <span className="ai-chat-item__content">{entry.content}</span>
-                                    </li>
-                                ))}
                                 {chatMessages.map((msg) => (
                                     <li key={msg.id} className={`ai-chat-item ${msg.role === 'assistant' ? '' : 'user'}`}>
                                         {parseMessageType(msg.content) !== 'text' ? (
@@ -933,6 +919,76 @@ function AITaskPanel({
                         {t('common.close', 'Close')}
                     </Button>
                 </Modal.Footer>
+            </Modal>
+            {/* Subtask Detail Modal */}
+            <Modal
+                show={Boolean(expandedSubtask)}
+                onHide={() => setExpandedSubtask(null)}
+                centered
+                size="lg"
+                className="ai-subtask-modal"
+            >
+                {expandedSubtask && (() => {
+                    const task = (Array.isArray(subTasks) ? subTasks : []).find((t) => t.key === expandedSubtask);
+                    const status = task ? (STATUS_KEYS.includes(task.status) ? task.status : 'pending') : 'pending';
+                    const label = t(`taskLog.ai.subTask.${expandedSubtask}`, task?.actionLabel || expandedSubtask);
+                    const hasAction = Boolean(task?.actionLabel);
+                    const canStart = hasAction && status !== 'pending' && typeof onSubtaskAction === 'function';
+                    return (
+                        <>
+                            <Modal.Header closeButton>
+                                <Modal.Title>
+                                    <div className="ai-subtask-modal__title">
+                                        <span className={`ai-subtask-card__badge ai-subtask-card__badge--${status}`}>
+                                            {status === 'done' ? '\u2713' : status === 'failed' ? '!' : status === 'running' ? '\u25B6' : '\u25CB'}
+                                        </span>
+                                        {label}
+                                        <span className={`ai-subtask-modal__status ai-subtask-modal__status--${status}`}>
+                                            {t(`taskLog.ai.status.${status}`, status)}
+                                        </span>
+                                    </div>
+                                </Modal.Title>
+                            </Modal.Header>
+                            <Modal.Body>
+                                <div className="ai-subtask-modal__logs">
+                                    {expandedSubtaskLogEntries.length ? (
+                                        <ul className="ai-subtask-modal__log-list">
+                                            {expandedSubtaskLogEntries.map((entry) => (
+                                                <li key={entry.id} className="ai-subtask-modal__log-item">
+                                                    <span className="ai-subtask-modal__log-time">
+                                                        {new Date(entry.time || Date.now()).toLocaleTimeString()}
+                                                    </span>
+                                                    <span className="ai-subtask-modal__log-text">{entry.content}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : (
+                                        <div className="placeholder">{t('taskLog.emptyLogs', 'No logs yet')}</div>
+                                    )}
+                                </div>
+                            </Modal.Body>
+                            <Modal.Footer>
+                                {canStart && (
+                                    <Button
+                                        variant={status === 'running' ? 'warning' : 'info'}
+                                        size="sm"
+                                        disabled={interactionDisabled}
+                                        onClick={() => {
+                                            onSubtaskAction(expandedSubtask, status === 'running' ? 'restart' : 'start');
+                                        }}
+                                    >
+                                        {status === 'running'
+                                            ? t('taskLog.ai.subtaskRestart', 'Restart')
+                                            : t('taskLog.ai.subtaskStart', 'Start')}
+                                    </Button>
+                                )}
+                                <Button variant="outline-light" size="sm" onClick={() => setExpandedSubtask(null)}>
+                                    {t('common.close', 'Close')}
+                                </Button>
+                            </Modal.Footer>
+                        </>
+                    );
+                })()}
             </Modal>
         </div>
     );
