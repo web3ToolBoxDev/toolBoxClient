@@ -244,6 +244,26 @@ function AITaskPanel({
     }, [expandedSubtask, subtaskLogs, runtimeLogs, t]);
 
 
+    const isAiProcessing = useMemo(() => {
+        return (Array.isArray(messages) ? messages : []).some((m) => m._thinking);
+    }, [messages]);
+
+    const hasRunningSubtask = useMemo(() => {
+        return (Array.isArray(subTasks) ? subTasks : []).find((t) => t.status === 'running');
+    }, [subTasks]);
+
+    const confirmSubtaskAction = (taskKey, action) => {
+        if (typeof onSubtaskAction !== 'function') return;
+        if (action === 'finish' && isAiProcessing) {
+            if (!window.confirm(t('taskLog.ai.subtaskFinishAiWarning', 'AI is still processing. Are you sure you want to finish this subtask?'))) return;
+        }
+        if ((action === 'start' || action === 'restart') && hasRunningSubtask && hasRunningSubtask.key !== taskKey) {
+            const runningLabel = t(`taskLog.ai.subTask.${hasRunningSubtask.key}`, hasRunningSubtask.key);
+            if (!window.confirm(t('taskLog.ai.subtaskStartWarning', { name: runningLabel, defaultValue: `"${runningLabel}" is currently running. Starting this subtask will reset downstream progress. Continue?` }))) return;
+        }
+        onSubtaskAction(taskKey, action);
+    };
+
     const parseMessageType = (content = '') => {
         if (typeof content !== 'string') return 'text';
         if (content.startsWith('[attachment]')) return 'attachment';
@@ -724,7 +744,7 @@ function AITaskPanel({
                                                             variant="outline-success"
                                                             className="ai-subtask-action"
                                                             disabled={interactionDisabled}
-                                                            onClick={() => onSubtaskAction(task.key, 'finish')}
+                                                            onClick={() => confirmSubtaskAction(task.key, 'finish')}
                                                         >
                                                             {t('taskLog.ai.subtaskFinish', 'Finish')}
                                                         </Button>
@@ -734,7 +754,7 @@ function AITaskPanel({
                                                         variant={status === 'running' ? 'outline-warning' : 'outline-info'}
                                                         className="ai-subtask-action"
                                                         disabled={interactionDisabled}
-                                                        onClick={() => onSubtaskAction(task.key, status === 'running' ? 'restart' : 'start')}
+                                                        onClick={() => confirmSubtaskAction(task.key, status === 'running' ? 'restart' : 'start')}
                                                     >
                                                         {status === 'running'
                                                             ? t('taskLog.ai.subtaskRestart', 'Restart')
@@ -987,7 +1007,7 @@ function AITaskPanel({
                                         size="sm"
                                         disabled={interactionDisabled}
                                         onClick={() => {
-                                            onSubtaskAction(expandedSubtask, 'finish');
+                                            confirmSubtaskAction(expandedSubtask, 'finish');
                                             setExpandedSubtask(null);
                                         }}
                                     >
@@ -1000,7 +1020,7 @@ function AITaskPanel({
                                         size="sm"
                                         disabled={interactionDisabled}
                                         onClick={() => {
-                                            onSubtaskAction(expandedSubtask, status === 'running' ? 'restart' : 'start');
+                                            confirmSubtaskAction(expandedSubtask, status === 'running' ? 'restart' : 'start');
                                         }}
                                     >
                                         {status === 'running'

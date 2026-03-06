@@ -533,10 +533,16 @@ function handleSubtaskAction(payload = {}) {
     const isRestart = action === 'restart' || target.status === 'done' || target.status === 'failed';
 
     updateSubTasks(sessionId, (list) => {
-        const item = list.find((i) => i.key === subtaskKey);
-        if (item) {
-            item.status = 'running';
-            item.updatedAt = now();
+        const idx = list.findIndex((i) => i.key === subtaskKey);
+        if (idx < 0) return list;
+        list[idx].status = 'running';
+        list[idx].updatedAt = now();
+        // Reset all downstream subtasks to pending (e.g., restarting profile resets search/match/resume)
+        for (let i = idx + 1; i < list.length; i++) {
+            if (list[i].status !== 'pending') {
+                list[i].status = 'pending';
+                list[i].updatedAt = now();
+            }
         }
         return list;
     });

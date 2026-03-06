@@ -113,6 +113,8 @@
     "taskLog.ai.subtaskStart": "Start",
     "taskLog.ai.subtaskRestart": "Restart",
     "taskLog.ai.subtaskFinish": "Finish",
+    "taskLog.ai.subtaskFinishAiWarning": "AI is still processing. Are you sure you want to finish this subtask?",
+    "taskLog.ai.subtaskStartWarning": "\"{{name}}\" is currently running. Starting this subtask will reset downstream progress. Continue?",
     "taskLog.ai.status.pending": "Pending",
     "taskLog.ai.status.running": "Running",
     "taskLog.ai.status.review": "Review",
