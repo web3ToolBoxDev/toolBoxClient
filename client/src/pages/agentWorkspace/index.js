@@ -27,6 +27,7 @@ function AgentWorkspace() {
     const [runtimeLogs, setRuntimeLogs] = useState({});
     const [prompts, setPrompts] = useState({});
     const [executionStates, setExecutionStates] = useState({});
+    const [autoOpenPresetSession, setAutoOpenPresetSession] = useState('');
     const [apiKeyConfigured, setApiKeyConfigured] = useState(true);
     const [envList, setEnvList] = useState([]);
     const [walletList, setWalletList] = useState([]);
@@ -190,6 +191,11 @@ function AgentWorkspace() {
                 if (!sessionId) break;
                 const state = info?.data?.state || {};
                 setExecutionStates((prev) => ({ ...prev, [sessionId]: state }));
+                break;
+            }
+            case 'agent_auto_open_preset': {
+                const sid = info?.data?.sessionId;
+                if (sid) setAutoOpenPresetSession(sid);
                 break;
             }
             case 'agent_error':
@@ -828,6 +834,8 @@ function AgentWorkspace() {
                             onSubmitAnswer={handleSubmitAnswer}
                             onSendAttachments={handleSendAttachments}
                             onOpenArtifact={handleOpenArtifact}
+                            autoOpenPreset={autoOpenPresetSession === activeSessionId}
+                            onAutoOpenPresetConsumed={() => setAutoOpenPresetSession('')}
                         />
                     ) : (
                         <div className="empty">{t('agentWorkspace.createSessionFirst', 'Create a session first')}</div>

@@ -9,8 +9,7 @@ const {
     defaultSubTasks,
     buildPresetPrompt,
     buildAttachmentActionQuestion,
-    buildProfileCollectionPrompt,
-    buildOnboardingPrompt
+    buildProfileCollectionPrompt
 } = require('./lib/prompts');
 const { callAPI, buildMultimodalContent } = require('./lib/aiClient');
 const memoryClient = require('./lib/core/memoryClient');
@@ -800,21 +799,13 @@ async function handleUserInput(payload = {}) {
         let reply = '';
 
         // Determine system prompt based on session phase
-        const direction = state.selectedAnswers[sessionId] || {};
-        const onboarded = state.onboardingComplete[sessionId];
         const inProfileCollection = state.profileCollectionMode[sessionId];
-        let systemPrompt;
-
-        if (!onboarded) {
-            // Onboarding phase: AI guides user to answer remaining questions and extracts answers
-            systemPrompt = buildOnboardingPrompt(isZh(), direction);
-        } else if (inProfileCollection) {
-            systemPrompt = buildProfileCollectionPrompt(isZh(), direction);
-        } else {
-            systemPrompt = isZh()
+        const direction = state.selectedAnswers[sessionId] || {};
+        const systemPrompt = inProfileCollection
+            ? buildProfileCollectionPrompt(isZh(), direction)
+            : (isZh()
                 ? '\u4F60\u662F\u4E00\u4E2A\u6709\u7528\u7684 AI \u52A9\u624B\u3002\u8BF7\u7528\u4E0E\u7528\u6237\u76F8\u540C\u7684\u8BED\u8A00\u56DE\u590D\u3002'
-                : 'You are a helpful AI assistant. Reply in the same language as the user.';
-        }
+                : 'You are a helpful AI assistant. Reply in the same language as the user.');
 
         if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
             const cliContext = inProfileCollection
@@ -846,11 +837,6 @@ async function handleUserInput(payload = {}) {
         removeThinkingMessages(sessionId);
         appendConversation(sessionId, 'assistant', reply || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)'));
         appendRuntimeLog(sessionId, `ai_reply -> ${(reply || '').slice(0, 120)}`, { source: 'ai' });
-
-        // During onboarding: extract answers from AI reply
-        if (!onboarded && reply) {
-            extractOnboardingAnswersFromReply(sessionId, reply);
-        }
 
         // Detect [PROFILE_COMPLETE] marker from AI in profile collection mode
         if (inProfileCollection && reply && reply.includes('[PROFILE_COMPLETE]')) {
@@ -1411,77 +1397,85 @@ async function extractResumeFromAttachments(sessionId, attachments) {
 // --------------- onboarding completion & profile collection ---------------
 
 /**
- * Extract onboarding answers from AI reply via [ANSWER:key=value] markers.
- * Updates selectedAnswers, refreshes prompt, and checks completion.
+ * Store/update direction in knowledge store. If direction already existed, also store
+ * a history entry so the dashboard can show target change timeline.
  */
-function extractOnboardingAnswersFromReply(sessionId, reply) {
-    const answerRegex = /\[ANSWER:(\w+)=([^\]]+)\]/g;
-    let match;
-    let extracted = 0;
-    if (!state.selectedAnswers[sessionId]) state.selectedAnswers[sessionId] = {};
-
-    while ((match = answerRegex.exec(reply)) !== null) {
-        const key = match[1].trim();
-        const value = match[2].trim();
-        if (!key || !value) continue;
-
-        // Validate work mode
-        if (key === 'q_work_mode' && !['remote', 'hybrid', 'onsite', 'any'].includes(value.toLowerCase())) {
-            continue;
-        }
-        const normalizedValue = key === 'q_work_mode' ? value.toLowerCase() : value;
-        state.selectedAnswers[sessionId][key] = normalizedValue;
-        extracted++;
-        appendRuntimeLog(sessionId, `onboarding_answer_extracted -> ${key}=${normalizedValue}`, { source: 'onboarding' });
-    }
-
-    if (extracted > 0) {
-        // Update prompt to reflect new answers
-        state.prompts[sessionId] = _buildPresetPrompt(state.selectedAnswers[sessionId]);
-        checkAndCompleteOnboarding(sessionId);
-        sendSnapshot();
-        scheduleSave();
-        console.log(`[agent:onboarding] Extracted ${extracted} answers from AI reply`);
-    }
-}
-
-/**
- * Check if required onboarding questions are answered and transition to chat mode.
- * Stores direction in knowledge store and starts profile collection if no resume uploaded.
- */
-function checkAndCompleteOnboarding(sessionId) {
-    if (state.onboardingComplete[sessionId]) return;
-
-    const templates = _getTemplates();
+function storeDirection(sessionId) {
     const selectedMap = state.selectedAnswers[sessionId] || {};
-    if (!isOnboardingComplete(selectedMap, templates)) return;
-
-    // Mark onboarding complete
-    state.onboardingComplete[sessionId] = true;
-    moveSubTaskForward(sessionId); // onboarding -> done, profile -> running
-
-    // Store direction in knowledge store
     const directionContent = [
         `Job Title: ${selectedMap.q_job_title || ''}`,
         `Location: ${selectedMap.q_location || ''}`,
         `Work Mode: ${selectedMap.q_work_mode || ''}`,
         selectedMap.q_salary ? `Target Salary: ${selectedMap.q_salary}K` : ''
     ].filter(Boolean).join('\n');
+    const summary = `${selectedMap.q_job_title || ''} in ${selectedMap.q_location || ''} (${selectedMap.q_work_mode || ''})`;
 
+    // Upsert current direction (overwrite)
     knowledgeClient.upsert({
         refId: `direction_${sessionId}`,
         type: 'direction',
-        subType: 'session',
+        subType: 'current',
         content: directionContent,
-        summary: `${selectedMap.q_job_title} in ${selectedMap.q_location} (${selectedMap.q_work_mode})`,
-        source: 'onboarding',
+        summary,
+        source: 'preset',
         tags: ['direction', selectedMap.q_job_title, selectedMap.q_location].filter(Boolean)
     }).then(() => {
         console.log(`[agent:knowledge] Stored direction for session ${sessionId}`);
-        appendRuntimeLog(sessionId, `knowledge_store -> direction stored`, { source: 'knowledge' });
+        appendRuntimeLog(sessionId, `knowledge_store -> direction stored: ${summary}`, { source: 'knowledge' });
     }).catch(err => {
         console.error('[agent:knowledge] direction store error:', err.message);
     });
+
+    // Also store a timestamped history entry (for dashboard change tracking)
+    knowledgeClient.upsert({
+        refId: `direction_history_${sessionId}_${Date.now()}`,
+        type: 'direction',
+        subType: 'history',
+        content: directionContent,
+        summary,
+        source: 'preset',
+        tags: ['direction_history', sessionId]
+    }).catch(() => {});
+
+    // Update session name to reflect current target
+    const session = state.sessions.find(s => s.id === sessionId);
+    if (session && selectedMap.q_job_title) {
+        const location = selectedMap.q_location ? ` - ${selectedMap.q_location}` : '';
+        session.name = `${selectedMap.q_job_title}${location}`;
+        session.updatedAt = now();
+        upsertSession(session);
+        emitSessionList();
+    }
+}
+
+/**
+ * Check if required onboarding questions are answered.
+ * On first completion: marks done, stores direction, starts profile collection if needed.
+ * On subsequent changes: updates direction + history.
+ */
+function checkAndCompleteOnboarding(sessionId) {
+    const templates = _getTemplates();
+    const selectedMap = state.selectedAnswers[sessionId] || {};
+    const complete = isOnboardingComplete(selectedMap, templates);
+
+    if (!complete) return;
+
+    // Always store/update direction when answers change
+    storeDirection(sessionId);
+
+    if (state.onboardingComplete[sessionId]) {
+        // Already completed before — this is a direction change
+        const summary = isZh()
+            ? `求职方向已更新：${selectedMap.q_job_title}，${selectedMap.q_location}（${selectedMap.q_work_mode}）${selectedMap.q_salary ? `，目标年薪 ${selectedMap.q_salary}K` : ''}`
+            : `Job search direction updated: ${selectedMap.q_job_title}, ${selectedMap.q_location} (${selectedMap.q_work_mode})${selectedMap.q_salary ? `, target salary ${selectedMap.q_salary}K` : ''}`;
+        appendConversation(sessionId, 'assistant', summary);
+        scheduleSave();
+        return;
+    }
+
+    // First time completion
+    state.onboardingComplete[sessionId] = true;
+    moveSubTaskForward(sessionId); // onboarding -> done, profile -> running
 
     const summary = isZh()
         ? `求职方向已设定：${selectedMap.q_job_title}，${selectedMap.q_location}（${selectedMap.q_work_mode}）${selectedMap.q_salary ? `，目标年薪 ${selectedMap.q_salary}K` : ''}`
@@ -1490,18 +1484,13 @@ function checkAndCompleteOnboarding(sessionId) {
 
     // Check if resume was uploaded
     const hasResume = Boolean(selectedMap.q_upload_profile);
-    if (hasResume) {
-        appendConversation(sessionId, 'assistant', isZh()
-            ? '简历已上传，正在解析中。对话功能已解锁，你可以开始聊天了。'
-            : 'Resume uploaded and being parsed. Chat is now unlocked — you can start chatting.');
-    } else {
-        // Enter profile collection mode
+    if (!hasResume) {
         state.profileCollectionMode[sessionId] = true;
         appendConversation(sessionId, 'assistant', isZh()
-            ? '对话功能已解锁！由于你没有上传简历，我会通过对话帮你构建个人档案。请先告诉我你的姓名和联系方式。'
-            : 'Chat unlocked! Since you did not upload a resume, I will help build your profile through conversation. Please start by telling me your name and contact info.');
+            ? '你还没有上传简历，可以随时上传，或者通过对话告诉我你的技能和经历来构建档案。'
+            : 'You haven\'t uploaded a resume yet. You can upload one any time, or tell me about your skills and experience through chat to build your profile.');
     }
-    appendRuntimeLog(sessionId, `onboarding_complete -> hasResume=${hasResume}, profileCollection=${!hasResume}`, { source: 'onboarding' });
+    appendRuntimeLog(sessionId, `onboarding_complete -> hasResume=${hasResume}`, { source: 'onboarding' });
     scheduleSave();
 }
 
@@ -1661,9 +1650,12 @@ function handleSessionContextUpdate(payload = {}) {
     const execState = getExecutionState(sessionId);
     if (!execState.started) {
         setExecutionState(sessionId, { paused: false, canceled: false, started: true });
+        const questionCount = _getTemplates().length;
         appendConversation(sessionId, 'assistant', isZh()
-            ? '会话已启动，你可以开始对话了。'
-            : 'Session started. You can begin chatting now.');
+            ? `会话已启动！有 ${questionCount} 个预设问题帮助设定你的求职方向，你可以随时修改。开始求职功能前需要完成必填项。`
+            : `Session started! There are ${questionCount} preset questions to set your job search direction. You can change them any time. Required fields must be completed before using job search features.`);
+        // Tell frontend to auto-open preset modal
+        emit('agent_auto_open_preset', { sessionId });
     }
 
     sendSnapshot();

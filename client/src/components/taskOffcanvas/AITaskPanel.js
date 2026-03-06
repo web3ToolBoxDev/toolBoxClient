@@ -13,6 +13,8 @@ function AITaskPanel({
     runtimeLogs = [],
     apiKeyConfigured = true,
     interactionDisabled = false,
+    autoOpenPreset = false,
+    onAutoOpenPresetConsumed,
     onSendMessage,
     onSelectOption,
     onSubmitAnswer,
@@ -22,6 +24,14 @@ function AITaskPanel({
     const { t } = useTranslation();
     const [pendingMessage, setPendingMessage] = useState('');
     const [showPresetModal, setShowPresetModal] = useState(false);
+
+    // Auto-open preset modal when triggered by backend (e.g., session first start)
+    useEffect(() => {
+        if (autoOpenPreset) {
+            setShowPresetModal(true);
+            if (onAutoOpenPresetConsumed) onAutoOpenPresetConsumed();
+        }
+    }, [autoOpenPreset, onAutoOpenPresetConsumed]);
     const [pendingAttachments, setPendingAttachments] = useState([]);
     const [pendingRejectedAttachments, setPendingRejectedAttachments] = useState([]);
     const [isDragOver, setIsDragOver] = useState(false);
