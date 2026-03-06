@@ -968,27 +968,22 @@ function handleUserOption(payload = {}) {
     const model = String(payload.model || runtimeContext?.model || state.currentModel || 'default');
     updateModel(model);
     if (!optionLabel || !optionId) return;
-    appendConversation(sessionId, 'user', `[option] ${optionLabel}`);
-    appendRuntimeLog(sessionId, `user_option -> ${questionId || 'unknown'}:${optionId}`, { source: 'user' });
-    appendConversation(sessionId, 'assistant', isZh() ? `\u4F60\u9009\u62E9\u4E86\uFF1A${optionLabel}` : `You selected: ${optionLabel}`);
-    if (runtimeContext && (runtimeContext.mode || (Array.isArray(runtimeContext.envIds) && runtimeContext.envIds.length) || (Array.isArray(runtimeContext.walletIds) && runtimeContext.walletIds.length))) {
-        appendConversation(
-            sessionId,
-            'assistant',
-            isZh()
-                ? `\u5DF2\u5728\u4E0A\u4E0B\u6587\u4E2D\u6267\u884C\uFF1Amode=${runtimeContext.mode || 'unknown'}, model=${model}`
-                : `Executed with context: mode=${runtimeContext.mode || 'unknown'}, model=${model}`
-        );
+    const isPresetQ = _getTemplates().some((q) => q.id === questionId);
+    if (isPresetQ) {
+        // Preset answers go to onboarding subtask log, keep conversation clean
+        appendSubtaskLog(sessionId, 'onboarding', isZh()
+            ? `预设选择：${optionLabel}`
+            : `Preset selected: ${optionLabel}`);
+    } else {
+        appendConversation(sessionId, 'user', `[option] ${optionLabel}`);
+        appendConversation(sessionId, 'assistant', isZh() ? `\u4F60\u9009\u62E9\u4E86\uFF1A${optionLabel}` : `You selected: ${optionLabel}`);
     }
+    appendRuntimeLog(sessionId, `user_option -> ${questionId || 'unknown'}:${optionId}`, { source: 'user' });
     if (!state.selectedAnswers[sessionId] || typeof state.selectedAnswers[sessionId] !== 'object') {
         state.selectedAnswers[sessionId] = {};
     }
     const selectedMap = state.selectedAnswers[sessionId];
-    const beforeAnswered = _getTemplates()
-        .filter((q) => q.type !== 'upload')
-        .filter((q) => String(selectedMap[q.id] || '').trim().length > 0).length;
-    const isPresetQuestion = _getTemplates().some((q) => q.id === questionId);
-    if (questionId && isPresetQuestion) {
+    if (questionId && isPresetQ) {
         selectedMap[questionId] = optionId;
     }
     if (questionId === 'q_execute_mode') {
@@ -1041,9 +1036,17 @@ function handleUserAnswer(payload = {}) {
     }
     state.selectedAnswers[sessionId][questionId] = answer;
     state.prompts[sessionId] = _buildPresetPrompt(state.selectedAnswers[sessionId]);
-    appendConversation(sessionId, 'user', `[answer] ${questionText}: ${answer}`);
+    const isPresetQ = _getTemplates().some((q) => q.id === questionId);
+    if (isPresetQ) {
+        // Preset answers go to onboarding subtask log, keep conversation clean
+        appendSubtaskLog(sessionId, 'onboarding', isZh()
+            ? `预设输入 ${questionText}: ${answer}`
+            : `Preset input ${questionText}: ${answer}`);
+    } else {
+        appendConversation(sessionId, 'user', `[answer] ${questionText}: ${answer}`);
+        appendConversation(sessionId, 'assistant', isZh() ? '\u5DF2\u8BB0\u5F55\u8BE5\u8F93\u5165\u3002' : 'Input recorded.');
+    }
     appendRuntimeLog(sessionId, `user_answer -> ${questionId}:${answer}`, { source: 'user' });
-    appendConversation(sessionId, 'assistant', isZh() ? '\u5DF2\u8BB0\u5F55\u8BE5\u8F93\u5165\u3002' : 'Input recorded.');
 
     // Check onboarding completion after answer
     checkAndCompleteOnboarding(sessionId);
@@ -1688,18 +1691,16 @@ function handleSessionContextUpdate(payload = {}) {
     extractEnvWalletData(runtimeContext);
     const providerDisplay = state.currentProvider || 'auto';
     const modelDisplay = runtimeContext.model || state.currentModel;
-    const envNames = state.envs.map((e) => e.name || e.id || '?').join(', ') || 'none';
-    const walletNames = state.wallets.map((w) => w.name || w.id || '?').join(', ') || 'none';
-    appendConversation(
-        sessionId,
-        'assistant',
-        isZh()
-            ? `会话上下文已更新：mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=[${envNames}](${state.envs.length}), wallet=[${walletNames}](${state.wallets.length}), model=${modelDisplay}`
-            : `Session context updated: mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=[${envNames}](${state.envs.length}), wallet=[${walletNames}](${state.wallets.length}), model=${modelDisplay}`
-    );
+    const envCount = state.envs.length;
+    const walletCount = state.wallets.length;
+    // Technical context details go to onboarding subtask log, not main conversation
+    const contextSummary = `provider=${providerDisplay}, env=${envCount}, wallet=${walletCount}, model=${modelDisplay}`;
+    appendSubtaskLog(sessionId, 'onboarding', isZh()
+        ? `上下文已更新：${contextSummary}`
+        : `Context updated: ${contextSummary}`);
     appendRuntimeLog(
         sessionId,
-        `session_context_updated -> mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=${state.envs.length}, wallet=${state.wallets.length}, model=${modelDisplay}`,
+        `session_context_updated -> mode=${runtimeContext.mode || 'unknown'}, ${contextSummary}`,
         { source: 'context' }
     );
 
