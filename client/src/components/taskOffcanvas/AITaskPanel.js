@@ -717,17 +717,30 @@ function AITaskPanel({
                                                 </span>
                                             </button>
                                             {canStart && (
-                                                <Button
-                                                    size="sm"
-                                                    variant={status === 'running' ? 'outline-warning' : 'outline-info'}
-                                                    className="ai-subtask-action"
-                                                    disabled={interactionDisabled}
-                                                    onClick={() => onSubtaskAction(task.key, status === 'running' ? 'restart' : 'start')}
-                                                >
-                                                    {status === 'running'
-                                                        ? t('taskLog.ai.subtaskRestart', 'Restart')
-                                                        : t('taskLog.ai.subtaskStart', 'Start')}
-                                                </Button>
+                                                <div className="ai-subtask-actions">
+                                                    {status === 'running' && (
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline-success"
+                                                            className="ai-subtask-action"
+                                                            disabled={interactionDisabled}
+                                                            onClick={() => onSubtaskAction(task.key, 'finish')}
+                                                        >
+                                                            {t('taskLog.ai.subtaskFinish', 'Finish')}
+                                                        </Button>
+                                                    )}
+                                                    <Button
+                                                        size="sm"
+                                                        variant={status === 'running' ? 'outline-warning' : 'outline-info'}
+                                                        className="ai-subtask-action"
+                                                        disabled={interactionDisabled}
+                                                        onClick={() => onSubtaskAction(task.key, status === 'running' ? 'restart' : 'start')}
+                                                    >
+                                                        {status === 'running'
+                                                            ? t('taskLog.ai.subtaskRestart', 'Restart')
+                                                            : t('taskLog.ai.subtaskStart', 'Start')}
+                                                    </Button>
+                                                </div>
                                             )}
                                         </li>
                                     );
@@ -968,6 +981,19 @@ function AITaskPanel({
                                 </div>
                             </Modal.Body>
                             <Modal.Footer>
+                                {canStart && status === 'running' && (
+                                    <Button
+                                        variant="success"
+                                        size="sm"
+                                        disabled={interactionDisabled}
+                                        onClick={() => {
+                                            onSubtaskAction(expandedSubtask, 'finish');
+                                            setExpandedSubtask(null);
+                                        }}
+                                    >
+                                        {t('taskLog.ai.subtaskFinish', 'Finish')}
+                                    </Button>
+                                )}
                                 {canStart && (
                                     <Button
                                         variant={status === 'running' ? 'warning' : 'info'}

@@ -112,6 +112,7 @@
     "taskLog.ai.subtaskLogsHint": "Showing logs for this subtask",
     "taskLog.ai.subtaskStart": "Start",
     "taskLog.ai.subtaskRestart": "Restart",
+    "taskLog.ai.subtaskFinish": "Finish",
     "taskLog.ai.status.pending": "Pending",
     "taskLog.ai.status.running": "Running",
     "taskLog.ai.status.review": "Review",

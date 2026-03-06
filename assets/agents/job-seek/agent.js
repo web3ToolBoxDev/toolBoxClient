@@ -461,6 +461,37 @@ function handleSubtaskAction(payload = {}) {
         return;
     }
 
+    // Finish action: mark current subtask done, unlock next pending subtask
+    if (action === 'finish') {
+        if (target.status !== 'running') {
+            sendSnapshot();
+            return;
+        }
+        updateSubTasks(sessionId, (list) => {
+            const idx = list.findIndex((i) => i.key === subtaskKey);
+            if (idx >= 0) {
+                list[idx].status = 'done';
+                list[idx].updatedAt = now();
+                // Unlock next pending subtask
+                if (list[idx + 1] && list[idx + 1].status === 'pending') {
+                    list[idx + 1].status = 'running';
+                    list[idx + 1].updatedAt = now();
+                }
+            }
+            return list;
+        });
+        appendSubtaskLog(sessionId, subtaskKey,
+            isZh() ? '子任务已完成' : 'Subtask finished',
+            { level: 'info' }
+        );
+        appendConversation(sessionId, 'assistant', isZh()
+            ? `子任务已完成：${subtaskKey}`
+            : `Subtask finished: ${subtaskKey}`);
+        sendSnapshot();
+        scheduleSave();
+        return;
+    }
+
     const isRestart = action === 'restart' || target.status === 'done' || target.status === 'failed';
 
     updateSubTasks(sessionId, (list) => {
