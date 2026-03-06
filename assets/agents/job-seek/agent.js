@@ -143,8 +143,15 @@ function restoreState() {
         if (state.prompts[sid]) {
             state.prompts[sid] = _buildPresetPrompt(state.selectedAnswers[sid] || {});
         }
-        // Restore running subtasks — keep their status so they can resume
-        // (subtasks are already persisted; no reset needed)
+        // Migrate subtasks: remove deprecated keys (match, resume, coverLetter)
+        const VALID_SUBTASK_KEYS = new Set(['onboarding', 'profile', 'search']);
+        if (Array.isArray(state.subtasks[sid])) {
+            const before = state.subtasks[sid].length;
+            state.subtasks[sid] = state.subtasks[sid].filter((t) => VALID_SUBTASK_KEYS.has(t.key));
+            if (state.subtasks[sid].length !== before) {
+                console.log(`[agent] Migrated subtasks for ${sid}: ${before} -> ${state.subtasks[sid].length}`);
+            }
+        }
     }
     console.log(`[agent] Restored ${state.sessions.length} sessions`);
     return state.sessions.length > 0;
@@ -1006,12 +1013,13 @@ function announceRuntimeContext() {
     const walletPath = state.walletExtensionPath ? `, metamaskPath=${state.walletExtensionPath}` : '';
     const { provider, reason } = resolveProvider();
     const providerInfo = provider ? `${provider} (${reason})` : `none (${reason})`;
-    appendConversation(
+    // Technical context goes to onboarding subtask log, not main conversation
+    appendSubtaskLog(
         state.activeSessionId,
-        'assistant',
+        'onboarding',
         isZh()
-            ? `运行上下文已加载：provider=${providerInfo}, mode=${mode}, env=[${envNames}](${envCount}), wallet=[${walletNames}](${walletCount}), model=${model}${walletPath}`
-            : `Runtime context loaded: provider=${providerInfo}, mode=${mode}, env=[${envNames}](${envCount}), wallet=[${walletNames}](${walletCount}), model=${model}${walletPath}`
+            ? `运行上下文：provider=${providerInfo}, env=${envCount}, wallet=${walletCount}, model=${model}`
+            : `Runtime context: provider=${providerInfo}, env=${envCount}, wallet=${walletCount}, model=${model}`
     );
     appendRuntimeLog(
         state.activeSessionId,
