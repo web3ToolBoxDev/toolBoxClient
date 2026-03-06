@@ -113,7 +113,8 @@ const state = {
     chromePath: '',
     savePath: '',
     walletExtensionPath: '',
-    resumeProfile: ''
+    resumeProfile: '',
+    intentFiles: {}
 };
 
 // Track active browser instances (not persisted)
@@ -274,6 +275,7 @@ function deleteSession(sessionId) {
     delete state.onboardingComplete[id];
     delete state.profileSections[id];
     delete state.profileCollectionMode[id];
+    delete state.intentFiles[id];
     if (!state.sessions.length) {
         createSession('');
         return;
@@ -487,6 +489,42 @@ function handleSubtaskAction(payload = {}) {
         appendConversation(sessionId, 'assistant', isZh()
             ? `子任务已完成：${subtaskKey}`
             : `Subtask finished: ${subtaskKey}`);
+
+        // Build intent file + dashboard when Profile Collection finishes
+        if (subtaskKey === 'profile') {
+            try {
+                const { filePath: intentPath, version } = buildIntentFile(sessionId);
+                // Remove old intent/dashboard artifacts before adding new ones
+                if (state.artifacts[sessionId]) {
+                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(
+                        (a) => a.type !== 'intent' && a.type !== 'dashboard'
+                    );
+                }
+                appendArtifact(sessionId, {
+                    id: `intent-${sessionId}-v${version}`,
+                    type: 'intent',
+                    title: isZh() ? `求职意向 (v${version})` : `Job Search Intent (v${version})`,
+                    filePath: intentPath,
+                    openFile: true
+                });
+                const { filePath: dashPath } = buildDashboard(sessionId);
+                appendArtifact(sessionId, {
+                    id: `dashboard-${sessionId}-v${version}`,
+                    type: 'dashboard',
+                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
+                    filePath: dashPath,
+                    openFile: true
+                });
+                appendSubtaskLog(sessionId, subtaskKey,
+                    isZh() ? `意向文件已生成 (v${version})` : `Intent file generated (v${version})`,
+                    { level: 'info' }
+                );
+            } catch (err) {
+                console.error('[agent] buildIntentFile/dashboard failed:', err);
+                appendRuntimeLog(sessionId, `intent_build_error -> ${err.message}`, { source: 'error' });
+            }
+        }
+
         sendSnapshot();
         scheduleSave();
         return;
@@ -579,6 +617,141 @@ function appendArtifact(sessionId, artifact) {
     state.artifacts[sessionId].push(artifact);
     emit('agent_artifact_update', { sessionId, append: [artifact] });
     appendRuntimeLog(sessionId, `artifact -> ${artifact?.title || artifact?.type || 'artifact'}`, { source: 'artifact' });
+}
+
+// --------------- intent file & dashboard ---------------
+
+function buildIntentFile(sessionId) {
+    const answers = state.selectedAnswers[sessionId] || {};
+    const sections = state.profileSections[sessionId] || {};
+    const resumeRaw = state.resumeProfile || '';
+    const prev = state.intentFiles[sessionId];
+    const version = prev ? (prev.version || 0) + 1 : 1;
+    const builtAt = new Date().toISOString();
+
+    const direction = {
+        jobTitle: answers.q_job_title || '',
+        location: answers.q_location || '',
+        workMode: answers.q_work_mode || '',
+        salary: answers.q_salary || ''
+    };
+
+    // Build markdown
+    const lines = [
+        `# Job Search Intent (v${version})`,
+        `Built: ${builtAt.replace('T', ' ').slice(0, 19)}`,
+        '',
+        '## Direction',
+        direction.jobTitle ? `- **Job Title:** ${direction.jobTitle}` : '',
+        direction.location ? `- **Location:** ${direction.location}` : '',
+        direction.workMode ? `- **Work Mode:** ${direction.workMode}` : '',
+        direction.salary ? `- **Target Salary:** ${direction.salary}K` : '',
+        ''
+    ].filter(Boolean);
+
+    lines.push('## Profile', '');
+    const sectionOrder = ['basic', 'skills', 'experience', 'education'];
+    const sectionLabels = { basic: 'Basic Info', skills: 'Skills', experience: 'Experience', education: 'Education' };
+    for (const key of sectionOrder) {
+        const content = sections[key] || '';
+        if (content.trim()) {
+            lines.push(`### ${sectionLabels[key] || key}`, content.trim(), '');
+        }
+    }
+    // Include any extra sections not in the standard order
+    for (const [key, content] of Object.entries(sections)) {
+        if (!sectionOrder.includes(key) && content && content.trim()) {
+            lines.push(`### ${key}`, content.trim(), '');
+        }
+    }
+
+    if (resumeRaw && !Object.keys(sections).length) {
+        lines.push('### Resume (Raw)', resumeRaw.trim(), '');
+    }
+
+    const markdown = lines.join('\n');
+
+    // Write to workspace
+    const sessionDir = path.join(_workspaceDir, sessionId);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const intentPath = path.join(sessionDir, 'intent.md');
+    fs.writeFileSync(intentPath, markdown, 'utf-8');
+
+    // Store in state
+    state.intentFiles[sessionId] = { version, builtAt, direction, filePath: intentPath };
+
+    return { markdown, filePath: intentPath, version };
+}
+
+function buildDashboard(sessionId) {
+    const intent = state.intentFiles[sessionId];
+    const answers = state.selectedAnswers[sessionId] || {};
+    const subtasks = state.subtasks[sessionId] || [];
+
+    const statusIcon = (s) => s === 'done' ? '✅' : s === 'running' ? '▶️' : s === 'failed' ? '❌' : '⏳';
+    const subtaskRows = subtasks.map((t) =>
+        `<tr><td>${statusIcon(t.status)}</td><td>${t.key}</td><td>${t.status}</td></tr>`
+    ).join('\n');
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Search Dashboard</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1b2e; color: #dfe3ff; padding: 2rem; margin: 0; }
+  h1 { color: #8b9aff; border-bottom: 2px solid #2d2f4a; padding-bottom: 0.5rem; }
+  h2 { color: #6a7eff; margin-top: 2rem; }
+  .card { background: #242640; border: 1px solid #2d2f4a; border-radius: 8px; padding: 1.2rem; margin-bottom: 1rem; }
+  .card h3 { margin-top: 0; color: #8b9aff; }
+  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+  th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #2d2f4a; }
+  th { color: #9da0c3; font-weight: 600; }
+  .direction-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .direction-item { background: #2d2f4a; border-radius: 6px; padding: 0.75rem; }
+  .direction-item label { display: block; color: #9da0c3; font-size: 0.8rem; margin-bottom: 0.25rem; }
+  .direction-item span { font-size: 1.1rem; font-weight: 500; }
+  .meta { color: #7a7fa8; font-size: 0.8rem; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+<h1>🎯 Job Search Dashboard</h1>
+<p class="meta">Session: ${sessionId} | Intent v${intent?.version || 1} | Built: ${intent?.builtAt ? intent.builtAt.replace('T', ' ').slice(0, 19) : 'N/A'}</p>
+
+<h2>Direction</h2>
+<div class="card">
+  <div class="direction-grid">
+    <div class="direction-item"><label>Job Title</label><span>${answers.q_job_title || '—'}</span></div>
+    <div class="direction-item"><label>Location</label><span>${answers.q_location || '—'}</span></div>
+    <div class="direction-item"><label>Work Mode</label><span>${answers.q_work_mode || '—'}</span></div>
+    <div class="direction-item"><label>Target Salary</label><span>${answers.q_salary ? answers.q_salary + 'K' : '—'}</span></div>
+  </div>
+</div>
+
+<h2>Subtask Progress</h2>
+<div class="card">
+  <table>
+    <thead><tr><th></th><th>Subtask</th><th>Status</th></tr></thead>
+    <tbody>
+${subtaskRows}
+    </tbody>
+  </table>
+</div>
+
+<h2>Profile Summary</h2>
+<div class="card">
+  <p>${intent ? 'Intent file generated. Open <strong>intent.md</strong> for full profile details.' : 'No intent file yet.'}</p>
+</div>
+</body>
+</html>`;
+
+    const sessionDir = path.join(_workspaceDir, sessionId);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const dashboardPath = path.join(sessionDir, 'dashboard.html');
+    fs.writeFileSync(dashboardPath, html, 'utf-8');
+
+    return { filePath: dashboardPath };
 }
 
 // --------------- provider detection & CLI ---------------

@@ -34,7 +34,8 @@ const PERSIST_KEYS = [
     'chromePath',
     'savePath',
     'walletExtensionPath',
-    'resumeProfile'
+    'resumeProfile',
+    'intentFiles'
 ];
 
 /**

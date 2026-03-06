@@ -591,7 +591,8 @@ function AgentWorkspace() {
         const payload = {
             filePath,
             basePath: savePathFromContext,
-            fallbackOpenPath: savePathFromContext
+            fallbackOpenPath: savePathFromContext,
+            openFile: Boolean(artifact?.openFile)
         };
         const result = await electronAPI.revealInFolder(payload);
         if (!result?.success) {
