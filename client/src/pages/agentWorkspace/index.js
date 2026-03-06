@@ -353,11 +353,14 @@ function AgentWorkspace() {
         if (activeExecutionState.canceled) {
             return t('agentWorkspace.stateCanceled', 'Canceled');
         }
+        if (!activeExecutionState.started && activeExecutionState.paused) {
+            return t('agentWorkspace.stateNotStarted', 'Not Started');
+        }
         if (activeExecutionState.paused) {
             return t('agentWorkspace.statePaused', 'Paused');
         }
         return t('agentWorkspace.stateRunning', 'Running');
-    }, [activeExecutionState.canceled, activeExecutionState.paused, t]);
+    }, [activeExecutionState.canceled, activeExecutionState.paused, activeExecutionState.started, t]);
     const runtimeSummaryText = useMemo(() => {
         const bindText = activeRuntimeContext
             ? (activeRuntimeContext.mode === 'wallet'
@@ -531,10 +534,6 @@ function AgentWorkspace() {
 
     const handleApplyModel = async () => {
         if (!activeSessionId || !isTaskRunning) return;
-        if (!activeExecutionState.paused) {
-            alert(t('agentWorkspace.pauseBeforeApply', 'Please pause the session before changing the model.'));
-            return;
-        }
         // Re-fetch models with apiKey if provider is api-key (user may have just entered it)
         if (selectedProvider === 'api-key' && runtimeApiKey && selectedSubProvider) {
             await fetchProviderModels(selectedProvider, selectedSubProvider, runtimeApiKey);

@@ -237,7 +237,7 @@ function createSession(name = '') {
         ...getRuntimeContext(),
         model: state.currentModel
     };
-    state.executionStates[session.id] = { paused: false, canceled: false };
+    state.executionStates[session.id] = { paused: true, canceled: false, started: false };
     state.attachmentKinds[session.id] = [];
     state.onboardingComplete[session.id] = false;
     state.profileSections[session.id] = {};
@@ -1611,7 +1611,7 @@ function handleExecutionControl(payload = {}) {
         state.subtasks[sessionId] = defaultSubTasks(now());
         state.selectedAnswers[sessionId] = {};
         state.prompts[sessionId] = _buildPresetPrompt({});
-        state.executionStates[sessionId] = { paused: false, canceled: false };
+        state.executionStates[sessionId] = { paused: true, canceled: false, started: false };
         state.attachmentKinds[sessionId] = [];
         state.onboardingComplete[sessionId] = false;
         state.profileSections[sessionId] = {};
@@ -1656,6 +1656,16 @@ function handleSessionContextUpdate(payload = {}) {
         `session_context_updated -> mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=${state.envs.length}, wallet=${state.wallets.length}, model=${modelDisplay}`,
         { source: 'context' }
     );
+
+    // Auto-start session on first Apply Model
+    const execState = getExecutionState(sessionId);
+    if (!execState.started) {
+        setExecutionState(sessionId, { paused: false, canceled: false, started: true });
+        appendConversation(sessionId, 'assistant', isZh()
+            ? '会话已启动，你可以开始对话了。'
+            : 'Session started. You can begin chatting now.');
+    }
+
     sendSnapshot();
     scheduleSave();
 }

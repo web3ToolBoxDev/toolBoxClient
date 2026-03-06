@@ -458,7 +458,7 @@ describe('AgentWorkspace protocol regression', () => {
                     subtasks: {},
                     artifacts: {},
                     prompts: {},
-                    executionStates: { s1: { paused: true } }
+                    executionStates: { s1: { paused: true, started: false } }
                 }
             });
         });
@@ -506,7 +506,7 @@ describe('AgentWorkspace protocol regression', () => {
                     subtasks: {},
                     artifacts: {},
                     prompts: {},
-                    executionStates: { s1: { paused: true } }
+                    executionStates: { s1: { paused: true, started: false } }
                 }
             });
         });
@@ -622,7 +622,7 @@ describe('AgentWorkspace protocol regression', () => {
                     subtasks: {},
                     artifacts: {},
                     prompts: {},
-                    executionStates: { s1: { paused: true } }
+                    executionStates: { s1: { paused: true, started: false } }
                 }
             });
         });
@@ -683,7 +683,7 @@ describe('AgentWorkspace protocol regression', () => {
                     subtasks: {},
                     artifacts: {},
                     prompts: {},
-                    executionStates: { s1: { paused: true } }
+                    executionStates: { s1: { paused: true, started: false } }
                 }
             });
         });
@@ -725,7 +725,7 @@ describe('AgentWorkspace protocol regression', () => {
         expect(providerSelect.value).toBe('claude-code');
     });
 
-    it('alerts user to pause before applying model while session is running', async () => {
+    it('apply model sends context update even when session is not started', async () => {
         render(
             <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
                 <Routes>
@@ -748,7 +748,8 @@ describe('AgentWorkspace protocol regression', () => {
                     conversations: { s1: [] },
                     subtasks: {},
                     artifacts: {},
-                    prompts: {}
+                    prompts: {},
+                    executionStates: { s1: { paused: true, started: false } }
                 }
             });
         });
@@ -759,16 +760,15 @@ describe('AgentWorkspace protocol regression', () => {
         fireEvent.change(screen.getByLabelText('session-provider'), { target: { value: 'codex-cli' } });
         await waitFor(() => expect(screen.getByLabelText('session-model').value).toBe('default'));
 
-        // Try to apply while session is running (not paused) → should alert
+        // Apply model while session is not started → should send context update (no pause guard)
         mockWsManager.sendMessage.mockClear();
         fireEvent.click(screen.getByRole('button', { name: 'Apply Model' }));
-        expect(window.alert).toHaveBeenCalledWith('Please pause the session before changing the model.');
 
-        // No context update should have been sent
+        expect(window.alert).not.toHaveBeenCalled();
         const contextSent = mockWsManager.sendMessage.mock.calls.some(([raw]) => {
             try { return JSON.parse(raw).type === 'agent_session_context_update'; } catch { return false; }
         });
-        expect(contextSent).toBe(false);
+        expect(contextSent).toBe(true);
     });
 
     it('sends selected model (not default) when user picks a specific model', async () => {
@@ -795,7 +795,7 @@ describe('AgentWorkspace protocol regression', () => {
                     subtasks: {},
                     artifacts: {},
                     prompts: {},
-                    executionStates: { s1: { paused: true } }
+                    executionStates: { s1: { paused: true, started: false } }
                 }
             });
         });
@@ -896,7 +896,7 @@ describe('AgentWorkspace protocol regression', () => {
         await waitFor(() => expect(modelSelect.value).toBe('sonnet'));
     });
 
-    it('chat input is always enabled when task is running (no onboarding gate on UI)', async () => {
+    it('chat is disabled when session not started, enabled after start', async () => {
         render(
             <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
                 <Routes>
@@ -909,7 +909,7 @@ describe('AgentWorkspace protocol regression', () => {
         await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
         const listener = mockWsManager.addMessageListener.mock.calls[0][0];
 
-        // Snapshot with onboardingComplete=false — chat should still be enabled (not disabled)
+        // Session not started (paused=true, started=false) -> interaction disabled
         act(() => {
             listener({
                 type: 'agent_state_snapshot',
@@ -922,13 +922,31 @@ describe('AgentWorkspace protocol regression', () => {
                     artifacts: {},
                     prompts: {},
                     runtimeContexts: {},
-                    executionStates: { s1: { paused: false, canceled: false } },
-                    onboardingComplete: { s1: false }
+                    executionStates: { s1: { paused: true, started: false, canceled: false } }
                 }
             });
         });
 
-        // interactionDisabled should be false (task is running, not paused/canceled)
+        await waitFor(() => expect(screen.getByTestId('panel-interaction-disabled').textContent).toBe('true'));
+
+        // After Apply Model: backend sends started=true, paused=false -> interaction enabled
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {},
+                    runtimeContexts: {},
+                    executionStates: { s1: { paused: false, started: true, canceled: false } }
+                }
+            });
+        });
+
         await waitFor(() => expect(screen.getByTestId('panel-interaction-disabled').textContent).toBe('false'));
     });
 
