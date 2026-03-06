@@ -1659,7 +1659,7 @@ async function extractResumeFromAttachments(sessionId, attachments) {
                     console.log(`[agent:knowledge] Parsed ${sectionKeys.length} sections: ${sectionKeys.join(', ')}`);
 
                     // Clear old profile docs before storing new ones
-                    await knowledgeClient.remove({ type: 'profile' });
+                    await knowledgeClient.remove({ type: 'profile', scope: 'agent:job-seek' });
 
                     let stored = 0;
                     for (const [subType, content] of Object.entries(sections)) {
@@ -1668,6 +1668,7 @@ async function extractResumeFromAttachments(sessionId, attachments) {
                             refId: `profile_${subType}`,
                             type: 'profile',
                             subType,
+                            scope: 'agent:job-seek',
                             content,
                             summary,
                             source: attachment.name,
@@ -1732,7 +1733,8 @@ function storeDirection(sessionId) {
     knowledgeClient.upsert({
         refId: `direction_${sessionId}`,
         type: 'direction',
-        subType: 'current',
+        subType: 'target',
+        scope: 'agent:job-seek',
         content: directionContent,
         summary,
         source: 'preset',
@@ -1747,8 +1749,9 @@ function storeDirection(sessionId) {
     // Also store a timestamped history entry (for dashboard change tracking)
     knowledgeClient.upsert({
         refId: `direction_history_${sessionId}_${Date.now()}`,
-        type: 'direction',
-        subType: 'history',
+        type: 'decision',
+        subType: '',
+        scope: 'agent:job-seek',
         content: directionContent,
         summary,
         source: 'preset',
@@ -1849,13 +1852,14 @@ async function extractProfileFromConversation(sessionId) {
             state.profileSections[sessionId] = sections;
 
             // Store in knowledge store
-            await knowledgeClient.remove({ type: 'profile' });
+            await knowledgeClient.remove({ type: 'profile', scope: 'agent:job-seek' });
             let stored = 0;
             for (const [subType, content] of Object.entries(sections)) {
                 const result = await knowledgeClient.upsert({
                     refId: `profile_${subType}`,
                     type: 'profile',
                     subType,
+                    scope: 'agent:job-seek',
                     content,
                     summary: sanitizeForMemory(content.split('\n')[0] || '').slice(0, 100),
                     source: 'conversation',
