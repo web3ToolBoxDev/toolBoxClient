@@ -256,8 +256,8 @@ function createSession(name = '') {
     state.profileSections[session.id] = {};
     state.profileCollectionMode[session.id] = false;
     appendConversation(session.id, 'assistant', isZh()
-        ? '欢迎使用求职助手！请先回答以下问题来设定本次求职方向。完成后即可开始对话。'
-        : 'Welcome to Job Seek Assistant! Please answer the onboarding questions below to set your job search direction. Chat will be unlocked once required questions are completed.');
+        ? '欢迎使用求职助手！请先点击右上角「运行时设置」选择 AI 供应商并点击「应用模型」启动会话，然后回答预设问题来设定求职方向。'
+        : 'Welcome to Job Seek Assistant! To get started, click "Runtime Settings" in the top right to select your AI provider, then click "Apply Model" to start the session. After that, answer the preset questions to set your job search direction.');
     appendRuntimeLog(session.id, 'Session created', { source: 'system' });
     emitSessionList();
     sendSnapshot();
