@@ -4,9 +4,12 @@ const path = require('path');
 const { execSync, spawn } = require('child_process');
 const {
     getPresetQuestionTemplates,
+    isOnboardingComplete,
+    isProfileComplete,
     defaultSubTasks,
     buildPresetPrompt,
-    buildAttachmentActionQuestion
+    buildAttachmentActionQuestion,
+    buildProfileCollectionPrompt
 } = require('./lib/prompts');
 const { callAPI, buildMultimodalContent } = require('./lib/aiClient');
 const memoryClient = require('./lib/core/memoryClient');
@@ -100,6 +103,9 @@ const state = {
     runtimeContexts: {},
     executionStates: {},
     attachmentKinds: {},
+    onboardingComplete: {},
+    profileSections: {},
+    profileCollectionMode: {},
     envs: [],
     wallets: [],
     envsData: {},
@@ -127,6 +133,9 @@ function restoreState() {
     for (const sid of Object.keys(state.conversations)) {
         if (!state.runtimeLogs[sid]) state.runtimeLogs[sid] = [];
         if (!state.executionStates[sid]) state.executionStates[sid] = { paused: false, canceled: false };
+        if (state.onboardingComplete[sid] === undefined) state.onboardingComplete[sid] = false;
+        if (!state.profileSections[sid]) state.profileSections[sid] = {};
+        if (state.profileCollectionMode[sid] === undefined) state.profileCollectionMode[sid] = false;
         // Refresh attachment policy in existing prompts to pick up newly supported kinds
         if (state.prompts[sid] && state.prompts[sid].attachmentPolicy) {
             state.prompts[sid].attachmentPolicy.allowedKinds = ['image', 'pdf', 'doc', 'sheet', 'text'];
@@ -189,6 +198,7 @@ function sendSnapshot() {
         prompts: state.prompts,
         runtimeContexts: state.runtimeContexts,
         executionStates: state.executionStates,
+        onboardingComplete: state.onboardingComplete,
         envs: state.envs,
         wallets: state.wallets,
         activeBrowserEnvIds: Object.keys(_activeBrowsers)
@@ -228,21 +238,12 @@ function createSession(name = '') {
     };
     state.executionStates[session.id] = { paused: false, canceled: false };
     state.attachmentKinds[session.id] = [];
-    appendConversation(session.id, 'assistant', isZh() ? 'AI\u4EFB\u52A1\u5DF2\u542F\u52A8\uFF0C\u8BF7\u4ECE\u63A8\u8350\u9009\u9879\u5F00\u59CB\u3002' : 'AI task started. Please begin with a suggested option.');
-    appendConversation(
-        session.id,
-        'assistant',
-        isZh() ? '\u53EF\u5148\u4E0A\u4F20\u7B80\u5386\u539F\u59CB\u6587\u4EF6\uFF08\u53EF\u9009\uFF09' : 'You can upload original resume file first (optional)',
-        {
-            questionType: 'upload',
-            questionId: 'inline_upload_resume',
-            questionText: isZh() ? '\u4E0A\u4F20\u7B80\u5386\u539F\u59CB\u6587\u4EF6' : 'Upload original resume file',
-            buttonLabel: isZh() ? '\u4E0A\u4F20\u7B80\u5386\u6587\u4EF6' : 'Upload Resume File',
-            allowMultiple: false,
-            acceptKinds: ['pdf', 'image', 'text'],
-            maxSizeMB: 6
-        }
-    );
+    state.onboardingComplete[session.id] = false;
+    state.profileSections[session.id] = {};
+    state.profileCollectionMode[session.id] = false;
+    appendConversation(session.id, 'assistant', isZh()
+        ? '欢迎使用求职助手！请先回答以下问题来设定本次求职方向。完成后即可开始对话。'
+        : 'Welcome to Job Seek Assistant! Please answer the onboarding questions below to set your job search direction. Chat will be unlocked once required questions are completed.');
     appendRuntimeLog(session.id, 'Session created', { source: 'system' });
     emitSessionList();
     sendSnapshot();
@@ -263,6 +264,9 @@ function deleteSession(sessionId) {
     delete state.runtimeContexts[id];
     delete state.executionStates[id];
     delete state.attachmentKinds[id];
+    delete state.onboardingComplete[id];
+    delete state.profileSections[id];
+    delete state.profileCollectionMode[id];
     if (!state.sessions.length) {
         createSession('');
         return;
@@ -741,6 +745,15 @@ async function handleUserInput(payload = {}) {
         appendConversation(sessionId, 'assistant', isZh() ? '\u5F53\u524D\u4F1A\u8BDD\u5DF2\u6682\u505C\uFF0C\u8BF7\u5148\u6062\u590D\u540E\u7EE7\u7EED\u3002' : 'Current session is paused. Please resume before continuing.');
         return;
     }
+
+    // Onboarding gate: chat is disabled until required questions are answered
+    if (!state.onboardingComplete[sessionId]) {
+        appendConversation(sessionId, 'assistant', isZh()
+            ? '请先完成上方的必填问题（目标职位、地点、工作模式），然后才能开始对话。'
+            : 'Please complete the required onboarding questions (job title, location, work mode) before chatting.');
+        return;
+    }
+
     const text = String(payload.text || '').trim();
     const runtimeContext = payload.runtimeContext || state.runtimeContexts[sessionId] || {};
     const model = String(payload.model || runtimeContext?.model || state.currentModel || 'default');
@@ -756,7 +769,7 @@ async function handleUserInput(payload = {}) {
     appendConversation(sessionId, 'assistant', thinkingMsg, { _system: true, _thinking: true });
 
     try {
-        // Build context: knowledge store (FTS + expand) → mem0 fallback → state fallback
+        // Build context: knowledge store (FTS + expand) -> mem0 fallback -> state fallback
         let memoryContext = '';
         try {
             console.log(`[agent:knowledge] Searching for: "${text.slice(0, 80)}"`);
@@ -793,9 +806,20 @@ async function handleUserInput(payload = {}) {
 
         let reply = '';
 
+        // Determine system prompt: profile collection mode vs normal
+        const direction = state.selectedAnswers[sessionId] || {};
+        const inProfileCollection = state.profileCollectionMode[sessionId];
+        const systemPrompt = inProfileCollection
+            ? buildProfileCollectionPrompt(isZh(), direction)
+            : (isZh()
+                ? '\u4F60\u662F\u4E00\u4E2A\u6709\u7528\u7684 AI \u52A9\u624B\u3002\u8BF7\u7528\u4E0E\u7528\u6237\u76F8\u540C\u7684\u8BED\u8A00\u56DE\u590D\u3002'
+                : 'You are a helpful AI assistant. Reply in the same language as the user.');
+
         if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
-            // CLI spawned in temp dir (no repo context) with memory injected
-            reply = await invokeCliAsync(activeProvider, text, memoryContext, model);
+            const cliContext = inProfileCollection
+                ? (memoryContext ? `${systemPrompt}\n\n${memoryContext}` : systemPrompt)
+                : memoryContext;
+            reply = await invokeCliAsync(activeProvider, text, cliContext, model);
         } else if (activeProvider === 'api-key') {
             const subProvider = state.currentSubProvider || 'openai';
             const apiKey = getRawApiKey();
@@ -808,9 +832,7 @@ async function handleUserInput(payload = {}) {
                 apiKey,
                 model: state.currentModel,
                 conversationHistory,
-                systemPrompt: (isZh()
-                    ? '\u4F60\u662F\u4E00\u4E2A\u6709\u7528\u7684 AI \u52A9\u624B\u3002\u8BF7\u7528\u4E0E\u7528\u6237\u76F8\u540C\u7684\u8BED\u8A00\u56DE\u590D\u3002'
-                    : 'You are a helpful AI assistant. Reply in the same language as the user.') + memorySuffix
+                systemPrompt: systemPrompt + memorySuffix
             });
             reply = result.content || '';
             if (result.usage) {
@@ -823,9 +845,16 @@ async function handleUserInput(payload = {}) {
         removeThinkingMessages(sessionId);
         appendConversation(sessionId, 'assistant', reply || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)'));
         appendRuntimeLog(sessionId, `ai_reply -> ${(reply || '').slice(0, 120)}`, { source: 'ai' });
+
+        // Detect [PROFILE_COMPLETE] marker from AI in profile collection mode
+        if (inProfileCollection && reply && reply.includes('[PROFILE_COMPLETE]')) {
+            await extractProfileFromConversation(sessionId);
+        }
+
         scheduleSave();
 
         // Store user message in memory — only if it contains factual info (not just questions)
+        const ns = getMemoryNamespace();
         const llmConfig = activeProvider === 'api-key' ? {
             apiKey: getRawApiKey(),
             model: state.currentModel,
@@ -851,7 +880,6 @@ async function handleUserInput(payload = {}) {
         } else {
             console.log(`[agent:memory] SKIP storing question: "${text.slice(0, 80)}"`);
         }
-        // Skip storing AI replies — they're verbose and pollute search results
     } catch (err) {
         removeThinkingMessages(sessionId);
         const errorMsg = String(err?.message || err || 'Unknown error').slice(0, 500);
@@ -928,51 +956,10 @@ function handleUserOption(payload = {}) {
         );
     }
 
-    if (payload.optionId === 'next_resume') {
-        const resumeTitle = isZh() ? '\u7B80\u5386\u8349\u7A3F v1' : 'Resume Draft v1';
-        const fileInfo = buildArtifactFile(sessionId, 'resume', resumeTitle);
-        appendArtifact(sessionId, { id: genId('resume'), type: 'resume', title: resumeTitle, ...fileInfo });
-    }
-    if (payload.optionId === 'next_cover') {
-        const coverTitle = isZh() ? '\u6C42\u804C\u4FE1\u8349\u7A3F v1' : 'Cover Letter Draft v1';
-        const fileInfo = buildArtifactFile(sessionId, 'cover_letter', coverTitle);
-        appendArtifact(sessionId, { id: genId('cover'), type: 'cover_letter', title: coverTitle, ...fileInfo });
-    }
-
-    moveSubTaskForward(sessionId);
-
-    const prompts = (state.prompts[sessionId]?.questions || _getTemplates());
-    const promptQuestionsForProgress = prompts.filter((q) => q.type !== 'upload');
-    const selectedLabels = prompts.map((q) => {
-        const answer = selectedMap[q.id];
-        if (!answer) return '';
-        if (q.type === 'upload') return '';
-        if (Array.isArray(q.options)) {
-            const opt = (q.options || []).find((o) => o.id === answer);
-            return opt ? opt.label : '';
-        }
-        return `${q.text}: ${answer}`;
-    }).filter(Boolean);
-
     state.prompts[sessionId] = _buildPresetPrompt(selectedMap);
 
-    const nowAnswered = promptQuestionsForProgress.filter((q) => {
-        const v = selectedMap[q.id];
-        return String(v || '').trim().length > 0;
-    }).length;
-    if (nowAnswered > beforeAnswered && nowAnswered < promptQuestionsForProgress.length) {
-        appendConversation(sessionId, 'assistant', isZh() ? '\u5DF2\u8BB0\u5F55\uFF0C\u7EE7\u7EED\u9009\u62E9\u4E0B\u4E00\u9898\u3002' : 'Recorded. Please continue with next question.');
-        sendSnapshot();
-        return;
-    }
-
-    const summary = selectedLabels.join(' / ');
-    if (summary && nowAnswered === promptQuestionsForProgress.length) {
-        appendConversation(sessionId, 'assistant', isZh() ? `\u4F60\u7684\u5DF2\u9009\u8DEF\u5F84\uFF1A${summary}` : `Your selected path: ${summary}`);
-    }
-    if (nowAnswered === promptQuestionsForProgress.length) {
-        appendConversation(sessionId, 'assistant', isZh() ? '\u5F53\u524D\u9636\u6BB5\u5DF2\u5B8C\u6210\uFF0C\u8BF7\u5728\u53F3\u4FA7\u4EA7\u7269\u533A\u67E5\u770B\u7B80\u5386/\u6C42\u804C\u4FE1\u8349\u7A3F\u3002' : 'Current stage is completed. Please check generated artifacts on the right side.');
-    }
+    // Check onboarding completion after option selection
+    checkAndCompleteOnboarding(sessionId);
     sendSnapshot();
 }
 
@@ -1010,14 +997,8 @@ function handleUserAnswer(payload = {}) {
     appendRuntimeLog(sessionId, `user_answer -> ${questionId}:${answer}`, { source: 'user' });
     appendConversation(sessionId, 'assistant', isZh() ? '\u5DF2\u8BB0\u5F55\u8BE5\u8F93\u5165\u3002' : 'Input recorded.');
 
-    const prompts = _getTemplates().filter((q) => q.type !== 'upload');
-    const allAnswered = prompts.every((q) => {
-        const v = state.selectedAnswers[sessionId][q.id];
-        return String(v || '').trim().length > 0;
-    });
-    if (allAnswered) {
-        appendConversation(sessionId, 'assistant', isZh() ? '\u5DF2\u5B8C\u6210\u5168\u90E8\u9884\u8BBE\u95EE\u9898\u3002' : 'All preset questions are completed.');
-    }
+    // Check onboarding completion after answer
+    checkAndCompleteOnboarding(sessionId);
     sendSnapshot();
 }
 
@@ -1421,6 +1402,137 @@ async function extractResumeFromAttachments(sessionId, attachments) {
     }
 }
 
+// --------------- onboarding completion & profile collection ---------------
+
+/**
+ * Check if required onboarding questions are answered and transition to chat mode.
+ * Stores direction in knowledge store and starts profile collection if no resume uploaded.
+ */
+function checkAndCompleteOnboarding(sessionId) {
+    if (state.onboardingComplete[sessionId]) return;
+
+    const templates = _getTemplates();
+    const selectedMap = state.selectedAnswers[sessionId] || {};
+    if (!isOnboardingComplete(selectedMap, templates)) return;
+
+    // Mark onboarding complete
+    state.onboardingComplete[sessionId] = true;
+    moveSubTaskForward(sessionId); // onboarding -> done, profile -> running
+
+    // Store direction in knowledge store
+    const directionContent = [
+        `Job Title: ${selectedMap.q_job_title || ''}`,
+        `Location: ${selectedMap.q_location || ''}`,
+        `Work Mode: ${selectedMap.q_work_mode || ''}`,
+        selectedMap.q_salary ? `Target Salary: ${selectedMap.q_salary}K` : ''
+    ].filter(Boolean).join('\n');
+
+    knowledgeClient.upsert({
+        refId: `direction_${sessionId}`,
+        type: 'direction',
+        subType: 'session',
+        content: directionContent,
+        summary: `${selectedMap.q_job_title} in ${selectedMap.q_location} (${selectedMap.q_work_mode})`,
+        source: 'onboarding',
+        tags: ['direction', selectedMap.q_job_title, selectedMap.q_location].filter(Boolean)
+    }).then(() => {
+        console.log(`[agent:knowledge] Stored direction for session ${sessionId}`);
+        appendRuntimeLog(sessionId, `knowledge_store -> direction stored`, { source: 'knowledge' });
+    }).catch(err => {
+        console.error('[agent:knowledge] direction store error:', err.message);
+    });
+
+    const summary = isZh()
+        ? `求职方向已设定：${selectedMap.q_job_title}，${selectedMap.q_location}（${selectedMap.q_work_mode}）${selectedMap.q_salary ? `，目标年薪 ${selectedMap.q_salary}K` : ''}`
+        : `Job search direction set: ${selectedMap.q_job_title}, ${selectedMap.q_location} (${selectedMap.q_work_mode})${selectedMap.q_salary ? `, target salary ${selectedMap.q_salary}K` : ''}`;
+    appendConversation(sessionId, 'assistant', summary);
+
+    // Check if resume was uploaded
+    const hasResume = Boolean(selectedMap.q_upload_profile);
+    if (hasResume) {
+        appendConversation(sessionId, 'assistant', isZh()
+            ? '简历已上传，正在解析中。对话功能已解锁，你可以开始聊天了。'
+            : 'Resume uploaded and being parsed. Chat is now unlocked — you can start chatting.');
+    } else {
+        // Enter profile collection mode
+        state.profileCollectionMode[sessionId] = true;
+        appendConversation(sessionId, 'assistant', isZh()
+            ? '对话功能已解锁！由于你没有上传简历，我会通过对话帮你构建个人档案。请先告诉我你的姓名和联系方式。'
+            : 'Chat unlocked! Since you did not upload a resume, I will help build your profile through conversation. Please start by telling me your name and contact info.');
+    }
+    appendRuntimeLog(sessionId, `onboarding_complete -> hasResume=${hasResume}, profileCollection=${!hasResume}`, { source: 'onboarding' });
+    scheduleSave();
+}
+
+/**
+ * Extract profile sections from conversation history when AI marks [PROFILE_COMPLETE].
+ * Parses the conversation to build profile sections and stores in knowledge store.
+ */
+async function extractProfileFromConversation(sessionId) {
+    const { provider: activeProvider } = resolveProvider();
+    if (!activeProvider) return;
+
+    const conversationHistory = getConversationForAI(sessionId);
+    const extractPrompt = isZh()
+        ? '根据以上对话内容，提取用户的个人档案信息，严格按以下分区格式返回：\n\n[SECTION:basic]\n姓名、联系方式\n\n[SECTION:skills]\n技能列表\n\n[SECTION:experience]\n工作经历\n\n[SECTION:education]\n教育背景\n\n如果某个分区信息缺失，跳过该分区。'
+        : 'Based on the conversation above, extract the user profile. Use EXACTLY this format:\n\n[SECTION:basic]\nName, contact info\n\n[SECTION:skills]\nSkills list\n\n[SECTION:experience]\nWork experience\n\n[SECTION:education]\nEducation\n\nSkip missing sections.';
+
+    try {
+        let reply = '';
+        const model = state.currentModel || 'default';
+
+        if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
+            const convoText = conversationHistory.map(m => `${m.role}: ${m.text}`).join('\n').slice(0, 8000);
+            reply = await invokeCliAsync(activeProvider, `${extractPrompt}\n\nConversation:\n${convoText}`, '', model);
+        } else if (activeProvider === 'api-key') {
+            const result = await callAPI({
+                subProvider: state.currentSubProvider || 'openai',
+                apiKey: getRawApiKey(),
+                model,
+                conversationHistory: [...conversationHistory, { role: 'user', text: extractPrompt }],
+                systemPrompt: isZh() ? '你是简历分析助手。' : 'You are a resume analysis assistant.'
+            });
+            reply = result.content || '';
+        }
+
+        if (reply) {
+            const sections = parseResumeSections(reply);
+            const sectionKeys = Object.keys(sections);
+            state.profileSections[sessionId] = sections;
+
+            // Store in knowledge store
+            await knowledgeClient.remove({ type: 'profile' });
+            let stored = 0;
+            for (const [subType, content] of Object.entries(sections)) {
+                const result = await knowledgeClient.upsert({
+                    refId: `profile_${subType}`,
+                    type: 'profile',
+                    subType,
+                    content,
+                    summary: sanitizeForMemory(content.split('\n')[0] || '').slice(0, 100),
+                    source: 'conversation',
+                    tags: ['profile', subType]
+                });
+                if (result?.success) stored++;
+            }
+
+            state.profileCollectionMode[sessionId] = false;
+            state.resumeProfile = reply;
+            moveSubTaskForward(sessionId); // profile -> done
+
+            appendConversation(sessionId, 'assistant', isZh()
+                ? `个人档案已构建完成！已存储 ${stored} 个分区（${sectionKeys.join('、')}）。你现在可以开始搜索工作了。`
+                : `Profile built successfully! ${stored} sections stored (${sectionKeys.join(', ')}). You can now start searching for jobs.`);
+            appendRuntimeLog(sessionId, `profile_from_conversation -> ${stored}/${sectionKeys.length} sections`, { source: 'knowledge' });
+            sendSnapshot();
+            scheduleSave();
+        }
+    } catch (err) {
+        console.error('[agent] profile extraction from conversation failed:', err);
+        appendRuntimeLog(sessionId, `profile_extraction_error -> ${err.message}`, { source: 'error' });
+    }
+}
+
 function handleExecutionControl(payload = {}) {
     const sessionId = payload.sessionId || state.activeSessionId;
     if (!sessionId || !state.conversations[sessionId]) {
@@ -1460,6 +1572,9 @@ function handleExecutionControl(payload = {}) {
         state.prompts[sessionId] = _buildPresetPrompt({});
         state.executionStates[sessionId] = { paused: false, canceled: false };
         state.attachmentKinds[sessionId] = [];
+        state.onboardingComplete[sessionId] = false;
+        state.profileSections[sessionId] = {};
+        state.profileCollectionMode[sessionId] = false;
         emit('agent_subtask_update', { sessionId, items: state.subtasks[sessionId] });
         emit('agent_execution_update', { sessionId, state: state.executionStates[sessionId] });
         appendRuntimeLog(sessionId, 'execution -> retry', { source: 'execution' });

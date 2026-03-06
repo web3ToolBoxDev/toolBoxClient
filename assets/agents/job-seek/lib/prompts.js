@@ -1,105 +1,132 @@
 /**
  * Preset question templates & prompt builders for the Job Seek AI Agent.
- * Extracted from example/ai_example.js so the agent entry script stays lean.
+ * Phase 1: Onboarding questions that gate chat access until required answers are provided.
  */
+
+const WORK_MODE_OPTIONS_ZH = [
+    { id: 'remote', label: '远程' },
+    { id: 'hybrid', label: '混合' },
+    { id: 'onsite', label: '到岗' },
+    { id: 'any', label: '不限' }
+];
+
+const WORK_MODE_OPTIONS_EN = [
+    { id: 'remote', label: 'Remote' },
+    { id: 'hybrid', label: 'Hybrid' },
+    { id: 'onsite', label: 'Onsite' },
+    { id: 'any', label: 'Any' }
+];
 
 const getPresetQuestionTemplates = (isZh) => {
     if (isZh) {
         return [
             {
-                id: 'q_track',
-                text: '\u8BF7\u9009\u62E9\u4F60\u5F53\u524D\u6C42\u804C\u4E3B\u65B9\u5411',
-                options: [
-                    { id: 'track_frontend', label: '\u524D\u7AEF\u5DE5\u7A0B\u5E08' },
-                    { id: 'track_backend', label: '\u540E\u7AEF\u5DE5\u7A0B\u5E08' },
-                    { id: 'track_fullstack', label: '\u5168\u6808\u5DE5\u7A0B\u5E08' }
-                ]
+                id: 'q_job_title',
+                type: 'input',
+                inputType: 'text',
+                text: '目标职位名称',
+                placeholder: '例如：前端工程师',
+                required: true
             },
             {
-                id: 'q_style',
-                text: '\u8BF7\u9009\u62E9\u7B80\u5386\u98CE\u683C',
-                options: [
-                    { id: 'style_data', label: '\u6570\u636E\u5BFC\u5411\u578B' },
-                    { id: 'style_story', label: '\u9879\u76EE\u53D9\u4E8B\u578B' },
-                    { id: 'style_compact', label: '\u7B80\u6D01\u6458\u8981\u578B' }
-                ]
+                id: 'q_location',
+                type: 'input',
+                inputType: 'text',
+                text: '期望工作地点',
+                placeholder: '例如：上海 / Toronto',
+                required: true
+            },
+            {
+                id: 'q_work_mode',
+                text: '工作模式',
+                options: WORK_MODE_OPTIONS_ZH,
+                required: true
             },
             {
                 id: 'q_salary',
                 type: 'input',
-                inputType: 'number',
-                text: '\u8BF7\u8F93\u5165\u76EE\u6807\u85AA\u8D44\uFF08K/\u6708\uFF09',
-                placeholder: '\u4F8B\u5982 30'
+                inputType: 'text',
+                text: '目标年薪（K，可选）',
+                placeholder: '例如 300',
+                required: false
             },
             {
                 id: 'q_upload_profile',
                 type: 'upload',
-                text: '\u8BF7\u4E0A\u4F20\u7B80\u5386\u6216\u4F5C\u54C1\u96C6\uFF08\u53EF\u9009\uFF09',
-                buttonLabel: '\u4E0A\u4F20\u6587\u4EF6',
+                text: '上传简历（可选，PDF/图片/文本）',
+                buttonLabel: '上传文件',
                 allowMultiple: false,
                 acceptKinds: ['pdf', 'image', 'text'],
-                maxSizeMB: 6
-            },
-            {
-                id: 'q_next',
-                text: '\u8BF7\u9009\u62E9\u4E0B\u4E00\u6B65\u64CD\u4F5C',
-                options: [
-                    { id: 'next_match', label: '\u8FDB\u884C\u5C97\u4F4D\u5339\u914D' },
-                    { id: 'next_resume', label: '\u751F\u6210\u7B80\u5386\u8349\u7A3F' },
-                    { id: 'next_cover', label: '\u751F\u6210\u6C42\u804C\u4FE1\u8349\u7A3F' }
-                ]
+                maxSizeMB: 6,
+                required: false
             }
         ];
     }
     return [
         {
-            id: 'q_track',
-            text: 'Choose your primary job track',
-            options: [
-                { id: 'track_frontend', label: 'Frontend Engineer' },
-                { id: 'track_backend', label: 'Backend Engineer' },
-                { id: 'track_fullstack', label: 'Fullstack Engineer' }
-            ]
+            id: 'q_job_title',
+            type: 'input',
+            inputType: 'text',
+            text: 'Target job title',
+            placeholder: 'e.g. Frontend Engineer',
+            required: true
         },
         {
-            id: 'q_style',
-            text: 'Choose resume style',
-            options: [
-                { id: 'style_data', label: 'Data-Oriented' },
-                { id: 'style_story', label: 'Project Story' },
-                { id: 'style_compact', label: 'Compact Summary' }
-            ]
+            id: 'q_location',
+            type: 'input',
+            inputType: 'text',
+            text: 'Preferred location',
+            placeholder: 'e.g. Toronto / Shanghai',
+            required: true
+        },
+        {
+            id: 'q_work_mode',
+            text: 'Work mode',
+            options: WORK_MODE_OPTIONS_EN,
+            required: true
         },
         {
             id: 'q_salary',
             type: 'input',
-            inputType: 'number',
-            text: 'Input target monthly salary (K)',
-            placeholder: 'e.g. 30'
+            inputType: 'text',
+            text: 'Target annual salary in K (optional)',
+            placeholder: 'e.g. 120',
+            required: false
         },
         {
             id: 'q_upload_profile',
             type: 'upload',
-            text: 'Upload resume or portfolio (optional)',
+            text: 'Upload resume (optional, PDF/image/text)',
             buttonLabel: 'Upload File',
             allowMultiple: false,
             acceptKinds: ['pdf', 'image', 'text'],
-            maxSizeMB: 6
-        },
-        {
-            id: 'q_next',
-            text: 'Choose next action',
-            options: [
-                { id: 'next_match', label: 'Run Requirement Match' },
-                { id: 'next_resume', label: 'Generate Resume Draft' },
-                { id: 'next_cover', label: 'Generate Cover Letter Draft' }
-            ]
+            maxSizeMB: 6,
+            required: false
         }
     ];
 };
 
+/**
+ * Check if all required onboarding questions have been answered.
+ */
+const isOnboardingComplete = (selectedMap = {}, templates) => {
+    const required = templates.filter(q => q.required && q.type !== 'upload');
+    return required.every(q => {
+        const v = String(selectedMap[q.id] || '').trim();
+        return v.length > 0;
+    });
+};
+
+/**
+ * Check if user profile has at least basic + skills sections.
+ */
+const isProfileComplete = (profileSections = {}) => {
+    return Boolean(profileSections.basic && profileSections.skills);
+};
+
 const defaultSubTasks = (now) => ([
-    { key: 'profile', status: 'running', updatedAt: now },
+    { key: 'onboarding', status: 'running', updatedAt: now },
+    { key: 'profile', status: 'pending', updatedAt: now },
     { key: 'search', status: 'pending', updatedAt: now },
     { key: 'match', status: 'pending', updatedAt: now },
     { key: 'resume', status: 'pending', updatedAt: now },
@@ -107,7 +134,7 @@ const defaultSubTasks = (now) => ([
 ]);
 
 const buildPresetPrompt = (isZh, selectedMap = {}, questionTemplates) => ({
-    text: isZh ? '\u8BF7\u9009\u62E9\u9884\u8BBE\u95EE\u9898\u5E76\u56DE\u7B54' : 'Select preset questions and answer',
+    text: isZh ? '请回答以下问题以开始求职' : 'Answer the following questions to start your job search',
     attachmentPolicy: {
         maxSizeMB: 4,
         allowedKinds: ['image', 'pdf', 'doc', 'sheet', 'text']
@@ -124,28 +151,64 @@ const buildAttachmentActionQuestion = (isZh, kinds = []) => {
     if (!Array.isArray(kinds) || !kinds.length) return null;
     const options = [];
     if (kinds.includes('pdf')) {
-        options.push({ id: 'attach_extract_pdf', label: isZh ? '\u63D0\u53D6PDF\u5173\u952E\u4FE1\u606F' : 'Extract PDF key points' });
+        options.push({ id: 'attach_extract_pdf', label: isZh ? '提取PDF关键信息' : 'Extract PDF key points' });
     }
     if (kinds.includes('image')) {
-        options.push({ id: 'attach_ocr_image', label: isZh ? '\u56FE\u7247OCR\u8BC6\u522B' : 'Run OCR on image' });
+        options.push({ id: 'attach_ocr_image', label: isZh ? '图片OCR识别' : 'Run OCR on image' });
     }
     if (kinds.includes('sheet')) {
-        options.push({ id: 'attach_map_sheet', label: isZh ? '\u8868\u683C\u5B57\u6BB5\u6620\u5C04' : 'Map spreadsheet fields' });
+        options.push({ id: 'attach_map_sheet', label: isZh ? '表格字段映射' : 'Map spreadsheet fields' });
     }
     if (kinds.includes('text') || kinds.includes('file')) {
-        options.push({ id: 'attach_summarize', label: isZh ? '\u603B\u7ED3\u9644\u4EF6\u5185\u5BB9' : 'Summarize attachments' });
+        options.push({ id: 'attach_summarize', label: isZh ? '总结附件内容' : 'Summarize attachments' });
     }
     if (!options.length) return null;
     return {
         id: 'q_attachment_action',
-        text: isZh ? '\u8BF7\u9009\u62E9\u9644\u4EF6\u5904\u7406\u65B9\u5F0F' : 'Choose attachment processing action',
+        text: isZh ? '请选择附件处理方式' : 'Choose attachment processing action',
         options
     };
 };
 
+/**
+ * System prompt for guided profile collection via chat.
+ * Used when user skips resume upload and onboarding is complete.
+ */
+const buildProfileCollectionPrompt = (isZh, direction = {}) => {
+    const jobTitle = direction.q_job_title || '';
+    const location = direction.q_location || '';
+    if (isZh) {
+        return `你是一个专业的求职顾问。用户正在寻找 "${jobTitle}" 的职位（地点：${location || '不限'}）。
+用户没有上传简历，请通过对话收集以下信息来帮助构建个人档案：
+
+1. **基本信息** — 姓名、联系方式（邮箱/电话）
+2. **技能列表** — 与目标职位相关的技术技能和软技能
+3. **工作经历** — 公司、职位、时间段、主要职责和成就
+4. **教育背景** — 学校、专业、学位、毕业时间
+
+请逐步引导用户，每次只问一个类别的问题。使用友好的对话方式。
+当收集到足够信息后（至少有基本信息和技能），用 [PROFILE_COMPLETE] 标记表示可以开始匹配。
+用中文回复。`;
+    }
+    return `You are a professional career consultant. The user is looking for a "${jobTitle}" position (location: ${location || 'any'}).
+The user did not upload a resume. Collect the following information through conversation to build their profile:
+
+1. **Basic info** — Full name, contact info (email/phone)
+2. **Skills** — Technical and soft skills relevant to the target role
+3. **Work experience** — Company, role, duration, key responsibilities and achievements
+4. **Education** — School, major, degree, graduation year
+
+Guide the user step by step, asking about one category at a time. Be friendly and conversational.
+When you have enough info (at least basic info and skills), mark with [PROFILE_COMPLETE] to indicate readiness for matching.
+Reply in English.`;
+};
+
 module.exports = {
     getPresetQuestionTemplates,
+    isOnboardingComplete,
+    isProfileComplete,
     defaultSubTasks,
     buildPresetPrompt,
-    buildAttachmentActionQuestion
+    buildAttachmentActionQuestion,
+    buildProfileCollectionPrompt
 };

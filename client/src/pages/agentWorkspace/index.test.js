@@ -78,6 +78,7 @@ jest.mock('../../components/taskOffcanvas/AITaskPanel', () => {
             <div data-testid="ai-panel">
                 <div data-testid="panel-task">{props.activeTask?.displayName || ''}</div>
                 <div data-testid="panel-message-count">{(props.messages || []).length}</div>
+                <div data-testid="panel-chat-disabled">{props.chatDisabled ? 'true' : 'false'}</div>
                 <button type="button" onClick={() => props.onSendMessage && props.onSendMessage('mock input')}>
                     mock-send
                 </button>
@@ -893,6 +894,62 @@ describe('AgentWorkspace protocol regression', () => {
         fireEvent.click(sessionAItem);
         await waitFor(() => expect(providerSelect.value).toBe('claude-code'));
         await waitFor(() => expect(modelSelect.value).toBe('sonnet'));
+    });
+
+    it('disables chat when onboarding is not complete and enables after completion', async () => {
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+
+        // Snapshot with onboardingComplete=false -> chat should be disabled
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {},
+                    runtimeContexts: {},
+                    executionStates: { s1: { paused: false, canceled: false } },
+                    onboardingComplete: { s1: false }
+                }
+            });
+        });
+
+        await waitFor(() => expect(screen.getByTestId('panel-chat-disabled').textContent).toBe('true'));
+
+        // Snapshot with onboardingComplete=true -> chat should be enabled
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {},
+                    runtimeContexts: {},
+                    executionStates: { s1: { paused: false, canceled: false } },
+                    onboardingComplete: { s1: true }
+                }
+            });
+        });
+
+        await waitFor(() => expect(screen.getByTestId('panel-chat-disabled').textContent).toBe('false'));
     });
 
     it('navigates back to task manage when ai task stops', async () => {
