@@ -425,6 +425,8 @@
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
+    align-self: flex-start;
+    max-width: 85%;
 
     &.error {
       border-left: 3px solid #ff6b6b;
@@ -432,8 +434,10 @@
     }
 
     &.user {
+      align-self: flex-end;
       background-color: rgba(77, 124, 255, 0.2);
-      border-left: 3px solid #4d7cff;
+      border-right: 3px solid #4d7cff;
+      border-left: none;
     }
 
     &__time {

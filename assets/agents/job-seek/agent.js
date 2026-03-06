@@ -318,6 +318,19 @@ function appendConversation(sessionId, role, content, extra = {}) {
 }
 
 /**
+ * Remove thinking/processing placeholder messages from conversation and notify frontend.
+ */
+function removeThinkingMessages(sessionId) {
+    const convo = state.conversations[sessionId];
+    if (!convo) return;
+    const before = convo.length;
+    state.conversations[sessionId] = convo.filter(m => !m._thinking);
+    if (state.conversations[sessionId].length < before) {
+        sendSnapshot();
+    }
+}
+
+/**
  * Sanitize text before storing in mem0 memory.
  * BridgeLLM (offline fact extractor) splits on periods as sentence boundaries,
  * so "Vue.js" becomes "Vue" + "js". Strip markdown and neutralize mid-word dots.
@@ -807,6 +820,7 @@ async function handleUserInput(payload = {}) {
             reply = isZh() ? '\u672A\u77E5\u7684 Provider\u3002' : 'Unknown provider.';
         }
 
+        removeThinkingMessages(sessionId);
         appendConversation(sessionId, 'assistant', reply || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)'));
         appendRuntimeLog(sessionId, `ai_reply -> ${(reply || '').slice(0, 120)}`, { source: 'ai' });
         scheduleSave();
@@ -839,6 +853,7 @@ async function handleUserInput(payload = {}) {
         }
         // Skip storing AI replies — they're verbose and pollute search results
     } catch (err) {
+        removeThinkingMessages(sessionId);
         const errorMsg = String(err?.message || err || 'Unknown error').slice(0, 500);
         appendConversation(sessionId, 'assistant', isZh() ? `\u274C AI \u8C03\u7528\u5931\u8D25\uFF1A${errorMsg}` : `\u274C AI call failed: ${errorMsg}`);
         appendRuntimeLog(sessionId, `ai_error -> ${errorMsg}`, { source: 'error' });
@@ -1377,6 +1392,7 @@ async function extractResumeFromAttachments(sessionId, attachments) {
                     const sanitizedSummary = sanitizeForMemory(summaryText);
                     memoryClient.store(ns, sanitizedSummary, { role: 'user' }).catch(() => {});
 
+                    removeThinkingMessages(sessionId);
                     appendRuntimeLog(sessionId, `knowledge_store -> ${stored}/${sectionKeys.length} profile sections from ${attachment.name}`, { source: 'knowledge' });
                     appendConversation(sessionId, 'assistant', isZh()
                         ? `\u2705 \u5DF2\u5C06 ${stored} \u4E2A\u7B80\u5386\u5206\u533A\u5B58\u5165\u77E5\u8BC6\u5E93\uFF0C\u540E\u7EED\u5BF9\u8BDD\u4E2D\u6211\u4F1A\u8BB0\u4F4F\u8FD9\u4E9B\u4FE1\u606F\u3002`
@@ -1386,6 +1402,7 @@ async function extractResumeFromAttachments(sessionId, attachments) {
                     appendRuntimeLog(sessionId, `knowledge_store_error -> ${memErr.message}`, { source: 'knowledge' });
                 }
             } else {
+                removeThinkingMessages(sessionId);
                 appendConversation(sessionId, 'assistant', isZh()
                     ? `未能从 ${attachment.name} 中提取有效信息。`
                     : `Could not extract valid info from ${attachment.name}.`);
@@ -1394,6 +1411,7 @@ async function extractResumeFromAttachments(sessionId, attachments) {
             sendSnapshot();
             scheduleSave();
         } catch (err) {
+            removeThinkingMessages(sessionId);
             console.error(`[agent] Resume extraction failed for ${attachment.name}:`, err);
             appendConversation(sessionId, 'assistant', isZh()
                 ? `解析 ${attachment.name} 时出错：${err.message}`
