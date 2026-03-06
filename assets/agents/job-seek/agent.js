@@ -956,11 +956,6 @@ function handleUserOption(payload = {}) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
         return;
     }
-    if (!hasBackend()) {
-        const { reason } = resolveProvider();
-        appendConversation(sessionId, 'assistant', isZh() ? `\u672A\u68C0\u6D4B\u5230\u53EF\u7528\u7684 AI \u540E\u7AEF\uFF1A${reason}\u3002\u8BF7\u5B89\u88C5 Codex CLI / Claude Code\uFF0C\u6216\u586B\u5199 API Key\u3002` : `No AI backend available: ${reason}. Please install Codex CLI / Claude Code, or configure an API Key.`);
-        return;
-    }
     const execution = getExecutionState(sessionId);
     if (execution.canceled) {
         appendConversation(sessionId, 'assistant', isZh() ? '\u5F53\u524D\u4F1A\u8BDD\u5DF2\u53D6\u6D88\uFF0C\u8BF7\u5148\u70B9\u51FB\u91CD\u8BD5\u540E\u7EE7\u7EED\u3002' : 'Current session is canceled. Please retry before continuing.');
@@ -1029,11 +1024,6 @@ function handleUserAnswer(payload = {}) {
     const sessionId = payload.sessionId || state.activeSessionId;
     if (!sessionId || !state.conversations[sessionId]) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
-        return;
-    }
-    if (!hasBackend()) {
-        const { reason } = resolveProvider();
-        appendConversation(sessionId, 'assistant', isZh() ? `\u672A\u68C0\u6D4B\u5230\u53EF\u7528\u7684 AI \u540E\u7AEF\uFF1A${reason}\u3002\u8BF7\u5B89\u88C5 Codex CLI / Claude Code\uFF0C\u6216\u586B\u5199 API Key\u3002` : `No AI backend available: ${reason}. Please install Codex CLI / Claude Code, or configure an API Key.`);
         return;
     }
     const execution = getExecutionState(sessionId);
