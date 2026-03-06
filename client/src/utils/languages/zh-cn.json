@@ -110,6 +110,8 @@
     "taskLog.ai.subTask.resume": "\u751f\u6210\u7b80\u5386",
     "taskLog.ai.subTask.coverLetter": "\u64b0\u5199\u6c42\u804c\u4fe1",
     "taskLog.ai.subtaskLogsHint": "\u6b63\u5728\u663e\u793a\u6b64\u5b50\u4efb\u52a1\u7684\u65e5\u5fd7",
+    "taskLog.ai.subtaskStart": "\u542f\u52a8",
+    "taskLog.ai.subtaskRestart": "\u91cd\u65b0\u542f\u52a8",
     "taskLog.ai.status.pending": "\u5f85\u5904\u7406",
     "taskLog.ai.status.running": "\u8fdb\u884c\u4e2d",
     "taskLog.ai.status.review": "\u5f85\u5ba1\u6838",

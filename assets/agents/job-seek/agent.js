@@ -437,6 +437,56 @@ function moveSubTaskForward(sessionId) {
     });
 }
 
+// --------------- subtask actions (start / restart) ---------------
+
+function handleSubtaskAction(payload = {}) {
+    const sessionId = payload.sessionId || state.activeSessionId;
+    if (!sessionId || !state.conversations[sessionId]) {
+        emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
+        return;
+    }
+    const subtaskKey = String(payload.subtaskKey || '').trim();
+    const action = String(payload.action || 'start').trim();
+    if (!subtaskKey) return;
+
+    const items = state.subtasks[sessionId] || [];
+    const target = items.find((i) => i.key === subtaskKey);
+    if (!target) return;
+
+    if (target.status === 'pending') {
+        appendConversation(sessionId, 'assistant', isZh()
+            ? `子任务 "${subtaskKey}" 尚未解锁，请先完成前置步骤。`
+            : `Subtask "${subtaskKey}" is not unlocked yet. Please complete prior steps first.`);
+        sendSnapshot();
+        return;
+    }
+
+    const isRestart = action === 'restart' || target.status === 'done' || target.status === 'failed';
+
+    updateSubTasks(sessionId, (list) => {
+        const item = list.find((i) => i.key === subtaskKey);
+        if (item) {
+            item.status = 'running';
+            item.updatedAt = now();
+        }
+        return list;
+    });
+
+    appendSubtaskLog(sessionId, subtaskKey,
+        isRestart
+            ? (isZh() ? '子任务已重新启动' : 'Subtask restarted')
+            : (isZh() ? '子任务已启动' : 'Subtask started'),
+        { level: 'info' }
+    );
+
+    appendConversation(sessionId, 'assistant', isZh()
+        ? `${isRestart ? '重新启动' : '启动'}子任务：${subtaskKey}`
+        : `${isRestart ? 'Restarting' : 'Starting'} subtask: ${subtaskKey}`);
+
+    sendSnapshot();
+    scheduleSave();
+}
+
 // --------------- execution control ---------------
 
 function getExecutionState(sessionId) {
@@ -1891,6 +1941,10 @@ function initWebSocket() {
                 updateLanguage(data?.payload?.language);
                 updateApiKeyConfiguredHint(data?.payload?.apiKeyConfigured);
                 handleExecutionControl(data?.payload || {});
+                break;
+            case 'agent_subtask_action':
+                updateLanguage(data?.payload?.language);
+                handleSubtaskAction(data?.payload || {});
                 break;
             case 'agent_launch_browser':
                 handleLaunchBrowser(data?.payload || {});

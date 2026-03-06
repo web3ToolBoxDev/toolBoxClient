@@ -110,6 +110,8 @@
     "taskLog.ai.subTask.resume": "Generate Resume",
     "taskLog.ai.subTask.coverLetter": "Write Cover Letter",
     "taskLog.ai.subtaskLogsHint": "Showing logs for this subtask",
+    "taskLog.ai.subtaskStart": "Start",
+    "taskLog.ai.subtaskRestart": "Restart",
     "taskLog.ai.status.pending": "Pending",
     "taskLog.ai.status.running": "Running",
     "taskLog.ai.status.review": "Review",

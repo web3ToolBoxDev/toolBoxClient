@@ -566,6 +566,11 @@ function AgentWorkspace() {
         sendAgent('agent_execution_control', { sessionId: activeSessionId, action });
     };
 
+    const handleSubtaskAction = useCallback((subtaskKey, action) => {
+        if (!activeSessionId || !isTaskRunning) return;
+        sendAgent('agent_subtask_action', { sessionId: activeSessionId, subtaskKey, action });
+    }, [activeSessionId, isTaskRunning, sendAgent]);
+
     const handleOpenArtifact = useCallback(async (artifact) => {
         const electronAPI = typeof window !== 'undefined' ? window.electronAPI : null;
         if (!electronAPI?.revealInFolder) {
@@ -837,6 +842,7 @@ function AgentWorkspace() {
                             onSubmitAnswer={handleSubmitAnswer}
                             onSendAttachments={handleSendAttachments}
                             onOpenArtifact={handleOpenArtifact}
+                            onSubtaskAction={handleSubtaskAction}
                             autoOpenPreset={autoOpenPresetSession === activeSessionId}
                             onAutoOpenPresetConsumed={() => setAutoOpenPresetSession('')}
                         />

@@ -614,6 +614,18 @@
     gap: 0.4rem;
   }
 
+  .ai-subtask-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .ai-subtask-action {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.5rem;
+    align-self: flex-end;
+  }
+
   .ai-subtask-card {
     display: flex;
     align-items: center;

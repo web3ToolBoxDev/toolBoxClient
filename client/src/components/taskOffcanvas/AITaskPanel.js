@@ -20,7 +20,8 @@ function AITaskPanel({
     onSelectOption,
     onSubmitAnswer,
     onSendAttachments,
-    onOpenArtifact
+    onOpenArtifact,
+    onSubtaskAction
 }) {
     const { t } = useTranslation();
     const [pendingMessage, setPendingMessage] = useState('');
@@ -221,14 +222,26 @@ function AITaskPanel({
 
     const expandedSubtaskLogEntries = useMemo(() => {
         if (!expandedSubtask) return [];
-        const logs = subtaskLogs[expandedSubtask] || [];
-        return logs.map((entry) => ({
+        const label = t(`taskLog.ai.subTask.${expandedSubtask}`, expandedSubtask);
+        // Combine dedicated subtask logs + runtime logs that match this subtask key
+        const dedicated = (subtaskLogs[expandedSubtask] || []).map((entry) => ({
             id: entry.id || `stlog-${entry.time}`,
-            role: 'system',
-            content: `[${t(`taskLog.ai.subTask.${expandedSubtask}`, expandedSubtask)}] ${entry.text}`,
-            createdAt: entry.time || Date.now()
+            time: entry.time || 0,
+            content: `[${label}] ${entry.text}`
         }));
-    }, [expandedSubtask, subtaskLogs, t]);
+        const fromRuntime = (Array.isArray(runtimeLogs) ? runtimeLogs : [])
+            .filter((log) => log && (log.key === expandedSubtask || (log.source === 'subtask' && String(log.text || '').startsWith(expandedSubtask))))
+            .map((log) => ({
+                id: log.id || `rtlog-${log.time}`,
+                time: log.time || log.updatedAt || 0,
+                content: `[${label}] ${log.text}`
+            }));
+        // Merge, deduplicate by id, sort by time
+        const seen = new Set();
+        return [...dedicated, ...fromRuntime]
+            .filter((e) => { if (seen.has(e.id)) return false; seen.add(e.id); return true; })
+            .sort((a, b) => (a.time || 0) - (b.time || 0));
+    }, [expandedSubtask, subtaskLogs, runtimeLogs, t]);
 
 
     const parseMessageType = (content = '') => {
@@ -695,11 +708,11 @@ function AITaskPanel({
                                 {(Array.isArray(subTasks) ? subTasks : []).map((task) => {
                                     const status = STATUS_KEYS.includes(task.status) ? task.status : 'pending';
                                     const isActive = expandedSubtask === task.key;
-                                    const label = task.actionLabel
-                                        ? t(`taskLog.ai.subTask.${task.key}`, task.actionLabel)
-                                        : t(`taskLog.ai.subTask.${task.key}`, task.key);
+                                    const hasAction = Boolean(task.actionLabel);
+                                    const canStart = hasAction && status !== 'pending' && typeof onSubtaskAction === 'function';
+                                    const label = t(`taskLog.ai.subTask.${task.key}`, task.actionLabel || task.key);
                                     return (
-                                        <li key={task.key}>
+                                        <li key={task.key} className="ai-subtask-item">
                                             <button
                                                 type="button"
                                                 className={`ai-subtask-card ai-subtask-card--${status}${isActive ? ' ai-subtask-card--active' : ''}`}
@@ -717,6 +730,19 @@ function AITaskPanel({
                                                     {t(`taskLog.ai.status.${status}`, status)}
                                                 </span>
                                             </button>
+                                            {canStart && (
+                                                <Button
+                                                    size="sm"
+                                                    variant={status === 'running' ? 'outline-warning' : 'outline-info'}
+                                                    className="ai-subtask-action"
+                                                    disabled={interactionDisabled}
+                                                    onClick={() => onSubtaskAction(task.key, status === 'running' ? 'restart' : 'start')}
+                                                >
+                                                    {status === 'running'
+                                                        ? t('taskLog.ai.subtaskRestart', 'Restart')
+                                                        : t('taskLog.ai.subtaskStart', 'Start')}
+                                                </Button>
+                                            )}
                                         </li>
                                     );
                                 })}
