@@ -53,10 +53,10 @@ const getPresetQuestionTemplates = (isZh) => {
             {
                 id: 'q_upload_profile',
                 type: 'upload',
-                text: '上传简历（可选，PDF/图片/文本）',
+                text: '上传简历（可选，PDF/DOC/图片/文本）',
                 buttonLabel: '上传文件',
                 allowMultiple: false,
-                acceptKinds: ['pdf', 'image', 'text'],
+                acceptKinds: ['pdf', 'doc', 'image', 'text'],
                 maxSizeMB: 6,
                 required: false
             }
@@ -96,10 +96,10 @@ const getPresetQuestionTemplates = (isZh) => {
         {
             id: 'q_upload_profile',
             type: 'upload',
-            text: 'Upload resume (optional, PDF/image/text)',
+            text: 'Upload resume (optional, PDF/DOC/image/text)',
             buttonLabel: 'Upload File',
             allowMultiple: false,
-            acceptKinds: ['pdf', 'image', 'text'],
+            acceptKinds: ['pdf', 'doc', 'image', 'text'],
             maxSizeMB: 6,
             required: false
         }

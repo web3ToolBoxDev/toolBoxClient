@@ -136,9 +136,9 @@ function restoreState() {
         if (state.onboardingComplete[sid] === undefined) state.onboardingComplete[sid] = false;
         if (!state.profileSections[sid]) state.profileSections[sid] = {};
         if (state.profileCollectionMode[sid] === undefined) state.profileCollectionMode[sid] = false;
-        // Refresh attachment policy in existing prompts to pick up newly supported kinds
-        if (state.prompts[sid] && state.prompts[sid].attachmentPolicy) {
-            state.prompts[sid].attachmentPolicy.allowedKinds = ['image', 'pdf', 'doc', 'sheet', 'text'];
+        // Refresh prompts from current templates to pick up newly supported kinds / text changes
+        if (state.prompts[sid]) {
+            state.prompts[sid] = _buildPresetPrompt(state.selectedAnswers[sid] || {});
         }
     }
     console.log(`[agent] Restored ${state.sessions.length} sessions`);
