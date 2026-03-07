@@ -79,34 +79,85 @@ function parse(text) {
 }
 
 /**
- * Apply a PROFILE_ADD operation: append value to comma-separated content.
+ * Detect whether content is multi-line (bullet list) or flat comma-separated.
+ * Multi-line uses line-based splitting; flat uses comma-based.
+ */
+function isMultiLine(text) {
+    return /\n/.test(text.trim());
+}
+
+/**
+ * Normalize a string for fuzzy comparison: lowercase, collapse whitespace.
+ */
+function normalize(s) {
+    return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Split content into items: by newline for multi-line, by comma for flat.
+ * Each item is trimmed; for lines, leading "- " bullet prefix is preserved.
+ */
+function splitItems(text) {
+    if (isMultiLine(text)) {
+        return text.split('\n').map(s => s.trimEnd()).filter(s => s.trim());
+    }
+    return text.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+/**
+ * Join items back: newline for multi-line, comma for flat.
+ */
+function joinItems(items, multiLine) {
+    return multiLine ? items.join('\n') : items.join(', ');
+}
+
+/**
+ * Apply a PROFILE_ADD operation: append value to content.
+ * For multi-line content, adds as a new "- value" line.
+ * For flat content, appends as comma-separated item.
  * @param {string} existing - Current section content
  * @param {string} value - Value to add
  * @returns {string}
  */
 function applyAdd(existing, value) {
     if (!existing || !existing.trim()) return value;
-    const items = existing.split(',').map(s => s.trim()).filter(Boolean);
+    const multiLine = isMultiLine(existing);
+    const items = splitItems(existing);
     const newItem = value.trim();
-    if (items.some(item => item.toLowerCase() === newItem.toLowerCase())) {
+    // Check for duplicates using normalized comparison
+    if (items.some(item => normalize(item) === normalize(newItem) ||
+                           normalize(item) === normalize('- ' + newItem))) {
         return existing; // already exists
     }
-    items.push(newItem);
-    return items.join(', ');
+    if (multiLine) {
+        items.push('- ' + newItem);
+    } else {
+        items.push(newItem);
+    }
+    return joinItems(items, multiLine);
 }
 
 /**
- * Apply a PROFILE_REMOVE operation: remove value from comma-separated content.
+ * Apply a PROFILE_REMOVE operation: remove value from content.
+ * For multi-line content, removes lines that contain the value (substring match).
+ * For flat content, removes exact comma-separated item.
  * @param {string} existing - Current section content
  * @param {string} value - Value to remove
  * @returns {string}
  */
 function applyRemove(existing, value) {
     if (!existing) return '';
-    const target = value.trim().toLowerCase();
-    const items = existing.split(',').map(s => s.trim()).filter(Boolean);
-    const filtered = items.filter(item => item.toLowerCase() !== target);
-    return filtered.join(', ');
+    const target = normalize(value);
+    const multiLine = isMultiLine(existing);
+    const items = splitItems(existing);
+    const filtered = items.filter(item => {
+        const n = normalize(item);
+        if (n === target) return false; // exact match
+        // For multi-line: also match if line contains the target as substring
+        if (multiLine && n.includes(target)) return false;
+        return true;
+    });
+    return joinItems(filtered, multiLine);
 }
 
 module.exports = {

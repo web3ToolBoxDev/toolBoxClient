@@ -86,7 +86,7 @@ describe('markerParser', () => {
         });
     });
 
-    describe('applyAdd', () => {
+    describe('applyAdd — flat comma list', () => {
         it('adds to empty content', () => {
             expect(applyAdd('', 'K8s')).toBe('K8s');
         });
@@ -104,7 +104,32 @@ describe('markerParser', () => {
         });
     });
 
-    describe('applyRemove', () => {
+    describe('applyAdd — multi-line bullet content', () => {
+        const multiLine = '- Frontend: React, Vue\n- Backend: Node.js\n- DevOps: Docker';
+
+        it('adds new line with bullet prefix', () => {
+            const result = applyAdd(multiLine, 'K8s');
+            expect(result).toContain('- K8s');
+            expect(result.split('\n')).toHaveLength(4);
+        });
+
+        it('does not duplicate existing line (substring match)', () => {
+            const result = applyAdd(multiLine, 'Backend: Node.js');
+            // Should not add because "- Backend: Node.js" already exists
+            expect(result).toBe(multiLine);
+        });
+
+        it('preserves newline structure', () => {
+            const result = applyAdd(multiLine, 'Testing: Playwright');
+            const lines = result.split('\n');
+            expect(lines[0]).toBe('- Frontend: React, Vue');
+            expect(lines[1]).toBe('- Backend: Node.js');
+            expect(lines[2]).toBe('- DevOps: Docker');
+            expect(lines[3]).toBe('- Testing: Playwright');
+        });
+    });
+
+    describe('applyRemove — flat comma list', () => {
         it('removes item from comma list', () => {
             expect(applyRemove('React, Vue, Angular', 'Vue')).toBe('React, Angular');
         });
@@ -123,6 +148,45 @@ describe('markerParser', () => {
 
         it('handles empty input', () => {
             expect(applyRemove('', 'React')).toBe('');
+        });
+    });
+
+    describe('applyRemove — multi-line bullet content', () => {
+        const multiLine = [
+            '- QA Automation / SDET — 10 years experience',
+            '- ToolBoxClient (Founder) — 260+ Stars',
+            '- web3toolbox.app: React + Rust backend, Docker, Jenkins CI/CD'
+        ].join('\n');
+
+        it('removes line by substring match', () => {
+            const result = applyRemove(multiLine, 'web3toolbox.app');
+            expect(result).not.toContain('web3toolbox');
+            expect(result).toContain('QA Automation');
+            expect(result).toContain('ToolBoxClient');
+            expect(result.split('\n')).toHaveLength(2);
+        });
+
+        it('removes line by full content match', () => {
+            const result = applyRemove(multiLine, '- ToolBoxClient (Founder) — 260+ Stars');
+            expect(result).not.toContain('ToolBoxClient');
+            expect(result.split('\n')).toHaveLength(2);
+        });
+
+        it('removes case-insensitively', () => {
+            const result = applyRemove(multiLine, 'WEB3TOOLBOX.APP');
+            expect(result).not.toContain('web3toolbox');
+        });
+
+        it('returns unchanged if not found', () => {
+            const result = applyRemove(multiLine, 'nonexistent project');
+            expect(result).toBe(multiLine);
+        });
+
+        it('preserves remaining lines structure', () => {
+            const result = applyRemove(multiLine, 'ToolBoxClient');
+            const lines = result.split('\n');
+            expect(lines[0]).toBe('- QA Automation / SDET — 10 years experience');
+            expect(lines[1]).toBe('- web3toolbox.app: React + Rust backend, Docker, Jenkins CI/CD');
         });
     });
 });

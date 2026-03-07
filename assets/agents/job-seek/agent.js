@@ -1193,8 +1193,13 @@ async function handleUserInput(payload = {}) {
 
         removeThinkingMessages(sessionId);
 
+        // Log raw AI reply for marker debugging
+        console.log(`[agent:marker-debug] raw reply (${(reply || '').length} chars): ${(reply || '').slice(-300)}`);
+
         // Parse markers from AI reply, display clean text
         const { markers, cleanText } = markerParser.parse(reply || '');
+        console.log(`[agent:marker-debug] parsed ${markers.length} marker(s)${markers.length > 0 ? ': ' + markers.map(m => `${m.type}:${m.op}:${m.field}=${m.value}`).join(', ') : ' — NO MARKERS FOUND in reply'}`);
+
         const displayText = cleanText || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)');
         appendConversation(sessionId, 'assistant', displayText);
         appendRuntimeLog(sessionId, `ai_reply -> ${(reply || '').slice(0, 120)}`, { source: 'ai' });
@@ -1203,6 +1208,8 @@ async function handleUserInput(payload = {}) {
         if (markers.length > 0) {
             appendRuntimeLog(sessionId, `markers_detected -> ${markers.length} marker(s): ${markers.map(m => `${m.type}:${m.op}`).join(', ')}`, { source: 'knowledge' });
             await applyMarkers(sessionId, markers);
+        } else {
+            console.log(`[agent:marker-debug] no markers to apply — profile state unchanged`);
         }
 
         scheduleSave();
@@ -1861,6 +1868,8 @@ async function applyMarkers(sessionId, markers) {
     if (!markers || markers.length === 0) return;
     await _packReady;
 
+    console.log(`[agent:marker-debug] applyMarkers called with ${markers.length} marker(s) for session ${sessionId.slice(0, 8)}`);
+
     if (!state.profileSections[sessionId]) state.profileSections[sessionId] = {};
     const sections = state.profileSections[sessionId];
     let profileChanged = false;
@@ -1882,6 +1891,7 @@ async function applyMarkers(sessionId, markers) {
                 sections[m.field] = markerParser.applyRemove(prev, m.value);
             }
             profileChanged = true;
+            console.log(`[agent:marker-debug] PROFILE_${m.op} ${m.field}: "${prev}" -> "${sections[m.field]}"`);
             appendRuntimeLog(sessionId, `marker_apply -> PROFILE_${m.op} ${m.field}="${sections[m.field]}"`, { source: 'knowledge' });
         } else if (m.type === 'direction') {
             if (!state.selectedAnswers[sessionId]) state.selectedAnswers[sessionId] = {};

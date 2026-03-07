@@ -127,7 +127,7 @@ const isProfileComplete = (profileSections = {}) => {
 const defaultSubTasks = (now) => ([
     { key: 'onboarding', status: 'pending', updatedAt: now },
     { key: 'profile', status: 'pending', actionLabel: 'Collect Profile', actionLabelZh: '收集档案', updatedAt: now },
-    { key: 'search', status: 'pending', actionLabel: 'Start Search', actionLabelZh: '开始搜索', updatedAt: now }
+    { key: 'search', status: 'pending', actionLabel: 'Build Dashboard', actionLabelZh: '构建仪表盘', updatedAt: now }
 ]);
 
 const buildPresetPrompt = (isZh, selectedMap = {}, questionTemplates) => ({
@@ -194,7 +194,7 @@ const buildProfileCollectionPrompt = (isZh, direction = {}) => {
 section 必须是 basic、skills、experience、education、highlights 之一。
 当**首次**收集到足够信息后（至少有基本信息和技能），附加 [PROFILE_COMPLETE] 标记。
 注意：用户要求修改（添加/删除/替换）已有信息时，只用 SET/ADD/REMOVE 标记，不要附加 [PROFILE_COMPLETE]。
-用中文回复。`;
+用与用户相同的语言回复。`;
     }
     return `You are a professional career consultant. The user is looking for a "${jobTitle}" position (location: ${location || 'any'}).
 The user did not upload a resume. Collect the following information through conversation to build their profile:
@@ -251,7 +251,7 @@ const buildOnboardingPrompt = (isZh, currentAnswers = {}) => {
 
 注意：工作模式必须是 remote、hybrid、onsite、any 之一。
 每条标记单独一行，放在回复最后。如果用户一次给了多个信息，可以输出多个标记。
-用中文回复。`;
+用与用户相同的语言回复。`;
     }
     return `You are a job search assistant. The user just created a new job search session and needs to set their direction.${answeredSection}
 
@@ -274,7 +274,7 @@ Reply in the same language as the user.`;
  */
 const buildChatPrompt = (isZh) => {
     if (isZh) {
-        return `你是一个专业的求职顾问 AI 助手。用中文回复。
+        return `你是一个专业的求职顾问 AI 助手。用与用户相同的语言回复。
 
 当用户要求修改个人档案信息时，在回复末尾用标记记录变更（每个标记单独一行）：
 - 替换整个分区: [PROFILE_SET:skills=React, Vue, TypeScript]
