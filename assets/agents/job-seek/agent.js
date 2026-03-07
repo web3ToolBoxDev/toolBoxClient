@@ -338,16 +338,31 @@ function deleteSession(sessionId) {
  */
 async function resetAllMemory() {
     console.log('[agent] resetAllMemory — clearing all data');
+    const errors = [];
 
     // 1. Clear knowledge store (all job-seek types)
     const types = ['profile', 'direction', 'job_listing', 'match_result'];
     for (const type of types) {
-        await knowledgeClient.remove({ type, scope: 'agent:job-seek' }).catch(() => {});
+        try {
+            const result = await knowledgeClient.remove({ type, scope: 'agent:job-seek' });
+            console.log(`[agent] knowledge remove type=${type}:`, JSON.stringify(result));
+            if (result && !result.success) errors.push(`knowledge/${type}: ${result.error || 'failed'}`);
+        } catch (err) {
+            console.error(`[agent] knowledge remove type=${type} error:`, err.message);
+            errors.push(`knowledge/${type}: ${err.message}`);
+        }
     }
 
     // 2. Clear mem0 memory
     const ns = getMemoryNamespace();
-    await memoryClient.clear(ns).catch(() => {});
+    try {
+        const result = await memoryClient.clear(ns);
+        console.log('[agent] mem0 clear result:', JSON.stringify(result));
+        if (result && !result.success) errors.push(`mem0: ${result.error || 'failed'}`);
+    } catch (err) {
+        console.error('[agent] mem0 clear error:', err.message);
+        errors.push(`mem0: ${err.message}`);
+    }
 
     // 3. Clear global state
     state.resumeProfile = '';
@@ -356,23 +371,67 @@ async function resetAllMemory() {
     for (const sid of Object.keys(state.profileSections)) {
         state.profileSections[sid] = {};
     }
+    for (const sid of Object.keys(state.selectedAnswers)) {
+        state.selectedAnswers[sid] = {};
+    }
+    for (const sid of Object.keys(state.profileCollectionMode)) {
+        state.profileCollectionMode[sid] = false;
+    }
     for (const sid of Object.keys(state.intentFiles)) {
         const info = state.intentFiles[sid];
         if (info?.filePath) {
             try { fs.unlinkSync(info.filePath); } catch {}
         }
-        const sessionDir = path.join(_workspaceDir, sid);
-        try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch {}
     }
     state.intentFiles = {};
 
-    // 5. Notify
+    // 5. Clean up ALL session dirs + temp files in workspace
+    try {
+        const entries = fs.readdirSync(_workspaceDir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = path.join(_workspaceDir, entry.name);
+            if (entry.isDirectory()) {
+                // Remove all session directories
+                try { fs.rmSync(fullPath, { recursive: true, force: true }); } catch {}
+            } else if (entry.name.startsWith('_prompt_') || entry.name.startsWith('_context_')) {
+                try { fs.unlinkSync(fullPath); } catch {}
+            }
+        }
+        console.log('[agent] workspace cleaned');
+    } catch (err) {
+        console.warn('[agent] workspace cleanup error:', err.message);
+    }
+
+    // 6. Verify: check knowledge store and mem0 are actually empty
+    try {
+        const verifyDocs = await knowledgeClient.searchAndExpand('profile skills experience');
+        if (verifyDocs.docs && verifyDocs.docs.length > 0) {
+            console.warn(`[agent] VERIFY FAILED: knowledge store still has ${verifyDocs.docs.length} docs after clear`);
+            errors.push(`verify: knowledge store still has ${verifyDocs.docs.length} docs`);
+        }
+    } catch {}
+    try {
+        const verifyMem = await memoryClient.search(ns, 'user profile skills', 5);
+        if (verifyMem.length > 0) {
+            console.warn(`[agent] VERIFY FAILED: mem0 still has ${verifyMem.length} results after clear`);
+            errors.push(`verify: mem0 still has ${verifyMem.length} memories`);
+        }
+    } catch {}
+
+    // 7. Notify with actual result
     const sessionId = state.activeSessionId;
     if (sessionId) {
-        appendConversation(sessionId, 'assistant', isZh()
-            ? '✅ 所有记忆已清除（知识库、mem0、档案、意向文件）。'
-            : '✅ All memory cleared (knowledge store, mem0, profile, intent files).');
-        appendRuntimeLog(sessionId, 'reset_all_memory -> complete', { source: 'system' });
+        if (errors.length > 0) {
+            console.error('[agent] resetAllMemory partial failures:', errors);
+            appendConversation(sessionId, 'assistant', isZh()
+                ? `⚠️ 记忆部分清除失败：${errors.join('; ')}。状态已重置。`
+                : `⚠️ Memory partially cleared with errors: ${errors.join('; ')}. State has been reset.`);
+        } else {
+            appendConversation(sessionId, 'assistant', isZh()
+                ? '✅ 所有记忆已清除（知识库、mem0、档案、意向文件、状态）。'
+                : '✅ All memory cleared (knowledge store, mem0, profile, intent files, state).');
+        }
+        appendRuntimeLog(sessionId, `reset_all_memory -> ${errors.length ? 'partial' : 'complete'}, errors=${errors.length}`, { source: 'system' });
     }
     sendSnapshot();
     scheduleSave();

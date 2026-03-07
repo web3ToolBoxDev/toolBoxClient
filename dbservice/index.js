@@ -152,7 +152,28 @@ async function handleClear(req, res) {
 
     try {
         const memory = await getMemory({});
-        await memory.deleteAll({ userId: namespace });
+
+        // Try deleteAll by userId first
+        try {
+            await memory.deleteAll({ userId: namespace });
+            console.log(`[dbservice] deleteAll completed for namespace=${namespace}`);
+        } catch (delErr) {
+            console.warn(`[dbservice] deleteAll failed for namespace=${namespace}: ${delErr.message}, falling back to reset()`);
+        }
+
+        // Verify by searching — if anything remains, use reset() as nuclear option
+        try {
+            const check = await memory.search('user profile skills experience', { userId: namespace, limit: 3 });
+            const remaining = check?.results?.length || check?.length || 0;
+            if (remaining > 0) {
+                console.warn(`[dbservice] ${remaining} memories still remain after deleteAll, using reset()`);
+                await memory.reset();
+                console.log('[dbservice] memory.reset() completed');
+            }
+        } catch (checkErr) {
+            console.warn('[dbservice] verify search failed:', checkErr.message);
+        }
+
         sendJSON(res, 200, { success: true });
     } catch (err) {
         console.error('[dbservice] clear error:', err.message);
