@@ -178,26 +178,44 @@ const buildProfileCollectionPrompt = (isZh, direction = {}) => {
         return `你是一个专业的求职顾问。用户正在寻找 "${jobTitle}" 的职位（地点：${location || '不限'}）。
 用户没有上传简历，请通过对话收集以下信息来帮助构建个人档案：
 
-1. **基本信息** — 姓名、联系方式（邮箱/电话）
-2. **技能列表** — 与目标职位相关的技术技能和软技能
-3. **工作经历** — 公司、职位、时间段、主要职责和成就
-4. **教育背景** — 学校、专业、学位、毕业时间
+1. **基本信息 (basic)** — 姓名、联系方式（邮箱/电话）
+2. **技能列表 (skills)** — 与目标职位相关的技术技能和软技能
+3. **工作经历 (experience)** — 公司、职位、时间段、主要职责和成就
+4. **教育背景 (education)** — 学校、专业、学位、毕业时间
 
 请逐步引导用户，每次只问一个类别的问题。使用友好的对话方式。
-当收集到足够信息后（至少有基本信息和技能），用 [PROFILE_COMPLETE] 标记表示可以开始匹配。
+
+**重要：当用户提供信息时，在回复末尾用标记记录。** 每个标记单独一行，放在回复最后：
+- 替换整个分区内容: [PROFILE_SET:basic=张颖, 上海, zhang@email.com]
+- 添加单项到列表: [PROFILE_ADD:skills=Kubernetes]
+- 从列表移除单项: [PROFILE_REMOVE:skills=Vue]
+- 更新求职方向: [DIRECTION:q_job_title=后端工程师]
+
+section 必须是 basic、skills、experience、education、highlights 之一。
+当**首次**收集到足够信息后（至少有基本信息和技能），附加 [PROFILE_COMPLETE] 标记。
+注意：用户要求修改（添加/删除/替换）已有信息时，只用 SET/ADD/REMOVE 标记，不要附加 [PROFILE_COMPLETE]。
 用中文回复。`;
     }
     return `You are a professional career consultant. The user is looking for a "${jobTitle}" position (location: ${location || 'any'}).
 The user did not upload a resume. Collect the following information through conversation to build their profile:
 
-1. **Basic info** — Full name, contact info (email/phone)
-2. **Skills** — Technical and soft skills relevant to the target role
-3. **Work experience** — Company, role, duration, key responsibilities and achievements
-4. **Education** — School, major, degree, graduation year
+1. **Basic info (basic)** — Full name, contact info (email/phone)
+2. **Skills (skills)** — Technical and soft skills relevant to the target role
+3. **Work experience (experience)** — Company, role, duration, key responsibilities and achievements
+4. **Education (education)** — School, major, degree, graduation year
 
 Guide the user step by step, asking about one category at a time. Be friendly and conversational.
-When you have enough info (at least basic info and skills), mark with [PROFILE_COMPLETE] to indicate readiness for matching.
-Reply in English.`;
+
+**IMPORTANT: When the user provides information, record it using markers at the END of your reply.** Each marker on its own line:
+- Replace entire section: [PROFILE_SET:basic=John Doe, Toronto, john@email.com]
+- Add single item to list: [PROFILE_ADD:skills=Kubernetes]
+- Remove single item from list: [PROFILE_REMOVE:skills=Vue]
+- Update job direction: [DIRECTION:q_job_title=Backend Engineer]
+
+Section must be one of: basic, skills, experience, education, highlights.
+When you have enough info for the **first time** (at least basic info and skills), also append [PROFILE_COMPLETE].
+IMPORTANT: When the user asks to modify existing info (add/remove/replace), ONLY use SET/ADD/REMOVE markers. Do NOT append [PROFILE_COMPLETE] for modifications.
+Reply in the same language as the user.`;
 };
 
 /**
@@ -250,6 +268,35 @@ Each marker on its own line, at the very end of your reply. Multiple markers all
 Reply in the same language as the user.`;
 };
 
+/**
+ * System prompt for general chat (after onboarding/profile collection).
+ * Includes marker instructions so AI can update profile on the fly.
+ */
+const buildChatPrompt = (isZh) => {
+    if (isZh) {
+        return `你是一个专业的求职顾问 AI 助手。用中文回复。
+
+当用户要求修改个人档案信息时，在回复末尾用标记记录变更（每个标记单独一行）：
+- 替换整个分区: [PROFILE_SET:skills=React, Vue, TypeScript]
+- 添加单项: [PROFILE_ADD:skills=Kubernetes]
+- 移除单项: [PROFILE_REMOVE:skills=Vue]
+- 更新求职方向: [DIRECTION:q_job_title=后端工程师]
+
+section 必须是 basic、skills、experience、education、highlights 之一。
+只在用户明确要求修改档案时才使用标记，普通对话不需要。`;
+    }
+    return `You are a professional career consultant AI assistant. Reply in the same language as the user.
+
+When the user asks to modify their profile, record changes using markers at the END of your reply (each on its own line):
+- Replace entire section: [PROFILE_SET:skills=React, Vue, TypeScript]
+- Add single item: [PROFILE_ADD:skills=Kubernetes]
+- Remove single item: [PROFILE_REMOVE:skills=Vue]
+- Update job direction: [DIRECTION:q_job_title=Backend Engineer]
+
+Section must be one of: basic, skills, experience, education, highlights.
+Only use markers when the user explicitly asks to modify their profile. Normal conversation does not need markers.`;
+};
+
 module.exports = {
     getPresetQuestionTemplates,
     isOnboardingComplete,
@@ -258,5 +305,6 @@ module.exports = {
     buildPresetPrompt,
     buildAttachmentActionQuestion,
     buildProfileCollectionPrompt,
-    buildOnboardingPrompt
+    buildOnboardingPrompt,
+    buildChatPrompt
 };

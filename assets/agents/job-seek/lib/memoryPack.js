@@ -8,8 +8,8 @@
 const DOMAIN = 'job-seek';
 
 const TYPES = {
-    profile:      { durability: 'durable',  conflictPolicy: 'replace', description: 'User career profile section', subTypes: ['basic', 'skills', 'experience', 'education'] },
-    direction:    { durability: 'durable',  conflictPolicy: 'replace', description: 'Job search direction', subTypes: ['target'] },
+    profile:      { durability: 'durable',  conflictPolicy: 'replace', description: 'User career profile section', subTypes: ['basic', 'skills', 'experience', 'education', 'highlights'] },
+    direction:    { durability: 'durable',  conflictPolicy: 'replace', description: 'Job search direction', subTypes: ['target', 'history'] },
     job_listing:  { durability: 'durable',  conflictPolicy: 'replace', description: 'Scraped job posting', subTypes: [] },
     match_result: { durability: 'session',  conflictPolicy: 'replace', description: 'Job match score', subTypes: [] }
 };

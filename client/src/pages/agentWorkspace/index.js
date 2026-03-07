@@ -135,6 +135,10 @@ function AgentWorkspace() {
             // Setting them here would overwrite the user's in-progress dropdown
             // selections whenever a snapshot arrives (e.g., after Apply Model).
         }
+        // Auto-open preset modal if flagged in snapshot (e.g., after Apply Model)
+        if (data.autoOpenPresetSessionId) {
+            setAutoOpenPresetSession(data.autoOpenPresetSessionId);
+        }
     }, []);
 
     const handleTaskStopped = useCallback((reason = 'AI task stopped') => {
@@ -196,6 +200,7 @@ function AgentWorkspace() {
                 break;
             }
             case 'agent_auto_open_preset': {
+                // Legacy: still support separate message for backwards compatibility
                 const sid = info?.data?.sessionId;
                 if (sid) setAutoOpenPresetSession(sid);
                 break;
@@ -424,6 +429,12 @@ function AgentWorkspace() {
         sendAgent('agent_session_delete', { sessionId });
     };
 
+    const handleResetAllMemory = () => {
+        if (!isTaskRunning) return;
+        if (!window.confirm(t('agentWorkspace.confirmResetMemory', 'This will clear ALL memory (knowledge store, mem0, profiles, intent files). Continue?'))) return;
+        sendAgent('agent_reset_memory', {});
+    };
+
     const handleSwitchSession = (sessionId) => {
         setActiveSessionId(sessionId);
         sendAgent('agent_session_switch', { sessionId });
@@ -573,6 +584,18 @@ function AgentWorkspace() {
 
     const handleOpenArtifact = useCallback(async (artifact) => {
         const electronAPI = typeof window !== 'undefined' ? window.electronAPI : null;
+
+        // URL-based artifacts (e.g. live dashboard) — open in browser
+        if (artifact?.url || artifact?.openUrl) {
+            const url = artifact.url;
+            if (electronAPI?.openLink) {
+                electronAPI.openLink(url);
+            } else {
+                window.open(url, '_blank');
+            }
+            return;
+        }
+
         if (!electronAPI?.revealInFolder) {
             alert('仅桌面端支持打开产物文件');
             return;
@@ -822,6 +845,16 @@ function AgentWorkspace() {
                                         disabled={!isTaskRunning || !activeSessionId}
                                     >
                                         {t('agentWorkspace.cancel', 'Cancel')}
+                                    </Button>
+                                </div>
+                                <div className="runtime-row runtime-row--danger">
+                                    <Button
+                                        size="sm"
+                                        variant="outline-danger"
+                                        onClick={handleResetAllMemory}
+                                        disabled={!isTaskRunning}
+                                    >
+                                        {t('agentWorkspace.resetAllMemory', 'Reset All Memory')}
                                     </Button>
                                 </div>
                             </div>

@@ -9,7 +9,8 @@ const {
     defaultSubTasks,
     buildPresetPrompt,
     buildAttachmentActionQuestion,
-    buildProfileCollectionPrompt
+    buildProfileCollectionPrompt,
+    buildChatPrompt
 } = require('./lib/prompts');
 const { callAPI, buildMultimodalContent } = require('./lib/aiClient');
 const memoryClient = require('./lib/core/memoryClient');
@@ -18,6 +19,29 @@ const fileParser = require('./lib/core/fileParser');
 const sessionStore = require('./lib/core/sessionStore');
 const browserLauncher = require('./lib/core/browserLauncher');
 const memoryPack = require('./lib/memoryPack');
+const markerParser = require('./lib/markerParser');
+const dashboardServer = require('./lib/dashboardServer');
+
+// Register domain pack at startup (before any upsert can happen).
+// Retries on failure since dbservice may not be ready yet.
+let _packRegistered = false;
+const _packReady = (async () => {
+    for (let attempt = 1; attempt <= 10; attempt++) {
+        try {
+            const result = await knowledgeClient.registerPack(memoryPack.domain, memoryPack.types);
+            if (result?.success) {
+                _packRegistered = true;
+                console.log('[agent] domain pack registered');
+                return;
+            }
+            throw new Error(result?.error || 'registration returned success=false');
+        } catch (err) {
+            console.warn(`[agent] domain pack registration attempt ${attempt}/10 failed: ${err.message}`);
+            if (attempt < 10) await new Promise(r => setTimeout(r, 2000));
+        }
+    }
+    console.error('[agent] domain pack registration failed after 10 attempts');
+})();
 
 // Persistent data directory for this agent
 const _dataDir = path.join(__dirname, 'data');
@@ -173,9 +197,9 @@ function scheduleSave() {
 }
 
 // Save on exit
-process.on('SIGTERM', () => { saveState(); process.exit(0); });
-process.on('SIGINT', () => { saveState(); process.exit(0); });
-process.on('exit', () => { saveState(); });
+process.on('SIGTERM', () => { dashboardServer.stop(); saveState(); process.exit(0); });
+process.on('SIGINT', () => { dashboardServer.stop(); saveState(); process.exit(0); });
+process.on('exit', () => { dashboardServer.stop(); saveState(); });
 
 // --------------- transport ---------------
 
@@ -215,7 +239,8 @@ function sendSnapshot() {
         onboardingComplete: state.onboardingComplete,
         envs: state.envs,
         wallets: state.wallets,
-        activeBrowserEnvIds: Object.keys(_activeBrowsers)
+        activeBrowserEnvIds: Object.keys(_activeBrowsers),
+        autoOpenPresetSessionId: state._autoOpenPresetSessionId || ''
     });
 }
 
@@ -283,7 +308,19 @@ function deleteSession(sessionId) {
     delete state.onboardingComplete[id];
     delete state.profileSections[id];
     delete state.profileCollectionMode[id];
+
+    // Clean up intent file on disk
+    const intentInfo = state.intentFiles[id];
+    if (intentInfo?.filePath) {
+        try { fs.unlinkSync(intentInfo.filePath); } catch {}
+    }
+    const sessionDir = path.join(_workspaceDir, id);
+    try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch {}
     delete state.intentFiles[id];
+
+    // Clean up knowledge store docs for this session
+    knowledgeClient.remove({ refId: `direction_${id}` }).catch(() => {});
+
     if (!state.sessions.length) {
         createSession('');
         return;
@@ -292,6 +329,111 @@ function deleteSession(sessionId) {
         state.activeSessionId = state.sessions[0].id;
     }
     emitSessionList();
+    sendSnapshot();
+    scheduleSave();
+}
+
+/**
+ * Reset ALL memory: knowledge store, mem0, state, intent files.
+ * Used for testing / fresh start.
+ */
+async function resetAllMemory() {
+    console.log('[agent] resetAllMemory — clearing all data');
+    const errors = [];
+
+    // 1. Clear knowledge store (all job-seek types)
+    const types = ['profile', 'direction', 'job_listing', 'match_result'];
+    for (const type of types) {
+        try {
+            const result = await knowledgeClient.remove({ type, scope: 'agent:job-seek' });
+            console.log(`[agent] knowledge remove type=${type}:`, JSON.stringify(result));
+            if (result && !result.success) errors.push(`knowledge/${type}: ${result.error || 'failed'}`);
+        } catch (err) {
+            console.error(`[agent] knowledge remove type=${type} error:`, err.message);
+            errors.push(`knowledge/${type}: ${err.message}`);
+        }
+    }
+
+    // 2. Clear mem0 memory
+    const ns = getMemoryNamespace();
+    try {
+        const result = await memoryClient.clear(ns);
+        console.log('[agent] mem0 clear result:', JSON.stringify(result));
+        if (result && !result.success) errors.push(`mem0: ${result.error || 'failed'}`);
+    } catch (err) {
+        console.error('[agent] mem0 clear error:', err.message);
+        errors.push(`mem0: ${err.message}`);
+    }
+
+    // 3. Clear global state
+    state.resumeProfile = '';
+
+    // 4. Clear per-session state
+    for (const sid of Object.keys(state.profileSections)) {
+        state.profileSections[sid] = {};
+    }
+    for (const sid of Object.keys(state.selectedAnswers)) {
+        state.selectedAnswers[sid] = {};
+    }
+    for (const sid of Object.keys(state.profileCollectionMode)) {
+        state.profileCollectionMode[sid] = false;
+    }
+    for (const sid of Object.keys(state.intentFiles)) {
+        const info = state.intentFiles[sid];
+        if (info?.filePath) {
+            try { fs.unlinkSync(info.filePath); } catch {}
+        }
+    }
+    state.intentFiles = {};
+
+    // 5. Clean up ALL session dirs + temp files in workspace
+    try {
+        const entries = fs.readdirSync(_workspaceDir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = path.join(_workspaceDir, entry.name);
+            if (entry.isDirectory()) {
+                // Remove all session directories
+                try { fs.rmSync(fullPath, { recursive: true, force: true }); } catch {}
+            } else if (entry.name.startsWith('_prompt_') || entry.name.startsWith('_context_')) {
+                try { fs.unlinkSync(fullPath); } catch {}
+            }
+        }
+        console.log('[agent] workspace cleaned');
+    } catch (err) {
+        console.warn('[agent] workspace cleanup error:', err.message);
+    }
+
+    // 6. Verify: check knowledge store and mem0 are actually empty
+    try {
+        const verifyDocs = await knowledgeClient.searchAndExpand('profile skills experience');
+        if (verifyDocs.docs && verifyDocs.docs.length > 0) {
+            console.warn(`[agent] VERIFY FAILED: knowledge store still has ${verifyDocs.docs.length} docs after clear`);
+            errors.push(`verify: knowledge store still has ${verifyDocs.docs.length} docs`);
+        }
+    } catch {}
+    try {
+        const verifyMem = await memoryClient.search(ns, 'user profile skills', 5);
+        if (verifyMem.length > 0) {
+            console.warn(`[agent] VERIFY FAILED: mem0 still has ${verifyMem.length} results after clear`);
+            errors.push(`verify: mem0 still has ${verifyMem.length} memories`);
+        }
+    } catch {}
+
+    // 7. Notify with actual result
+    const sessionId = state.activeSessionId;
+    if (sessionId) {
+        if (errors.length > 0) {
+            console.error('[agent] resetAllMemory partial failures:', errors);
+            appendConversation(sessionId, 'assistant', isZh()
+                ? `⚠️ 记忆部分清除失败：${errors.join('; ')}。状态已重置。`
+                : `⚠️ Memory partially cleared with errors: ${errors.join('; ')}. State has been reset.`);
+        } else {
+            appendConversation(sessionId, 'assistant', isZh()
+                ? '✅ 所有记忆已清除（知识库、mem0、档案、意向文件、状态）。'
+                : '✅ All memory cleared (knowledge store, mem0, profile, intent files, state).');
+        }
+        appendRuntimeLog(sessionId, `reset_all_memory -> ${errors.length ? 'partial' : 'complete'}, errors=${errors.length}`, { source: 'system' });
+    }
     sendSnapshot();
     scheduleSave();
 }
@@ -449,7 +591,7 @@ function moveSubTaskForward(sessionId) {
 
 // --------------- subtask actions (start / restart) ---------------
 
-function handleSubtaskAction(payload = {}) {
+async function handleSubtaskAction(payload = {}) {
     const sessionId = payload.sessionId || state.activeSessionId;
     if (!sessionId || !state.conversations[sessionId]) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
@@ -498,38 +640,36 @@ function handleSubtaskAction(payload = {}) {
             ? `子任务已完成：${subtaskKey}`
             : `Subtask finished: ${subtaskKey}`);
 
-        // Build intent file + dashboard when Profile Collection finishes
+        // Build dashboard when Profile Collection finishes
         if (subtaskKey === 'profile') {
+            // If profile sections are empty, try extracting from conversation first
+            const currentSections = state.profileSections[sessionId] || {};
+            if (Object.keys(currentSections).length === 0) {
+                try {
+                    await extractProfileFromConversation(sessionId);
+                } catch (exErr) {
+                    console.error('[agent] profile extraction on finish failed:', exErr.message);
+                }
+            }
             try {
-                const { filePath: intentPath, version } = buildIntentFile(sessionId);
-                // Remove old intent/dashboard artifacts before adding new ones
+                buildIntentFile(sessionId);
+                // Remove old dashboard artifacts before adding new one
                 if (state.artifacts[sessionId]) {
                     state.artifacts[sessionId] = state.artifacts[sessionId].filter(
-                        (a) => a.type !== 'intent' && a.type !== 'dashboard'
+                        (a) => a.type !== 'dashboard'
                     );
                 }
+                const dashUrl = dashboardServer.getDashboardURL(sessionId);
                 appendArtifact(sessionId, {
-                    id: `intent-${sessionId}-v${version}`,
-                    type: 'intent',
-                    title: isZh() ? `求职意向 (v${version})` : `Job Search Intent (v${version})`,
-                    filePath: intentPath,
-                    openFile: true
-                });
-                const { filePath: dashPath } = buildDashboard(sessionId);
-                appendArtifact(sessionId, {
-                    id: `dashboard-${sessionId}-v${version}`,
+                    id: `dashboard-${sessionId}`,
                     type: 'dashboard',
                     title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
-                    filePath: dashPath,
-                    openFile: true
+                    url: dashUrl,
+                    openUrl: true
                 });
-                appendSubtaskLog(sessionId, subtaskKey,
-                    isZh() ? `意向文件已生成 (v${version})` : `Intent file generated (v${version})`,
-                    { level: 'info' }
-                );
             } catch (err) {
-                console.error('[agent] buildIntentFile/dashboard failed:', err);
-                appendRuntimeLog(sessionId, `intent_build_error -> ${err.message}`, { source: 'error' });
+                console.error('[agent] dashboard artifact failed:', err);
+                appendRuntimeLog(sessionId, `dashboard_error -> ${err.message}`, { source: 'error' });
             }
         }
 
@@ -554,6 +694,12 @@ function handleSubtaskAction(payload = {}) {
         }
         return list;
     });
+
+    // When (re)starting the profile subtask, enable profile collection mode
+    // so the AI uses the profile collection prompt with marker instructions.
+    if (subtaskKey === 'profile') {
+        state.profileCollectionMode[sessionId] = true;
+    }
 
     appendSubtaskLog(sessionId, subtaskKey,
         isRestart
@@ -697,118 +843,6 @@ function buildIntentFile(sessionId) {
     return { markdown, filePath: intentPath, version };
 }
 
-function buildDashboard(sessionId) {
-    const intent = state.intentFiles[sessionId];
-    const answers = state.selectedAnswers[sessionId] || {};
-    const subtasks = state.subtasks[sessionId] || [];
-
-    const statusIcon = (s) => s === 'done' ? '✅' : s === 'running' ? '▶️' : s === 'failed' ? '❌' : '⏳';
-    const subtaskRows = subtasks.map((t) =>
-        `<tr><td>${statusIcon(t.status)}</td><td>${t.key}</td><td>${t.status}</td></tr>`
-    ).join('\n');
-
-    const sections = state.profileSections[sessionId] || {};
-    const skillsSummary = (sections.skills || '').trim().split('\n').slice(0, 5).join(', ') || '—';
-    const expSummary = (sections.experience || '').trim().split('\n').slice(0, 3).join(' | ') || '—';
-
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Job Search Dashboard</title>
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1b2e; color: #dfe3ff; padding: 2rem; margin: 0; }
-  h1 { color: #8b9aff; border-bottom: 2px solid #2d2f4a; padding-bottom: 0.5rem; }
-  h2 { color: #6a7eff; margin-top: 2rem; }
-  .card { background: #242640; border: 1px solid #2d2f4a; border-radius: 8px; padding: 1.2rem; margin-bottom: 1rem; }
-  .card h3 { margin-top: 0; color: #8b9aff; }
-  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
-  th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #2d2f4a; }
-  th { color: #9da0c3; font-weight: 600; }
-  .direction-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
-  .direction-item { background: #2d2f4a; border-radius: 6px; padding: 0.75rem; }
-  .direction-item label { display: block; color: #9da0c3; font-size: 0.8rem; margin-bottom: 0.25rem; }
-  .direction-item span { font-size: 1.1rem; font-weight: 500; }
-  .meta { color: #7a7fa8; font-size: 0.8rem; margin-top: 0.5rem; }
-  .feature-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 0.5rem; }
-  .feature-card { background: #2d2f4a; border: 1px dashed #3d4060; border-radius: 8px; padding: 1.2rem; text-align: center; }
-  .feature-card .icon { font-size: 2rem; margin-bottom: 0.5rem; }
-  .feature-card h4 { color: #8b9aff; margin: 0 0 0.4rem 0; }
-  .feature-card p { color: #9da0c3; font-size: 0.85rem; margin: 0; }
-  .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; background: rgba(106,126,255,0.2); color: #8b9aff; margin-top: 0.5rem; }
-  .profile-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
-  .profile-summary .item { background: #2d2f4a; border-radius: 6px; padding: 0.75rem; }
-  .profile-summary .item label { display: block; color: #9da0c3; font-size: 0.8rem; margin-bottom: 0.25rem; }
-  .profile-summary .item p { margin: 0; font-size: 0.9rem; color: #c4c8ee; }
-</style>
-</head>
-<body>
-<h1>Job Search Dashboard</h1>
-<p class="meta">Session: ${sessionId.slice(0, 8)} | Intent v${intent?.version || 1} | Built: ${intent?.builtAt ? intent.builtAt.replace('T', ' ').slice(0, 19) : 'N/A'}</p>
-
-<h2>Direction</h2>
-<div class="card">
-  <div class="direction-grid">
-    <div class="direction-item"><label>Job Title</label><span>${answers.q_job_title || '—'}</span></div>
-    <div class="direction-item"><label>Location</label><span>${answers.q_location || '—'}</span></div>
-    <div class="direction-item"><label>Work Mode</label><span>${answers.q_work_mode || '—'}</span></div>
-    <div class="direction-item"><label>Target Salary</label><span>${answers.q_salary ? answers.q_salary + 'K' : '—'}</span></div>
-  </div>
-</div>
-
-<h2>Profile</h2>
-<div class="card">
-  <div class="profile-summary">
-    <div class="item"><label>Key Skills</label><p>${skillsSummary}</p></div>
-    <div class="item"><label>Experience</label><p>${expSummary}</p></div>
-  </div>
-</div>
-
-<h2>Workflow Progress</h2>
-<div class="card">
-  <table>
-    <thead><tr><th></th><th>Step</th><th>Status</th></tr></thead>
-    <tbody>
-${subtaskRows}
-    </tbody>
-  </table>
-</div>
-
-<h2>Job Search Tools</h2>
-<div class="feature-grid">
-  <div class="feature-card">
-    <div class="icon">🔍</div>
-    <h4>Match Jobs</h4>
-    <p>Score and rank job postings against your profile and preferences</p>
-    <span class="badge">Coming Soon</span>
-  </div>
-  <div class="feature-card">
-    <div class="icon">📄</div>
-    <h4>Resume Builder</h4>
-    <p>Generate tailored resumes for each job target</p>
-    <span class="badge">Coming Soon</span>
-  </div>
-  <div class="feature-card">
-    <div class="icon">✉️</div>
-    <h4>Cover Letter</h4>
-    <p>Write customized cover letters per application</p>
-    <span class="badge">Coming Soon</span>
-  </div>
-</div>
-
-</body>
-</html>`;
-
-    const sessionDir = path.join(_workspaceDir, sessionId);
-    fs.mkdirSync(sessionDir, { recursive: true });
-    const dashboardPath = path.join(sessionDir, 'dashboard.html');
-    fs.writeFileSync(dashboardPath, html, 'utf-8');
-
-    return { filePath: dashboardPath };
-}
-
 // --------------- provider detection & CLI ---------------
 
 function checkCliAvailable(cmd) {
@@ -883,30 +917,29 @@ function resolveProvider() {
 
 /**
  * Invoke CLI (codex or claude) with a prompt. Returns Promise<string>.
- * When memoryContext is provided, writes it to a temp file to avoid shell escaping issues.
+ * Context is inlined into the prompt (not as a file path) so the AI never sees file references.
+ * Full prompt is written to a temp file to avoid shell escaping issues.
  */
 function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default') {
     return new Promise((resolve, reject) => {
-        const escaped = prompt.replace(/"/g, '\\"');
         let fullCmd;
         const modelFlag = (model && model !== 'default') ? ` --model ${model}` : '';
         const workspaceDir = path.join(__dirname, 'workspace');
 
-        // Write memory context to temp file if present (avoids shell escaping issues with newlines/special chars)
-        let contextFilePath = '';
-        if (memoryContext) {
-            contextFilePath = path.join(workspaceDir, `_context_${Date.now()}.txt`);
-            fs.writeFileSync(contextFilePath, memoryContext, 'utf-8');
-        }
+        // Build full prompt with context inlined (never expose file paths to the AI)
+        const fullPrompt = memoryContext
+            ? `[CONTEXT]\n${memoryContext}\n[/CONTEXT]\n\n${prompt}`
+            : prompt;
 
-        const contextInstruction = contextFilePath
-            ? `First, read the context file at ${contextFilePath} - it contains important background information about this user. Use that information to answer the following question. `
-            : '';
+        // Write to temp file to avoid shell escaping issues with special chars/newlines
+        const promptFilePath = path.join(workspaceDir, `_prompt_${Date.now()}.txt`);
+        fs.writeFileSync(promptFilePath, fullPrompt, 'utf-8');
+        const pf = promptFilePath.replace(/\\/g, '/');
 
         if (provider === 'codex-cli') {
-            fullCmd = `codex exec${modelFlag} "${contextInstruction}${escaped}"`;
+            fullCmd = `codex exec${modelFlag} "$(cat '${pf}')"`;
         } else {
-            fullCmd = `claude -p "${contextInstruction}${escaped}"${modelFlag}`;
+            fullCmd = `claude -p "$(cat '${pf}')"${modelFlag}`;
         }
         console.log(`[agent:cli] CMD (${provider}): ${fullCmd.slice(0, 200)}...`);
         let stdout = '';
@@ -923,7 +956,7 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default')
         child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
         child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
         const cleanupContext = () => {
-            if (contextFilePath) try { fs.unlinkSync(contextFilePath); } catch (_) {}
+            if (promptFilePath) try { fs.unlinkSync(promptFilePath); } catch (_) {}
         };
         child.on('close', (code) => {
             cleanupContext();
@@ -1129,9 +1162,7 @@ async function handleUserInput(payload = {}) {
         const direction = state.selectedAnswers[sessionId] || {};
         const systemPrompt = inProfileCollection
             ? buildProfileCollectionPrompt(isZh(), direction)
-            : (isZh()
-                ? '\u4F60\u662F\u4E00\u4E2A\u6709\u7528\u7684 AI \u52A9\u624B\u3002\u8BF7\u7528\u4E0E\u7528\u6237\u76F8\u540C\u7684\u8BED\u8A00\u56DE\u590D\u3002'
-                : 'You are a helpful AI assistant. Reply in the same language as the user.');
+            : buildChatPrompt(isZh());
 
         if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
             const cliContext = inProfileCollection
@@ -1161,12 +1192,17 @@ async function handleUserInput(payload = {}) {
         }
 
         removeThinkingMessages(sessionId);
-        appendConversation(sessionId, 'assistant', reply || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)'));
+
+        // Parse markers from AI reply, display clean text
+        const { markers, cleanText } = markerParser.parse(reply || '');
+        const displayText = cleanText || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)');
+        appendConversation(sessionId, 'assistant', displayText);
         appendRuntimeLog(sessionId, `ai_reply -> ${(reply || '').slice(0, 120)}`, { source: 'ai' });
 
-        // Detect [PROFILE_COMPLETE] marker from AI in profile collection mode
-        if (inProfileCollection && reply && reply.includes('[PROFILE_COMPLETE]')) {
-            await extractProfileFromConversation(sessionId);
+        // Apply any structured markers (profile updates, direction changes, profile_complete)
+        if (markers.length > 0) {
+            appendRuntimeLog(sessionId, `markers_detected -> ${markers.length} marker(s): ${markers.map(m => `${m.type}:${m.op}`).join(', ')}`, { source: 'knowledge' });
+            await applyMarkers(sessionId, markers);
         }
 
         scheduleSave();
@@ -1720,7 +1756,8 @@ async function extractResumeFromAttachments(sessionId, attachments) {
  * Store/update direction in knowledge store. If direction already existed, also store
  * a history entry so the dashboard can show target change timeline.
  */
-function storeDirection(sessionId) {
+async function storeDirection(sessionId) {
+    await _packReady;
     const selectedMap = state.selectedAnswers[sessionId] || {};
     const directionContent = [
         `Job Title: ${selectedMap.q_job_title || ''}`,
@@ -1750,8 +1787,8 @@ function storeDirection(sessionId) {
     // Also store a timestamped history entry (for dashboard change tracking)
     knowledgeClient.upsert({
         refId: `direction_history_${sessionId}_${Date.now()}`,
-        type: 'decision',
-        subType: '',
+        type: 'direction',
+        subType: 'history',
         scope: 'agent:job-seek',
         content: directionContent,
         summary,
@@ -1817,6 +1854,112 @@ function checkAndCompleteOnboarding(sessionId) {
 }
 
 /**
+ * Apply parsed markers from AI reply to state and knowledge store.
+ * Handles PROFILE_SET/ADD/REMOVE, DIRECTION, and PROFILE_COMPLETE markers.
+ */
+async function applyMarkers(sessionId, markers) {
+    if (!markers || markers.length === 0) return;
+    await _packReady;
+
+    if (!state.profileSections[sessionId]) state.profileSections[sessionId] = {};
+    const sections = state.profileSections[sessionId];
+    let profileChanged = false;
+    let directionChanged = false;
+
+    // Separate profile markers from PROFILE_COMPLETE to avoid conflict
+    const profileMarkers = markers.filter(m => m.type === 'profile');
+    const hasProfileComplete = markers.some(m => m.type === 'profile_complete');
+    const hasExplicitProfileOps = profileMarkers.length > 0;
+
+    for (const m of markers) {
+        if (m.type === 'profile') {
+            const prev = sections[m.field] || '';
+            if (m.op === 'SET') {
+                sections[m.field] = m.value;
+            } else if (m.op === 'ADD') {
+                sections[m.field] = markerParser.applyAdd(prev, m.value);
+            } else if (m.op === 'REMOVE') {
+                sections[m.field] = markerParser.applyRemove(prev, m.value);
+            }
+            profileChanged = true;
+            appendRuntimeLog(sessionId, `marker_apply -> PROFILE_${m.op} ${m.field}="${sections[m.field]}"`, { source: 'knowledge' });
+        } else if (m.type === 'direction') {
+            if (!state.selectedAnswers[sessionId]) state.selectedAnswers[sessionId] = {};
+            state.selectedAnswers[sessionId][m.field] = m.value;
+            directionChanged = true;
+            appendRuntimeLog(sessionId, `marker_apply -> DIRECTION ${m.field}="${m.value}"`, { source: 'knowledge' });
+        } else if (m.type === 'profile_complete') {
+            // Skip re-extraction if explicit SET/ADD/REMOVE markers are present (they're more precise)
+            if (hasExplicitProfileOps) {
+                appendRuntimeLog(sessionId, 'marker_apply -> PROFILE_COMPLETE skipped (explicit profile ops present)', { source: 'knowledge' });
+                continue;
+            }
+            // Skip re-extraction if profile subtask is already done (avoid overwriting live edits)
+            const subtasks = state.subtasks[sessionId] || [];
+            const profileTask = subtasks.find(t => t.key === 'profile');
+            if (profileTask && profileTask.status === 'done') {
+                appendRuntimeLog(sessionId, 'marker_apply -> PROFILE_COMPLETE skipped (profile subtask already done)', { source: 'knowledge' });
+                continue;
+            }
+            appendRuntimeLog(sessionId, 'marker_apply -> PROFILE_COMPLETE signal', { source: 'knowledge' });
+            await extractProfileFromConversation(sessionId);
+        }
+    }
+
+    // Persist profile changes to knowledge store
+    if (profileChanged) {
+        for (const [subType, content] of Object.entries(sections)) {
+            if (!content) continue;
+            knowledgeClient.upsert({
+                refId: `profile_${subType}`,
+                type: 'profile',
+                subType,
+                scope: 'agent:job-seek',
+                content,
+                summary: sanitizeForMemory(content.split('\n')[0] || '').slice(0, 100),
+                source: 'conversation',
+                tags: ['profile', subType]
+            }).catch(err => {
+                console.error(`[agent:marker] upsert profile_${subType} failed:`, err.message);
+            });
+        }
+        appendSubtaskLog(sessionId, 'profile', isZh()
+            ? `档案已更新：${Object.keys(sections).join('、')}`
+            : `Profile updated: ${Object.keys(sections).join(', ')}`);
+    }
+
+    // Persist direction changes to knowledge store
+    if (directionChanged) {
+        const dir = state.selectedAnswers[sessionId] || {};
+        knowledgeClient.upsert({
+            refId: 'direction_target',
+            type: 'direction',
+            subType: 'target',
+            scope: 'agent:job-seek',
+            content: JSON.stringify(dir),
+            summary: `${dir.q_job_title || ''} @ ${dir.q_location || ''}`.trim(),
+            source: 'conversation',
+            tags: ['direction']
+        }).catch(err => {
+            console.error('[agent:marker] upsert direction failed:', err.message);
+        });
+        // Update the preset prompt to reflect new answers
+        state.prompts[sessionId] = _buildPresetPrompt(dir);
+    }
+
+    if (profileChanged || directionChanged) {
+        // Rebuild intent file to reflect changes (dashboard is live via dashboardServer)
+        try {
+            buildIntentFile(sessionId);
+        } catch (err) {
+            console.error('[agent:marker] intent rebuild failed:', err.message);
+        }
+        sendSnapshot();
+        scheduleSave();
+    }
+}
+
+/**
  * Extract profile sections from conversation history when AI marks [PROFILE_COMPLETE].
  * Parses the conversation to build profile sections and stores in knowledge store.
  */
@@ -1847,9 +1990,15 @@ async function extractProfileFromConversation(sessionId) {
             reply = result.content || '';
         }
 
+        console.log(`[agent] extractProfileFromConversation reply length: ${(reply || '').length}`);
         if (reply) {
             const sections = parseResumeSections(reply);
             const sectionKeys = Object.keys(sections);
+            console.log(`[agent] extractProfileFromConversation parsed ${sectionKeys.length} sections: ${sectionKeys.join(', ')}`);
+            if (sectionKeys.length === 0) {
+                console.warn('[agent] extractProfileFromConversation: no sections parsed from reply');
+                appendRuntimeLog(sessionId, 'profile_extraction -> 0 sections parsed, raw reply logged', { source: 'warning' });
+            }
             state.profileSections[sessionId] = sections;
 
             // Store in knowledge store
@@ -1872,6 +2021,26 @@ async function extractProfileFromConversation(sessionId) {
             state.profileCollectionMode[sessionId] = false;
             state.resumeProfile = reply;
             moveSubTaskForward(sessionId); // profile -> done
+
+            // Add dashboard artifact (live via dashboardServer)
+            try {
+                buildIntentFile(sessionId);
+                if (state.artifacts[sessionId]) {
+                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(
+                        (a) => a.type !== 'dashboard'
+                    );
+                }
+                const dashUrl = dashboardServer.getDashboardURL(sessionId);
+                appendArtifact(sessionId, {
+                    id: `dashboard-${sessionId}`,
+                    type: 'dashboard',
+                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
+                    url: dashUrl,
+                    openUrl: true
+                });
+            } catch (dashErr) {
+                console.error('[agent] dashboard artifact after extraction failed:', dashErr);
+            }
 
             appendConversation(sessionId, 'assistant', isZh()
                 ? `个人档案已构建完成！已存储 ${stored} 个分区（${sectionKeys.join('、')}）。你现在可以开始搜索工作了。`
@@ -1985,18 +2154,20 @@ function handleSessionContextUpdate(payload = {}) {
         appendConversation(sessionId, 'assistant', isZh()
             ? `会话已启动！有 ${questionCount} 个预设问题帮助设定你的求职方向，你可以随时修改。开始求职功能前需要完成必填项。`
             : `Session started! There are ${questionCount} preset questions to set your job search direction. You can change them any time. Required fields must be completed before using job search features.`);
-        // Tell frontend to auto-open preset modal
-        emit('agent_auto_open_preset', { sessionId });
+        // Tell frontend to auto-open preset modal (via snapshot flag)
+        state._autoOpenPresetSessionId = sessionId;
     } else {
         // On subsequent Apply Model, auto-open preset if required answers are still empty
         const selectedMap = state.selectedAnswers[sessionId] || {};
         const templates = _getTemplates();
         if (!isOnboardingComplete(selectedMap, templates)) {
-            emit('agent_auto_open_preset', { sessionId });
+            state._autoOpenPresetSessionId = sessionId;
         }
     }
 
     sendSnapshot();
+    // Clear after sending so it's only included once
+    state._autoOpenPresetSessionId = '';
     scheduleSave();
 }
 
@@ -2104,6 +2275,8 @@ function initWebSocket() {
     ws.on('open', () => {
         startHeartBeat();
         send({ type: 'request_task_data', data: '' });
+        // Start dashboard server (idempotent — only starts once)
+        dashboardServer.start(() => state);
     });
 
     ws.on('message', (raw) => {
@@ -2132,8 +2305,6 @@ function initWebSocket() {
                 state.taskName = taskData?.taskName || state.taskName;
                 extractEnvWalletData(taskData?.runtimeContext);
                 scheduleSave();
-                // Register domain-specific memory types with dbservice
-                knowledgeClient.registerPack(memoryPack.domain, memoryPack.types).catch(() => {});
                 if (!state.sessions.length) {
                     createSession('');
                 } else {
@@ -2165,6 +2336,12 @@ function initWebSocket() {
                 updateModel(data?.payload?.model);
                 updateApiKeyConfiguredHint(data?.payload?.apiKeyConfigured);
                 deleteSession(data?.payload?.sessionId);
+                break;
+            case 'agent_reset_memory':
+                updateLanguage(data?.payload?.language);
+                resetAllMemory().catch(err => {
+                    console.error('[agent] resetAllMemory error:', err);
+                });
                 break;
             case 'agent_session_switch':
                 updateLanguage(data?.payload?.language);
@@ -2239,6 +2416,7 @@ function initWebSocket() {
             clearInterval(heartBeatTimer);
             heartBeatTimer = null;
         }
+        dashboardServer.stop();
     });
 }
 
