@@ -110,29 +110,23 @@ function createWindow() {
       backendProcess = null;
     }
   });
+  // Windows focus fix: after the window regains focus, Electron on Windows
+  // sometimes fails to pass keyboard/mouse events to the renderer.
+  // Old approach used blur()+focus() on the BrowserWindow which caused a
+  // ~200ms period where the input fields were unclickable/untypeable.
+  // New approach: focus the webContents directly, which restores renderer
+  // input without stealing window-level focus.
   const isWindows = process.platform === 'win32';
-  let needsFocusFix = false;
-  let triggeringProgrammaticBlur = false;
-
-  mainWindow.on('blur', (event) => {
-    if(!triggeringProgrammaticBlur) {
-      needsFocusFix = true;
-    }
-  })
-
-  mainWindow.on('focus', (event) => {
-    if(isWindows && needsFocusFix) {
-      needsFocusFix = false;
-      triggeringProgrammaticBlur = true;
-      setTimeout(function () {
-        mainWindow.blur();
-        mainWindow.focus();
-        setTimeout(function () {
-          triggeringProgrammaticBlur = false;
-        }, 100);
-      }, 100);
-    }
-  })
+  if (isWindows) {
+    mainWindow.on('focus', () => {
+      // Use setImmediate to let the window finish its focus transition
+      setImmediate(() => {
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+          mainWindow.webContents.focus();
+        }
+      });
+    });
+  }
 
 }
 
