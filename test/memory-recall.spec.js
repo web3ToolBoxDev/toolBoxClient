@@ -354,23 +354,85 @@ test.describe.serial('Memory Recall E2E', () => {
         await page.waitForSelector('.ai-artifact-card', { timeout: 30_000 });
         console.log('[Test B] Dashboard auto-generated after recall');
 
-        // 8. Add skill via chat
+        // 8. Change name via chat — AI should ask for confirmation
+        await sendChat(page, 'Please change my name to Ying Zhang');
+        // Wait for AI to respond (confirmation question or direct update)
+        await page.waitForFunction(
+            () => {
+                const msgs = document.querySelectorAll('.ai-chat-item__text');
+                const allText = Array.from(msgs).map((el) => el.textContent || '').join(' ');
+                // AI either asks confirmation or directly confirms the change
+                return (
+                    allText.includes('Ying Zhang') ||
+                    allText.includes('confirm') ||
+                    allText.includes('确认') ||
+                    allText.includes('updated') ||
+                    allText.includes('已更新') ||
+                    allText.includes('changed') ||
+                    allText.includes('已修改')
+                );
+            },
+            null,
+            { timeout: AI_TIMEOUT }
+        );
+        console.log('[Test B] AI responded to name change request');
+
+        // 9. Confirm with short reply "y" — tests CLI conversation history
+        await sendChat(page, 'y');
+        // Wait for AI to acknowledge the update
+        await page.waitForFunction(
+            () => {
+                const msgs = document.querySelectorAll('.ai-chat-item__text');
+                // Look in the last few messages for confirmation that name was updated
+                const recent = Array.from(msgs).slice(-4);
+                const text = recent.map((el) => el.textContent || '').join(' ');
+                return (
+                    text.includes('Ying Zhang') ||
+                    text.includes('updated') ||
+                    text.includes('已更新') ||
+                    text.includes('changed') ||
+                    text.includes('已修改') ||
+                    text.includes('done') ||
+                    text.includes('完成')
+                );
+            },
+            null,
+            { timeout: AI_TIMEOUT }
+        );
+        console.log('[Test B] Name change confirmed with "y" — CLI context preserved');
+        await page.waitForTimeout(3000);
+
+        // 10. Verify the name was actually stored by asking AI
+        await sendChat(page, 'What is my name?');
+        await page.waitForFunction(
+            () => {
+                const msgs = document.querySelectorAll('.ai-chat-item__text');
+                const recent = Array.from(msgs).slice(-3);
+                return recent.some((el) => el.textContent?.includes('Ying Zhang'));
+            },
+            null,
+            { timeout: AI_TIMEOUT }
+        );
+        console.log('[Test B] AI correctly recalls updated name "Ying Zhang"');
+        await page.waitForTimeout(2000);
+
+        // 11. Add skill via chat
         await sendChat(page, 'Please add Docker and Kubernetes to my skills');
         await waitForChatMessage(page, 'Docker', AI_TIMEOUT);
         console.log('[Test B] AI responded to add skill request');
         await page.waitForTimeout(3000);
 
-        // 9. Upload new resume to replace seeded profile
+        // 12. Upload new resume to replace seeded profile
         await openPresetModal(page);
         await page.waitForSelector('.ai-preset-modal', { state: 'visible', timeout: 5000 });
         await uploadResumeInPreset(page, RESUME_FULLSTACK);
         await closePresetModal(page);
 
-        // 10. Wait for new resume extraction
+        // 13. Wait for new resume extraction
         await waitForChatMessage(page, ['sections stored', '分区存入知识库'], AI_TIMEOUT);
         console.log('[Test B] New resume extracted and stored');
 
-        // 11. Verify dashboard artifact still visible
+        // 14. Verify dashboard artifact still visible
         await page.waitForTimeout(3000);
         expect(await page.locator('.ai-artifact-card').first().isVisible()).toBeTruthy();
 
