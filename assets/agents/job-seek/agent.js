@@ -2113,6 +2113,26 @@ async function extractProfileFromConversation(sessionId) {
             state.resumeProfile = reply;
             moveSubTaskForward(sessionId); // profile -> done
 
+            // Rebuild dashboard with the full extracted profile
+            try {
+                buildIntentFile(sessionId);
+                if (state.artifacts[sessionId]) {
+                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(
+                        (a) => a.type !== 'dashboard'
+                    );
+                }
+                const { filePath: dashPath } = buildDashboard(sessionId);
+                appendArtifact(sessionId, {
+                    id: `dashboard-${sessionId}`,
+                    type: 'dashboard',
+                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
+                    filePath: dashPath,
+                    openFile: true
+                });
+            } catch (dashErr) {
+                console.error('[agent] dashboard build after extraction failed:', dashErr);
+            }
+
             appendConversation(sessionId, 'assistant', isZh()
                 ? `个人档案已构建完成！已存储 ${stored} 个分区（${sectionKeys.join('、')}）。你现在可以开始搜索工作了。`
                 : `Profile built successfully! ${stored} sections stored (${sectionKeys.join(', ')}). You can now start searching for jobs.`);
