@@ -82,9 +82,6 @@ function getDashboardData(sessionId) {
     const subtasks = state.subtasks?.[sessionId] || [];
     const intent = state.intentFiles?.[sessionId] || {};
 
-    const sectionKeys = Object.keys(sections).filter(k => sections[k]);
-    console.log(`[dashboard:data] session=${sessionId.slice(0, 8)} | profile sections: [${sectionKeys.join(', ')}] | skills preview: "${(sections.skills || '').slice(0, 80)}"`);
-
     return {
         sessionId,
         direction: {
