@@ -1,8 +1,15 @@
 'use strict';
 
-const { spawn } = require('child_process');
+/**
+ * Dev log interceptor — patches console.log/error/warn in the current process
+ * to also append to a timestamped log file in tmp/.
+ *
+ * Usage: require at the very top of a process entry point, or set
+ *        env var DEV_LOG=1 and require from electron.js / server.js.
+ */
 const fs = require('fs');
 const path = require('path');
+const util = require('util');
 
 const rootDir = path.join(__dirname, '..');
 const logDir = path.join(rootDir, 'tmp');
@@ -13,29 +20,31 @@ const logFile = path.join(logDir, `dev_${ts}.log`);
 const stream = fs.createWriteStream(logFile, { flags: 'a' });
 
 stream.write(`=== Dev session started at ${new Date().toISOString()} ===\n`);
-console.log(`Log file: ${logFile}`);
 
-// Resolve electron binary directly to avoid npx detach issues on Windows
-const electronPath = require('electron');
+const _origLog = console.log;
+const _origError = console.error;
+const _origWarn = console.warn;
 
-const child = spawn(electronPath, ['.'], {
-    cwd: rootDir,
-    env: { ...process.env, IS_BUILD: 'false' },
-    stdio: ['inherit', 'pipe', 'pipe']
-});
+function write(prefix, args) {
+    const line = `${new Date().toISOString()} ${prefix} ${util.format(...args)}\n`;
+    stream.write(line);
+}
 
-child.stdout.on('data', (data) => {
-    process.stdout.write(data);
-    stream.write(data);
-});
+console.log = function (...args) {
+    write('[LOG]', args);
+    _origLog.apply(console, args);
+};
 
-child.stderr.on('data', (data) => {
-    process.stderr.write(data);
-    stream.write(data);
-});
+console.error = function (...args) {
+    write('[ERR]', args);
+    _origError.apply(console, args);
+};
 
-child.on('close', (code) => {
-    stream.write(`\n=== Dev session ended at ${new Date().toISOString()} (exit ${code}) ===\n`);
-    stream.end();
-    process.exit(code || 0);
-});
+console.warn = function (...args) {
+    write('[WRN]', args);
+    _origWarn.apply(console, args);
+};
+
+_origLog(`[dev-log] writing to ${logFile}`);
+
+module.exports = { logFile, stream };
