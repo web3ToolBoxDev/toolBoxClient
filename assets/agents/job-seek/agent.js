@@ -18,6 +18,7 @@ const fileParser = require('./lib/core/fileParser');
 const sessionStore = require('./lib/core/sessionStore');
 const browserLauncher = require('./lib/core/browserLauncher');
 const memoryPack = require('./lib/memoryPack');
+const markerParser = require('./lib/markerParser');
 
 // Persistent data directory for this agent
 const _dataDir = path.join(__dirname, 'data');
@@ -1161,12 +1162,17 @@ async function handleUserInput(payload = {}) {
         }
 
         removeThinkingMessages(sessionId);
-        appendConversation(sessionId, 'assistant', reply || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)'));
+
+        // Parse markers from AI reply, display clean text
+        const { markers, cleanText } = markerParser.parse(reply || '');
+        const displayText = cleanText || (isZh() ? '(AI \u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94)' : '(AI returned an empty response)');
+        appendConversation(sessionId, 'assistant', displayText);
         appendRuntimeLog(sessionId, `ai_reply -> ${(reply || '').slice(0, 120)}`, { source: 'ai' });
 
-        // Detect [PROFILE_COMPLETE] marker from AI in profile collection mode
-        if (inProfileCollection && reply && reply.includes('[PROFILE_COMPLETE]')) {
-            await extractProfileFromConversation(sessionId);
+        // Apply any structured markers (profile updates, direction changes, profile_complete)
+        if (markers.length > 0) {
+            appendRuntimeLog(sessionId, `markers_detected -> ${markers.length} marker(s): ${markers.map(m => `${m.type}:${m.op}`).join(', ')}`, { source: 'knowledge' });
+            await applyMarkers(sessionId, markers);
         }
 
         scheduleSave();
@@ -1814,6 +1820,88 @@ function checkAndCompleteOnboarding(sessionId) {
     }
     appendRuntimeLog(sessionId, `onboarding_complete -> hasResume=${hasResume}`, { source: 'onboarding' });
     scheduleSave();
+}
+
+/**
+ * Apply parsed markers from AI reply to state and knowledge store.
+ * Handles PROFILE_SET/ADD/REMOVE, DIRECTION, and PROFILE_COMPLETE markers.
+ */
+async function applyMarkers(sessionId, markers) {
+    if (!markers || markers.length === 0) return;
+
+    if (!state.profileSections[sessionId]) state.profileSections[sessionId] = {};
+    const sections = state.profileSections[sessionId];
+    let profileChanged = false;
+    let directionChanged = false;
+
+    for (const m of markers) {
+        if (m.type === 'profile') {
+            const prev = sections[m.field] || '';
+            if (m.op === 'SET') {
+                sections[m.field] = m.value;
+            } else if (m.op === 'ADD') {
+                sections[m.field] = markerParser.applyAdd(prev, m.value);
+            } else if (m.op === 'REMOVE') {
+                sections[m.field] = markerParser.applyRemove(prev, m.value);
+            }
+            profileChanged = true;
+            appendRuntimeLog(sessionId, `marker_apply -> PROFILE_${m.op} ${m.field}="${sections[m.field]}"`, { source: 'knowledge' });
+        } else if (m.type === 'direction') {
+            if (!state.selectedAnswers[sessionId]) state.selectedAnswers[sessionId] = {};
+            state.selectedAnswers[sessionId][m.field] = m.value;
+            directionChanged = true;
+            appendRuntimeLog(sessionId, `marker_apply -> DIRECTION ${m.field}="${m.value}"`, { source: 'knowledge' });
+        } else if (m.type === 'profile_complete') {
+            appendRuntimeLog(sessionId, 'marker_apply -> PROFILE_COMPLETE signal', { source: 'knowledge' });
+            await extractProfileFromConversation(sessionId);
+        }
+    }
+
+    // Persist profile changes to knowledge store
+    if (profileChanged) {
+        for (const [subType, content] of Object.entries(sections)) {
+            if (!content) continue;
+            knowledgeClient.upsert({
+                refId: `profile_${subType}`,
+                type: 'profile',
+                subType,
+                scope: 'agent:job-seek',
+                content,
+                summary: sanitizeForMemory(content.split('\n')[0] || '').slice(0, 100),
+                source: 'conversation',
+                tags: ['profile', subType]
+            }).catch(err => {
+                console.error(`[agent:marker] upsert profile_${subType} failed:`, err.message);
+            });
+        }
+        appendSubtaskLog(sessionId, 'profile', isZh()
+            ? `档案已更新：${Object.keys(sections).join('、')}`
+            : `Profile updated: ${Object.keys(sections).join(', ')}`);
+    }
+
+    // Persist direction changes to knowledge store
+    if (directionChanged) {
+        const dir = state.selectedAnswers[sessionId] || {};
+        knowledgeClient.upsert({
+            refId: 'direction_target',
+            type: 'direction',
+            subType: 'target',
+            scope: 'agent:job-seek',
+            content: JSON.stringify(dir),
+            summary: `${dir.q_job_title || ''} @ ${dir.q_location || ''}`.trim(),
+            source: 'conversation',
+            tags: ['direction']
+        }).catch(err => {
+            console.error('[agent:marker] upsert direction failed:', err.message);
+        });
+        // Update the preset prompt to reflect new answers
+        state.prompts[sessionId] = _buildPresetPrompt(dir);
+    }
+
+    if (profileChanged || directionChanged) {
+        sendSnapshot();
+        scheduleSave();
+    }
 }
 
 /**

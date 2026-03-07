@@ -120,6 +120,24 @@ describe('prompts.js', () => {
             const prompt = buildProfileCollectionPrompt(true, { q_job_title: '前端工程师' });
             expect(prompt).toContain('前端工程师');
         });
+
+        it('includes marker instructions in English prompt', () => {
+            const prompt = buildProfileCollectionPrompt(false, {});
+            expect(prompt).toContain('[PROFILE_SET:');
+            expect(prompt).toContain('[PROFILE_ADD:');
+            expect(prompt).toContain('[PROFILE_REMOVE:');
+            expect(prompt).toContain('[DIRECTION:');
+            expect(prompt).toContain('[PROFILE_COMPLETE]');
+        });
+
+        it('includes marker instructions in Chinese prompt', () => {
+            const prompt = buildProfileCollectionPrompt(true, {});
+            expect(prompt).toContain('[PROFILE_SET:');
+            expect(prompt).toContain('[PROFILE_ADD:');
+            expect(prompt).toContain('[PROFILE_REMOVE:');
+            expect(prompt).toContain('[DIRECTION:');
+            expect(prompt).toContain('[PROFILE_COMPLETE]');
+        });
     });
 
     describe('buildOnboardingPrompt', () => {
