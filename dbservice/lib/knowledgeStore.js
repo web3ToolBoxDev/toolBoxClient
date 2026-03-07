@@ -253,7 +253,18 @@ function upsert(doc, opts = {}) {
     const writeClass = doc.writeClass || (existing ? existing.writeClass : 'explicit');
 
     // Determine status
-    const status = writeClass === 'candidate' ? 'candidate' : (doc.status || (existing ? existing.status : 'active'));
+    // If doc provides explicit status, use it. Otherwise default to 'active' for new docs
+    // or keep existing status — but never inherit 'deleted' (soft-deleted docs being re-upserted should revive).
+    let status;
+    if (writeClass === 'candidate') {
+        status = 'candidate';
+    } else if (doc.status) {
+        status = doc.status;
+    } else if (existing && existing.status !== 'deleted') {
+        status = existing.status;
+    } else {
+        status = 'active';
+    }
 
     // Resolve content via conflict policy
     let finalContent;
