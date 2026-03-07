@@ -24,18 +24,21 @@ const markerParser = require('./lib/markerParser');
 // Retries on failure since dbservice may not be ready yet.
 let _packRegistered = false;
 const _packReady = (async () => {
-    for (let attempt = 1; attempt <= 5; attempt++) {
+    for (let attempt = 1; attempt <= 10; attempt++) {
         try {
-            await knowledgeClient.registerPack(memoryPack.domain, memoryPack.types);
-            _packRegistered = true;
-            console.log('[agent] domain pack registered');
-            return;
+            const result = await knowledgeClient.registerPack(memoryPack.domain, memoryPack.types);
+            if (result?.success) {
+                _packRegistered = true;
+                console.log('[agent] domain pack registered');
+                return;
+            }
+            throw new Error(result?.error || 'registration returned success=false');
         } catch (err) {
-            console.warn(`[agent] domain pack registration attempt ${attempt}/5 failed: ${err.message}`);
-            if (attempt < 5) await new Promise(r => setTimeout(r, 2000));
+            console.warn(`[agent] domain pack registration attempt ${attempt}/10 failed: ${err.message}`);
+            if (attempt < 10) await new Promise(r => setTimeout(r, 2000));
         }
     }
-    console.error('[agent] domain pack registration failed after 5 attempts');
+    console.error('[agent] domain pack registration failed after 10 attempts');
 })();
 
 // Persistent data directory for this agent
