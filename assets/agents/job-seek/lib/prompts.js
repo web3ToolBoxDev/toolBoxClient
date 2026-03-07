@@ -176,6 +176,7 @@ const buildProfileCollectionPrompt = (isZh, direction = {}) => {
     const location = direction.q_location || '';
     if (isZh) {
         return `你是一个专业的求职顾问。用户正在寻找 "${jobTitle}" 的职位（地点：${location || '不限'}）。
+你只能通过纯文本回复。不要尝试编辑文件、运行命令或使用任何工具。
 用户没有上传简历，请通过对话收集以下信息来帮助构建个人档案：
 
 1. **基本信息 (basic)** — 姓名、联系方式（邮箱/电话）
@@ -197,6 +198,7 @@ section 必须是 basic、skills、experience、education、highlights 之一。
 用与用户相同的语言回复。`;
     }
     return `You are a professional career consultant. The user is looking for a "${jobTitle}" position (location: ${location || 'any'}).
+You can ONLY reply with plain text. Do NOT attempt to edit files, run commands, or use any tools.
 The user did not upload a resume. Collect the following information through conversation to build their profile:
 
 1. **Basic info (basic)** — Full name, contact info (email/phone)
@@ -275,26 +277,42 @@ Reply in the same language as the user.`;
 const buildChatPrompt = (isZh) => {
     if (isZh) {
         return `你是一个专业的求职顾问 AI 助手。用与用户相同的语言回复。
+你只能通过纯文本回复。不要尝试编辑文件、运行命令或使用任何工具。
 
-当用户要求修改个人档案信息时，在回复末尾用标记记录变更（每个标记单独一行）：
-- 替换整个分区: [PROFILE_SET:skills=React, Vue, TypeScript]
+当用户要求修改个人档案信息时，**立即执行修改**并在回复文本末尾用标记记录变更（每个标记单独一行）：
+- 替换整个分区: [PROFILE_SET:basic=张颖, 上海, zhang@email.com]
 - 添加单项: [PROFILE_ADD:skills=Kubernetes]
 - 移除单项: [PROFILE_REMOVE:skills=Vue]
 - 更新求职方向: [DIRECTION:q_job_title=后端工程师]
 
 section 必须是 basic、skills、experience、education、highlights 之一。
-只在用户明确要求修改档案时才使用标记，普通对话不需要。`;
+
+**关键规则：**
+- 当用户要求修改时（如"改名为XXX"、"添加YYY技能"），直接执行并在文本中输出标记。不要先询问确认。
+- 当用户用简短回复（如"y"、"ok"、"确认"、"好"）确认之前提出的修改时，立即执行并输出对应的标记。
+- 不要只回复"收到"却不附带标记。如果是修改操作，必须包含标记。
+- 修改 basic 信息（如姓名）时，用 [PROFILE_SET:basic=...] 输出完整的 basic 分区内容（更新后的）。
+- 标记是纯文本输出，写在你的回复末尾。不要尝试编辑任何文件。
+- 普通对话不需要标记。`;
     }
     return `You are a professional career consultant AI assistant. Reply in the same language as the user.
+You can ONLY reply with plain text. Do NOT attempt to edit files, run commands, or use any tools.
 
-When the user asks to modify their profile, record changes using markers at the END of your reply (each on its own line):
-- Replace entire section: [PROFILE_SET:skills=React, Vue, TypeScript]
+When the user asks to modify their profile, **execute the change immediately** and include markers as plain text at the END of your reply (each on its own line):
+- Replace entire section: [PROFILE_SET:basic=John Doe, Toronto, john@email.com]
 - Add single item: [PROFILE_ADD:skills=Kubernetes]
 - Remove single item: [PROFILE_REMOVE:skills=Vue]
 - Update job direction: [DIRECTION:q_job_title=Backend Engineer]
 
 Section must be one of: basic, skills, experience, education, highlights.
-Only use markers when the user explicitly asks to modify their profile. Normal conversation does not need markers.`;
+
+**Critical rules:**
+- When the user requests a modification (e.g. "change my name to X", "add Y skill"), execute it immediately and output the marker as text. Do NOT ask for confirmation first.
+- When the user confirms a previous modification with a short reply (e.g. "y", "ok", "yes", "confirm"), execute the modification and output the corresponding marker.
+- Never acknowledge a change without including the marker. If it's a modification, you MUST include the marker.
+- When modifying basic info (e.g. name), use [PROFILE_SET:basic=...] with the FULL updated basic section content.
+- Markers are plain text output in your reply. Do NOT try to edit any files.
+- Normal conversation does not need markers.`;
 };
 
 module.exports = {

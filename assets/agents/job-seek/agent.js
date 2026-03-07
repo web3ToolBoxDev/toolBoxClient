@@ -1042,11 +1042,16 @@ function resolveProvider() {
  * Context is inlined into the prompt (not as a file path) so the AI never sees file references.
  * Full prompt is written to a temp file to avoid shell escaping issues.
  */
-function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default') {
+function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default', options = {}) {
     return new Promise((resolve, reject) => {
         let fullCmd;
         const modelFlag = (model && model !== 'default') ? ` --model ${model}` : '';
         const workspaceDir = path.join(__dirname, 'workspace');
+        // Use a clean temp dir for chat (no files for AI to edit);
+        // use workspace dir when caller needs file access (e.g. resume extraction)
+        const chatDir = path.join(workspaceDir, '_chat');
+        if (!fs.existsSync(chatDir)) fs.mkdirSync(chatDir, { recursive: true });
+        const execDir = options.cwd || chatDir;
 
         // Build full prompt with context inlined (never expose file paths to the AI)
         const fullPrompt = memoryContext
@@ -1061,7 +1066,7 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default')
         if (provider === 'codex-cli') {
             fullCmd = `codex exec${modelFlag} "$(cat '${pf}')"`;
         } else {
-            fullCmd = `claude -p "$(cat '${pf}')"${modelFlag}`;
+            fullCmd = `claude -p "$(cat '${pf}')"${modelFlag} --max-turns 1`;
         }
         console.log(`[agent:cli] CMD (${provider}): ${fullCmd.slice(0, 200)}...`);
         let stdout = '';
@@ -1072,7 +1077,7 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default')
             stdio: ['ignore', 'pipe', 'pipe'],
             timeout: 120000,
             shell: true,
-            cwd: workspaceDir,
+            cwd: execDir,
             env: cleanEnv
         });
         child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
@@ -1307,6 +1312,10 @@ async function handleUserInput(payload = {}) {
             const contextParts = [systemPrompt];
             if (memoryContext) contextParts.push(memoryContext);
             if (convHistory) contextParts.push(convHistory);
+            // Add marker reminder at end of context (close to user message) so AI doesn't forget
+            contextParts.push(isZh()
+                ? 'REMINDER: 你只能输出纯文本回复。如果用户要求修改档案，你必须在回复末尾包含对应的标记（如 [PROFILE_SET:basic=...] 或 [PROFILE_ADD:skills=...]）。不要尝试编辑文件或使用工具。'
+                : 'REMINDER: You can ONLY output plain text. If the user asks to modify their profile, you MUST include the corresponding marker at the end (e.g. [PROFILE_SET:basic=...] or [PROFILE_ADD:skills=...]). Do NOT try to edit files or use tools.');
             const cliContext = contextParts.join('\n\n');
             reply = await invokeCliAsync(activeProvider, text, cliContext, model);
         } else if (activeProvider === 'api-key') {
@@ -1793,12 +1802,12 @@ async function extractResumeFromAttachments(sessionId, attachments) {
                     const imgPath = path.join(workspaceDir, `${tmpName}.png`);
                     const imgBuffer = Buffer.from(fileParser.stripDataUriPrefix(attachment.contentBase64), 'base64');
                     fs.writeFileSync(imgPath, imgBuffer);
-                    reply = await invokeCliAsync(activeProvider, `Look at the resume image at ${imgPath}. ${cliExtractInstructions}`, '', model);
+                    reply = await invokeCliAsync(activeProvider, `Look at the resume image at ${imgPath}. ${cliExtractInstructions}`, '', model, { cwd: path.join(__dirname, 'workspace') });
                     try { fs.unlinkSync(imgPath); } catch (_) {}
                 } else {
                     const txtPath = path.join(workspaceDir, `${tmpName}.txt`);
                     fs.writeFileSync(txtPath, parsed.text.slice(0, 12000), 'utf-8');
-                    reply = await invokeCliAsync(activeProvider, `Read the resume file at ${txtPath}. ${cliExtractInstructions}`, '', model);
+                    reply = await invokeCliAsync(activeProvider, `Read the resume file at ${txtPath}. ${cliExtractInstructions}`, '', model, { cwd: path.join(__dirname, 'workspace') });
                     try { fs.unlinkSync(txtPath); } catch (_) {}
                 }
             } else if (activeProvider === 'api-key') {

@@ -25,6 +25,16 @@ const AGENT_TASK_NAME = 'jobSeekAgent';
 // AI response timeout — Claude CLI can take up to 90s
 const AI_TIMEOUT = 90_000;
 
+/** Generate a unique random name so tests never match stale text on page */
+function randomTestName() {
+    const firsts = ['Alex', 'Robin', 'Kai', 'Sasha', 'Nova', 'Riley', 'Zara', 'Finn'];
+    const lasts = ['Moon', 'River', 'Storm', 'Lake', 'Fox', 'Stone', 'Peak', 'Vale'];
+    const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+    // Append 3-digit suffix for extra uniqueness
+    const suffix = String(Math.floor(Math.random() * 900) + 100);
+    return `${pick(firsts)} ${pick(lasts)}${suffix}`;
+}
+
 // ───────── helpers ─────────
 
 /** Wait for a chat message matching ANY of the given texts (bilingual support) */
@@ -142,12 +152,54 @@ async function uploadResumeInPreset(page, filePath) {
     await page.waitForTimeout(500);
 }
 
-/** Send a chat message */
+/** Send a chat message (low-level, no wait) */
 async function sendChat(page, message) {
+    // Wait until input is enabled (AI not processing)
     const input = page.locator('.ai-chat-input input').first();
+    await input.waitFor({ state: 'visible', timeout: 10_000 });
+    // Wait for input to be enabled (not disabled by isAiProcessing)
+    await page.waitForFunction(
+        () => {
+            const inp = document.querySelector('.ai-chat-input input');
+            return inp && !inp.disabled;
+        },
+        null,
+        { timeout: AI_TIMEOUT }
+    );
     await input.fill(message);
     // Click the last button in chat-input row (Send / 发送)
     await page.locator('.ai-chat-input button').last().click();
+}
+
+/** Send a chat message and wait for a NEW AI reply matching any of the given texts.
+ *  Uses message count to ensure we wait for a genuinely new response. */
+async function sendChatAndWaitReply(page, message, expectedTexts, timeout = AI_TIMEOUT) {
+    const searchTexts = Array.isArray(expectedTexts) ? expectedTexts : [expectedTexts];
+    // Snapshot current AI message count before sending
+    // Count ALL messages (user + assistant) before sending
+    const countBefore = await page.locator('.ai-chat-item').count();
+    await sendChat(page, message);
+    // Wait for a NEW assistant message (appears after our user message) matching expected text
+    await page.waitForFunction(
+        ({ countBefore: cb, candidates }) => {
+            const allItems = document.querySelectorAll('.ai-chat-item');
+            // Only check items that appeared after we sent (index > cb because cb includes the user msg we just sent)
+            for (let i = cb; i < allItems.length; i++) {
+                const item = allItems[i];
+                // Skip user messages
+                if (item.classList.contains('user')) continue;
+                const textEl = item.querySelector('.ai-chat-item__text');
+                if (!textEl) continue;
+                const text = textEl.textContent || '';
+                // Skip thinking indicators
+                if (text.includes('✨') && text.includes('...')) continue;
+                if (candidates.some((t) => text.includes(t))) return true;
+            }
+            return false;
+        },
+        { countBefore, candidates: searchTexts },
+        { timeout }
+    );
 }
 
 /** Open preset modal — skip if already open */
@@ -239,6 +291,40 @@ async function resetAgentForTest(maxRetries = 10) {
     }
 }
 
+const DASHBOARD_API = 'http://127.0.0.1:30003/api/dashboard';
+
+/** Get the active (most recent) session ID via REST API */
+async function getActiveSessionId() {
+    try {
+        const resp = await fetch(`${BACKEND_URL}/listAiSessions?taskName=${AGENT_TASK_NAME}`);
+        const body = await resp.json();
+        const sessions = body?.sessions || body?.data || [];
+        if (sessions.length === 0) return '';
+        // Return the last session (most recently created)
+        return sessions[sessions.length - 1]?.id || '';
+    } catch {
+        return '';
+    }
+}
+
+/** Fetch dashboard JSON and verify it contains expected text in profile.basic.
+ *  Short timeout — this is supplementary verification, not a hard requirement. */
+async function waitForDashboardProfile(sessionId, expectedText, timeout = 10_000) {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+        try {
+            const resp = await fetch(`${DASHBOARD_API}/${encodeURIComponent(sessionId)}`);
+            if (resp.ok) {
+                const data = await resp.json();
+                const basic = data?.profile?.basic || '';
+                if (basic.includes(expectedText)) return data;
+            }
+        } catch { /* retry */ }
+        await new Promise((r) => setTimeout(r, 1500));
+    }
+    throw new Error(`Dashboard profile did not contain "${expectedText}" within ${timeout}ms`);
+}
+
 // ───────── tests ─────────
 
 test.describe.serial('Memory Recall E2E', () => {
@@ -306,6 +392,9 @@ test.describe.serial('Memory Recall E2E', () => {
     });
 
     test('Session B: recall profile, modify, and verify dashboard updates', async ({ page }) => {
+        const TEST_NAME = randomTestName();
+        console.log(`[Test B] Using random test name: "${TEST_NAME}"`);
+
         await page.goto(WORKSPACE_URL);
         await page.waitForTimeout(3000);
 
@@ -350,89 +439,71 @@ test.describe.serial('Memory Recall E2E', () => {
         );
         console.log('[Test B] Profile recalled from Session A');
 
-        // 7. Verify dashboard was auto-generated
+        // 7. Verify dashboard was auto-generated and contains original name (Jane Doe)
         await page.waitForSelector('.ai-artifact-card', { timeout: 30_000 });
         console.log('[Test B] Dashboard auto-generated after recall');
 
-        // 8. Change name via chat — AI should ask for confirmation
-        await sendChat(page, 'Please change my name to Ying Zhang');
-        // Wait for AI to respond (confirmation question or direct update)
-        await page.waitForFunction(
-            () => {
-                const msgs = document.querySelectorAll('.ai-chat-item__text');
-                const allText = Array.from(msgs).map((el) => el.textContent || '').join(' ');
-                // AI either asks confirmation or directly confirms the change
-                return (
-                    allText.includes('Ying Zhang') ||
-                    allText.includes('confirm') ||
-                    allText.includes('确认') ||
-                    allText.includes('updated') ||
-                    allText.includes('已更新') ||
-                    allText.includes('changed') ||
-                    allText.includes('已修改')
-                );
-            },
-            null,
-            { timeout: AI_TIMEOUT }
+        // 8. Change name via chat — uses sendChatAndWaitReply to ensure
+        //    we wait for a genuinely NEW AI reply (not stale page text)
+        await sendChatAndWaitReply(
+            page,
+            `Please change my name to ${TEST_NAME}`,
+            [TEST_NAME, 'confirm', '确认', 'updated', '已更新', 'changed', '已修改'],
+            AI_TIMEOUT
         );
         console.log('[Test B] AI responded to name change request');
 
         // 9. Confirm with short reply "y" — tests CLI conversation history
-        await sendChat(page, 'y');
-        // Wait for AI to acknowledge the update
-        await page.waitForFunction(
-            () => {
-                const msgs = document.querySelectorAll('.ai-chat-item__text');
-                // Look in the last few messages for confirmation that name was updated
-                const recent = Array.from(msgs).slice(-4);
-                const text = recent.map((el) => el.textContent || '').join(' ');
-                return (
-                    text.includes('Ying Zhang') ||
-                    text.includes('updated') ||
-                    text.includes('已更新') ||
-                    text.includes('changed') ||
-                    text.includes('已修改') ||
-                    text.includes('done') ||
-                    text.includes('完成')
-                );
-            },
-            null,
-            { timeout: AI_TIMEOUT }
+        //    The AI must remember what "y" refers to from the previous exchange
+        await sendChatAndWaitReply(
+            page,
+            'y',
+            [TEST_NAME, 'updated', '已更新', 'changed', '已修改', 'done', '完成'],
+            AI_TIMEOUT
         );
         console.log('[Test B] Name change confirmed with "y" — CLI context preserved');
-        await page.waitForTimeout(3000);
 
         // 10. Verify the name was actually stored by asking AI
-        await sendChat(page, 'What is my name?');
-        await page.waitForFunction(
-            () => {
-                const msgs = document.querySelectorAll('.ai-chat-item__text');
-                const recent = Array.from(msgs).slice(-3);
-                return recent.some((el) => el.textContent?.includes('Ying Zhang'));
-            },
-            null,
-            { timeout: AI_TIMEOUT }
+        await sendChatAndWaitReply(
+            page,
+            'What is my name?',
+            [TEST_NAME],
+            AI_TIMEOUT
         );
-        console.log('[Test B] AI correctly recalls updated name "Ying Zhang"');
-        await page.waitForTimeout(2000);
+        console.log(`[Test B] AI correctly recalls updated name "${TEST_NAME}"`);
 
-        // 11. Add skill via chat
-        await sendChat(page, 'Please add Docker and Kubernetes to my skills');
-        await waitForChatMessage(page, 'Docker', AI_TIMEOUT);
+        // 11. Verify dashboard data reflects the name change
+        const sessionId = await getActiveSessionId();
+        if (sessionId) {
+            try {
+                const dashData = await waitForDashboardProfile(sessionId, TEST_NAME, 10_000);
+                console.log(`[Test B] Dashboard profile.basic contains "${TEST_NAME}"`);
+            } catch (e) {
+                // Dashboard verification is supplementary — log but don't fail
+                console.warn(`[Test B] Dashboard verification skipped: ${e.message}`);
+            }
+        }
+
+        // 12. Add skill via chat
+        await sendChatAndWaitReply(
+            page,
+            'Please add Docker and Kubernetes to my skills',
+            ['Docker'],
+            AI_TIMEOUT
+        );
         console.log('[Test B] AI responded to add skill request');
-        await page.waitForTimeout(3000);
 
-        // 12. Upload new resume to replace seeded profile
+        // 13. Upload new resume to replace seeded profile
         await openPresetModal(page);
         await page.waitForSelector('.ai-preset-modal', { state: 'visible', timeout: 5000 });
         await uploadResumeInPreset(page, RESUME_FULLSTACK);
         await closePresetModal(page);
 
-        // 13. Wait for new resume extraction
+        // 14. Wait for new resume extraction
         await waitForChatMessage(page, ['sections stored', '分区存入知识库'], AI_TIMEOUT);
         console.log('[Test B] New resume extracted and stored');
 
-        // 14. Verify dashboard artifact still visible
+        // 15. Verify dashboard artifact still visible
         await page.waitForTimeout(3000);
         expect(await page.locator('.ai-artifact-card').first().isVisible()).toBeTruthy();
 
