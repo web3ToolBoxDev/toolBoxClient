@@ -192,7 +192,8 @@ const buildProfileCollectionPrompt = (isZh, direction = {}) => {
 - 更新求职方向: [DIRECTION:q_job_title=后端工程师]
 
 section 必须是 basic、skills、experience、education 之一。
-当收集到足够信息后（至少有基本信息和技能），附加 [PROFILE_COMPLETE] 标记。
+当**首次**收集到足够信息后（至少有基本信息和技能），附加 [PROFILE_COMPLETE] 标记。
+注意：用户要求修改（添加/删除/替换）已有信息时，只用 SET/ADD/REMOVE 标记，不要附加 [PROFILE_COMPLETE]。
 用中文回复。`;
     }
     return `You are a professional career consultant. The user is looking for a "${jobTitle}" position (location: ${location || 'any'}).
@@ -212,7 +213,8 @@ Guide the user step by step, asking about one category at a time. Be friendly an
 - Update job direction: [DIRECTION:q_job_title=Backend Engineer]
 
 Section must be one of: basic, skills, experience, education.
-When you have enough info (at least basic info and skills), also append [PROFILE_COMPLETE].
+When you have enough info for the **first time** (at least basic info and skills), also append [PROFILE_COMPLETE].
+IMPORTANT: When the user asks to modify existing info (add/remove/replace), ONLY use SET/ADD/REMOVE markers. Do NOT append [PROFILE_COMPLETE] for modifications.
 Reply in the same language as the user.`;
 };
 

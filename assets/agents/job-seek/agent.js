@@ -1973,6 +1973,11 @@ async function applyMarkers(sessionId, markers) {
     let profileChanged = false;
     let directionChanged = false;
 
+    // Separate profile markers from PROFILE_COMPLETE to avoid conflict
+    const profileMarkers = markers.filter(m => m.type === 'profile');
+    const hasProfileComplete = markers.some(m => m.type === 'profile_complete');
+    const hasExplicitProfileOps = profileMarkers.length > 0;
+
     for (const m of markers) {
         if (m.type === 'profile') {
             const prev = sections[m.field] || '';
@@ -1991,6 +1996,18 @@ async function applyMarkers(sessionId, markers) {
             directionChanged = true;
             appendRuntimeLog(sessionId, `marker_apply -> DIRECTION ${m.field}="${m.value}"`, { source: 'knowledge' });
         } else if (m.type === 'profile_complete') {
+            // Skip re-extraction if explicit SET/ADD/REMOVE markers are present (they're more precise)
+            if (hasExplicitProfileOps) {
+                appendRuntimeLog(sessionId, 'marker_apply -> PROFILE_COMPLETE skipped (explicit profile ops present)', { source: 'knowledge' });
+                continue;
+            }
+            // Skip re-extraction if profile subtask is already done (avoid overwriting live edits)
+            const subtasks = state.subtasks[sessionId] || [];
+            const profileTask = subtasks.find(t => t.key === 'profile');
+            if (profileTask && profileTask.status === 'done') {
+                appendRuntimeLog(sessionId, 'marker_apply -> PROFILE_COMPLETE skipped (profile subtask already done)', { source: 'knowledge' });
+                continue;
+            }
             appendRuntimeLog(sessionId, 'marker_apply -> PROFILE_COMPLETE signal', { source: 'knowledge' });
             await extractProfileFromConversation(sessionId);
         }
