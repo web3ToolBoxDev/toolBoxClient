@@ -20,6 +20,24 @@ const browserLauncher = require('./lib/core/browserLauncher');
 const memoryPack = require('./lib/memoryPack');
 const markerParser = require('./lib/markerParser');
 
+// Register domain pack at startup (before any upsert can happen).
+// Retries on failure since dbservice may not be ready yet.
+let _packRegistered = false;
+const _packReady = (async () => {
+    for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+            await knowledgeClient.registerPack(memoryPack.domain, memoryPack.types);
+            _packRegistered = true;
+            console.log('[agent] domain pack registered');
+            return;
+        } catch (err) {
+            console.warn(`[agent] domain pack registration attempt ${attempt}/5 failed: ${err.message}`);
+            if (attempt < 5) await new Promise(r => setTimeout(r, 2000));
+        }
+    }
+    console.error('[agent] domain pack registration failed after 5 attempts');
+})();
+
 // Persistent data directory for this agent
 const _dataDir = path.join(__dirname, 'data');
 
@@ -1726,7 +1744,8 @@ async function extractResumeFromAttachments(sessionId, attachments) {
  * Store/update direction in knowledge store. If direction already existed, also store
  * a history entry so the dashboard can show target change timeline.
  */
-function storeDirection(sessionId) {
+async function storeDirection(sessionId) {
+    await _packReady;
     const selectedMap = state.selectedAnswers[sessionId] || {};
     const directionContent = [
         `Job Title: ${selectedMap.q_job_title || ''}`,
@@ -1756,8 +1775,8 @@ function storeDirection(sessionId) {
     // Also store a timestamped history entry (for dashboard change tracking)
     knowledgeClient.upsert({
         refId: `direction_history_${sessionId}_${Date.now()}`,
-        type: 'decision',
-        subType: '',
+        type: 'direction',
+        subType: 'history',
         scope: 'agent:job-seek',
         content: directionContent,
         summary,
@@ -1828,6 +1847,7 @@ function checkAndCompleteOnboarding(sessionId) {
  */
 async function applyMarkers(sessionId, markers) {
     if (!markers || markers.length === 0) return;
+    await _packReady;
 
     if (!state.profileSections[sessionId]) state.profileSections[sessionId] = {};
     const sections = state.profileSections[sessionId];
@@ -2220,8 +2240,6 @@ function initWebSocket() {
                 state.taskName = taskData?.taskName || state.taskName;
                 extractEnvWalletData(taskData?.runtimeContext);
                 scheduleSave();
-                // Register domain-specific memory types with dbservice
-                knowledgeClient.registerPack(memoryPack.domain, memoryPack.types).catch(() => {});
                 if (!state.sessions.length) {
                     createSession('');
                 } else {
