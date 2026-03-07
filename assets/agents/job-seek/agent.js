@@ -1338,7 +1338,7 @@ async function handleUserInput(payload = {}) {
     }
 }
 
-function handleUserOption(payload = {}) {
+async function handleUserOption(payload = {}) {
     const sessionId = payload.sessionId || state.activeSessionId;
     if (!sessionId || !state.conversations[sessionId]) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
@@ -1399,11 +1399,11 @@ function handleUserOption(payload = {}) {
     state.prompts[sessionId] = _buildPresetPrompt(selectedMap);
 
     // Check onboarding completion after option selection
-    checkAndCompleteOnboarding(sessionId);
+    await checkAndCompleteOnboarding(sessionId);
     sendSnapshot();
 }
 
-function handleUserAnswer(payload = {}) {
+async function handleUserAnswer(payload = {}) {
     const sessionId = payload.sessionId || state.activeSessionId;
     if (!sessionId || !state.conversations[sessionId]) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
@@ -1441,7 +1441,7 @@ function handleUserAnswer(payload = {}) {
     appendRuntimeLog(sessionId, `user_answer -> ${questionId}:${answer}`, { source: 'user' });
 
     // Check onboarding completion after answer
-    checkAndCompleteOnboarding(sessionId);
+    await checkAndCompleteOnboarding(sessionId);
     sendSnapshot();
 }
 
@@ -1908,7 +1908,7 @@ async function storeDirection(sessionId) {
  * On first completion: marks done, stores direction, starts profile collection if needed.
  * On subsequent changes: updates direction + history.
  */
-function checkAndCompleteOnboarding(sessionId) {
+async function checkAndCompleteOnboarding(sessionId) {
     const templates = _getTemplates();
     const selectedMap = state.selectedAnswers[sessionId] || {};
     const complete = isOnboardingComplete(selectedMap, templates);
