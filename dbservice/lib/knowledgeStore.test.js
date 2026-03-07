@@ -4,10 +4,20 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const ks = require('./knowledgeStore');
+const schema = require('./memorySchema');
 
 let tmpDir;
 
 beforeAll(async () => {
+    // Register job-seek domain pack (normally done by agent at startup)
+    schema.registerDomainPack('job-seek', {
+        types: {
+            profile:      { durability: 'durable',  conflictPolicy: 'replace', description: 'User career profile section', subTypes: ['basic', 'skills', 'experience', 'education'] },
+            direction:    { durability: 'durable',  conflictPolicy: 'replace', description: 'Job search direction', subTypes: ['target'] },
+            job_listing:  { durability: 'durable',  conflictPolicy: 'replace', description: 'Scraped job posting', subTypes: [] },
+            match_result: { durability: 'session',  conflictPolicy: 'replace', description: 'Job match score', subTypes: [] }
+        }
+    });
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ks-test-'));
     await ks.init(tmpDir);
 });

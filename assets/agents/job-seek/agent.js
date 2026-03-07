@@ -17,6 +17,7 @@ const knowledgeClient = require('./lib/core/knowledgeClient');
 const fileParser = require('./lib/core/fileParser');
 const sessionStore = require('./lib/core/sessionStore');
 const browserLauncher = require('./lib/core/browserLauncher');
+const memoryPack = require('./lib/memoryPack');
 
 // Persistent data directory for this agent
 const _dataDir = path.join(__dirname, 'data');
@@ -2131,6 +2132,8 @@ function initWebSocket() {
                 state.taskName = taskData?.taskName || state.taskName;
                 extractEnvWalletData(taskData?.runtimeContext);
                 scheduleSave();
+                // Register domain-specific memory types with dbservice
+                knowledgeClient.registerPack(memoryPack.domain, memoryPack.types).catch(() => {});
                 if (!state.sessions.length) {
                     createSession('');
                 } else {

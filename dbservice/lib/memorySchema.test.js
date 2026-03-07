@@ -2,6 +2,15 @@
 
 const schema = require('./memorySchema');
 
+// Register job-seek domain pack for tests (simulates what the agent does at startup)
+const jobSeekPack = {
+    profile:      { durability: 'durable',  conflictPolicy: 'replace', description: 'User career profile section', subTypes: ['basic', 'skills', 'experience', 'education'] },
+    direction:    { durability: 'durable',  conflictPolicy: 'replace', description: 'Job search direction', subTypes: ['target'] },
+    job_listing:  { durability: 'durable',  conflictPolicy: 'replace', description: 'Scraped job posting', subTypes: [] },
+    match_result: { durability: 'session',  conflictPolicy: 'replace', description: 'Job match score', subTypes: [] }
+};
+schema.registerDomainPack('job-seek', { types: jobSeekPack });
+
 describe('memorySchema', () => {
     describe('getAllTypes', () => {
         it('includes core generic types', () => {
@@ -16,7 +25,8 @@ describe('memorySchema', () => {
             expect(types.ephemeral).toBeDefined();
         });
 
-        it('includes job-seek domain-pack types', () => {
+        it('does not include domain-pack types by default (must be registered)', () => {
+            // After registration they exist — this tests that registerDomainPack worked
             const types = schema.getAllTypes();
             expect(types.profile).toBeDefined();
             expect(types.direction).toBeDefined();
@@ -35,7 +45,7 @@ describe('memorySchema', () => {
     });
 
     describe('getTypeDef', () => {
-        it('returns definition for known type', () => {
+        it('returns definition for registered domain type', () => {
             const def = schema.getTypeDef('profile');
             expect(def.durability).toBe('durable');
             expect(def.conflictPolicy).toBe('replace');

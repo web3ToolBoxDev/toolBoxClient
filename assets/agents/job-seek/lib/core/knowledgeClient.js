@@ -159,6 +159,21 @@ async function findFresh(type, scope, maxAgeDays = 30) {
 }
 
 /**
+ * Register a domain pack with the knowledge store.
+ * @param {string} domain - Domain name (e.g., 'job-seek')
+ * @param {object} types - Type definitions to register
+ * @returns {Promise<{success: boolean}>}
+ */
+async function registerPack(domain, types) {
+    try {
+        return await request('POST', '/knowledge/register-pack', { domain, types });
+    } catch (err) {
+        console.error('[knowledgeClient] registerPack failed:', err.message);
+        return { success: false, error: err.message };
+    }
+}
+
+/**
  * Detect intent from user question and map to document types.
  * When FTS keyword search fails (questions don't contain data keywords),
  * this routes to the right documents based on what the user is asking about.
@@ -210,4 +225,4 @@ async function searchAndExpand(query) {
     return { docs: [], source: 'none' };
 }
 
-module.exports = { upsert, search, find, expand, remove, promote, audit, resolve, findFresh, searchAndExpand, detectIntent };
+module.exports = { upsert, search, find, expand, remove, promote, audit, resolve, findFresh, registerPack, searchAndExpand, detectIntent };

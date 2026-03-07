@@ -297,6 +297,21 @@ async function handleKnowledgeResolve(req, res) {
     }
 }
 
+async function handleKnowledgeRegisterPack(req, res) {
+    const body = await readBody(req);
+    if (!body.domain || !body.types) {
+        return sendJSON(res, 400, { success: false, error: 'domain and types are required' });
+    }
+    try {
+        const schema = require('./lib/memorySchema');
+        schema.registerDomainPack(body.domain, { types: body.types });
+        sendJSON(res, 200, { success: true, domain: body.domain, typesRegistered: Object.keys(body.types) });
+    } catch (err) {
+        console.error('[dbservice] register-pack error:', err.message);
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
 async function handleKnowledgeFresh(req, res) {
     const body = await readBody(req);
     if (!body.type) {
@@ -368,6 +383,9 @@ const server = http.createServer(async (req, res) => {
         }
         if (url === '/knowledge/fresh' && req.method === 'POST') {
             return await handleKnowledgeFresh(req, res);
+        }
+        if (url === '/knowledge/register-pack' && req.method === 'POST') {
+            return await handleKnowledgeRegisterPack(req, res);
         }
         sendJSON(res, 404, { success: false, error: 'Not found' });
     } catch (err) {
