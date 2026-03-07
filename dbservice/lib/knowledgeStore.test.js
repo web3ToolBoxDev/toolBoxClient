@@ -50,7 +50,7 @@ describe('knowledgeStore', () => {
             expect(doc.content).toContain('Zhang Ying');
             expect(doc.tags).toEqual(['personal']);
             expect(doc.version).toBe(1);
-            expect(doc.current).toBe(1);
+            expect(doc.status).toBe('active');
             expect(doc.writeClass).toBe('explicit');
         });
 
@@ -100,7 +100,7 @@ describe('knowledgeStore', () => {
                 content: 'test'
             }, { skipValidation: true });
             expect(refId).toBe('skip_val_test');
-            ks.remove('skip_val_test');
+            ks.hardRemove('skip_val_test');
         });
     });
 
@@ -113,7 +113,7 @@ describe('knowledgeStore', () => {
             });
             const doc = ks.findByRef(refId);
             expect(doc.scope).toBe('global');
-            ks.remove(refId);
+            ks.hardRemove(refId);
         });
 
         it('stores explicit scope', () => {
@@ -125,12 +125,12 @@ describe('knowledgeStore', () => {
             });
             const doc = ks.findByRef(refId);
             expect(doc.scope).toBe('agent:code-review');
-            ks.remove(refId);
+            ks.hardRemove(refId);
         });
     });
 
     describe('candidate / promote', () => {
-        it('candidate writeClass inserts with current=0', () => {
+        it('candidate writeClass inserts with status=candidate', () => {
             ks.upsert({
                 refId: 'candidate_test',
                 type: 'knowledge',
@@ -138,7 +138,7 @@ describe('knowledgeStore', () => {
                 writeClass: 'candidate'
             });
             const doc = ks.findByRef('candidate_test');
-            expect(doc.current).toBe(0);
+            expect(doc.status).toBe('candidate');
             expect(doc.writeClass).toBe('candidate');
         });
 
@@ -147,12 +147,12 @@ describe('knowledgeStore', () => {
             expect(docs.find(d => d.refId === 'candidate_test')).toBeUndefined();
         });
 
-        it('promote makes candidate current', () => {
+        it('promote makes candidate active', () => {
             const ok = ks.promote('candidate_test');
             expect(ok).toBe(true);
             const doc = ks.findByRef('candidate_test');
-            expect(doc.current).toBe(1);
-            ks.remove('candidate_test');
+            expect(doc.status).toBe('active');
+            ks.hardRemove('candidate_test');
         });
     });
 
@@ -172,7 +172,7 @@ describe('knowledgeStore', () => {
                 content: 'duplicate content'
             });
             expect(refId2).toBe('dedup_a');
-            ks.remove('dedup_a');
+            ks.hardRemove('dedup_a');
         });
     });
 
@@ -244,9 +244,9 @@ describe('knowledgeStore', () => {
         });
 
         afterAll(() => {
-            ks.remove('res_global');
-            ks.remove('res_agent');
-            ks.remove('res_session');
+            ks.hardRemove('res_global');
+            ks.hardRemove('res_agent');
+            ks.hardRemove('res_session');
         });
     });
 
@@ -255,7 +255,7 @@ describe('knowledgeStore', () => {
             ks.upsert({ refId: 'fresh_1', type: 'knowledge', scope: 'global', content: 'recent fact' });
             const docs = ks.findFresh('knowledge', 'global', 1);
             expect(docs.some(d => d.refId === 'fresh_1')).toBe(true);
-            ks.remove('fresh_1');
+            ks.hardRemove('fresh_1');
         });
 
         it('excludes docs past validUntil', () => {
@@ -268,7 +268,7 @@ describe('knowledgeStore', () => {
             });
             const docs = ks.findFresh('knowledge', 'global', 30);
             expect(docs.find(d => d.refId === 'expired_valid')).toBeUndefined();
-            ks.remove('expired_valid');
+            ks.hardRemove('expired_valid');
         });
     });
 
@@ -299,7 +299,7 @@ describe('knowledgeStore', () => {
             expect(scoped.length).toBe(0);
             const correct = ks.search('unique_keyword_xyz', null, 10, 'agent:test-scope');
             expect(correct.length).toBe(1);
-            ks.remove('scope_search');
+            ks.hardRemove('scope_search');
         });
 
         it('returns empty for no match', () => {
@@ -330,7 +330,7 @@ describe('knowledgeStore', () => {
             ks.upsert({ refId: 'conflict_prof', type: 'profile', subType: 'skills', content: 'Vue' });
             const doc = ks.findByRef('conflict_prof');
             expect(doc.content).toBe('Vue');
-            ks.remove('conflict_prof');
+            ks.hardRemove('conflict_prof');
         });
 
         it('applies append policy for decision type', () => {
@@ -339,7 +339,7 @@ describe('knowledgeStore', () => {
             const doc = ks.findByRef('conflict_dec');
             expect(doc.content).toContain('chose A');
             expect(doc.content).toContain('chose B');
-            ks.remove('conflict_dec');
+            ks.hardRemove('conflict_dec');
         });
 
         it('applies append_set policy for constraint type', () => {
@@ -348,9 +348,8 @@ describe('knowledgeStore', () => {
             const doc = ks.findByRef('conflict_con');
             expect(doc.content).toContain('rule1');
             expect(doc.content).toContain('rule3');
-            // rule2 should not be duplicated
             expect(doc.content.split('rule2').length - 1).toBe(1);
-            ks.remove('conflict_con');
+            ks.hardRemove('conflict_con');
         });
     });
 
@@ -363,7 +362,7 @@ describe('knowledgeStore', () => {
             const actions = log.map(l => l.action);
             expect(actions).toContain('create');
             expect(actions).toContain('update');
-            ks.remove('audit_test');
+            ks.hardRemove('audit_test');
         });
 
         it('logs delete action', () => {
@@ -371,6 +370,7 @@ describe('knowledgeStore', () => {
             ks.remove('audit_del');
             const log = ks.getAuditLog('audit_del');
             expect(log.some(l => l.action === 'delete')).toBe(true);
+            ks.hardRemove('audit_del');
         });
 
         it('logs promote action', () => {
@@ -378,7 +378,7 @@ describe('knowledgeStore', () => {
             ks.promote('audit_promo');
             const log = ks.getAuditLog('audit_promo');
             expect(log.some(l => l.action === 'promote')).toBe(true);
-            ks.remove('audit_promo');
+            ks.hardRemove('audit_promo');
         });
     });
 
@@ -400,21 +400,97 @@ describe('knowledgeStore', () => {
             expect(doc.validFrom).toBe(now - 1000);
             expect(doc.validUntil).toBe(now + 86400000);
             expect(doc.lastConfirmedAt).toBe(now);
-            ks.remove('lifecycle_test');
+            ks.hardRemove('lifecycle_test');
+        });
+    });
+
+    describe('usage tracking', () => {
+        it('updates lastUsedAt and accessCount on findByRef', () => {
+            ks.upsert({ refId: 'usage_test', type: 'knowledge', scope: 'global', content: 'track me' });
+            // First read triggers touch — but returned doc has pre-touch values
+            ks.findByRef('usage_test');
+            // Second read sees the touch from the first read
+            const doc2 = ks.findByRef('usage_test');
+            expect(doc2.lastUsedAt).toBeGreaterThan(0);
+            expect(doc2.accessCount).toBeGreaterThanOrEqual(1);
+
+            // Third read sees accumulated count
+            const doc3 = ks.findByRef('usage_test');
+            expect(doc3.accessCount).toBeGreaterThan(doc2.accessCount);
+            ks.hardRemove('usage_test');
+        });
+
+        it('updates accessCount on findByType', () => {
+            ks.upsert({ refId: 'usage_type', type: 'ephemeral', scope: 'global', content: 'type track' });
+            ks.findByType('ephemeral');
+            // findByType touched it, now findByRef sees the incremented count
+            const doc = ks.findByRef('usage_type');
+            expect(doc.accessCount).toBeGreaterThanOrEqual(1);
+            ks.hardRemove('usage_type');
+        });
+
+        it('updates accessCount on search', () => {
+            ks.upsert({ refId: 'usage_search', type: 'knowledge', scope: 'global', content: 'searchable_unique_word' });
+            ks.search('searchable_unique_word');
+            // search touched it, now findByRef sees the incremented count
+            const doc = ks.findByRef('usage_search');
+            expect(doc.accessCount).toBeGreaterThanOrEqual(1);
+            ks.hardRemove('usage_search');
+        });
+    });
+
+    describe('soft delete & hardRemove', () => {
+        it('remove sets status to deleted', () => {
+            ks.upsert({ refId: 'soft_del', type: 'ephemeral', scope: 'global', content: 'to soft delete' });
+            ks.remove('soft_del');
+            const doc = ks.findByRef('soft_del');
+            expect(doc).not.toBeNull();
+            expect(doc.status).toBe('deleted');
+            ks.hardRemove('soft_del');
+        });
+
+        it('soft-deleted docs are excluded from findByType', () => {
+            ks.upsert({ refId: 'soft_del2', type: 'ephemeral', scope: 'global', content: 'soft deleted' });
+            ks.remove('soft_del2');
+            const docs = ks.findByType('ephemeral');
+            expect(docs.find(d => d.refId === 'soft_del2')).toBeUndefined();
+            ks.hardRemove('soft_del2');
+        });
+
+        it('hardRemove physically removes the document', () => {
+            ks.upsert({ refId: 'hard_del', type: 'ephemeral', scope: 'global', content: 'to hard delete' });
+            ks.hardRemove('hard_del');
+            const doc = ks.findByRef('hard_del');
+            expect(doc).toBeNull();
+        });
+
+        it('removeByType soft-deletes all matching docs', () => {
+            ks.upsert({ refId: 'rbt_a', type: 'task_state', scope: 'global', content: 'a' });
+            ks.upsert({ refId: 'rbt_b', type: 'task_state', scope: 'global', content: 'b' });
+            const count = ks.removeByType('task_state');
+            expect(count).toBe(2);
+            expect(ks.findByType('task_state').length).toBe(0);
+            // But they still exist as deleted
+            const a = ks.findByRef('rbt_a');
+            expect(a.status).toBe('deleted');
+            ks.hardRemove('rbt_a');
+            ks.hardRemove('rbt_b');
         });
     });
 
     describe('expireTTL', () => {
-        it('removes expired documents by TTL', async () => {
+        it('marks expired documents by TTL as expired', async () => {
             ks.upsert({ refId: 'ttl_old', type: 'ephemeral', scope: 'global', content: 'expired', ttl: 10 });
             expect(ks.findByRef('ttl_old')).not.toBeNull();
             await new Promise(r => setTimeout(r, 20));
             const expired = ks.expireTTL();
             expect(expired).toBeGreaterThanOrEqual(1);
-            expect(ks.findByRef('ttl_old')).toBeNull();
+            const doc = ks.findByRef('ttl_old');
+            expect(doc.status).toBe('expired');
+            ks.hardRemove('ttl_old');
         });
 
-        it('removes documents past validUntil', () => {
+        it('marks documents past validUntil as expired', () => {
             ks.upsert({
                 refId: 'valid_until_exp',
                 type: 'ephemeral',
@@ -424,24 +500,34 @@ describe('knowledgeStore', () => {
             });
             const expired = ks.expireTTL();
             expect(expired).toBeGreaterThanOrEqual(1);
-            expect(ks.findByRef('valid_until_exp')).toBeNull();
+            const doc = ks.findByRef('valid_until_exp');
+            expect(doc.status).toBe('expired');
+            ks.hardRemove('valid_until_exp');
         });
     });
 
-    describe('remove & removeByType', () => {
-        it('removes a single document', () => {
-            ks.upsert({ refId: 'tmp_rm', type: 'ephemeral', scope: 'global', content: 'to be removed' });
-            expect(ks.findByRef('tmp_rm')).not.toBeNull();
-            ks.remove('tmp_rm');
-            expect(ks.findByRef('tmp_rm')).toBeNull();
+    describe('purge', () => {
+        it('physically removes old deleted/expired docs', () => {
+            ks.upsert({ refId: 'purge_test', type: 'ephemeral', scope: 'global', content: 'purgeable' });
+            ks.remove('purge_test');
+            // Force updatedAt to old timestamp
+            const dbRef = ks._getDb();
+            const oldTime = Date.now() - (31 * 24 * 60 * 60 * 1000);
+            dbRef.run('UPDATE documents SET updatedAt = ? WHERE refId = ?', [oldTime, 'purge_test']);
+            const purged = ks.purge(30);
+            expect(purged).toBeGreaterThanOrEqual(1);
+            expect(ks.findByRef('purge_test')).toBeNull();
         });
 
-        it('removes all documents of a type', () => {
-            ks.upsert({ refId: 'tmp_a', type: 'task_state', scope: 'global', content: 'a' });
-            ks.upsert({ refId: 'tmp_b', type: 'task_state', scope: 'global', content: 'b' });
-            const count = ks.removeByType('task_state');
-            expect(count).toBe(2);
-            expect(ks.findByType('task_state').length).toBe(0);
+        it('does not purge recently deleted docs', () => {
+            ks.upsert({ refId: 'purge_recent', type: 'ephemeral', scope: 'global', content: 'recent delete' });
+            ks.remove('purge_recent');
+            const purged = ks.purge(30);
+            // Should not purge — updatedAt is recent
+            const doc = ks.findByRef('purge_recent');
+            expect(doc).not.toBeNull();
+            expect(doc.status).toBe('deleted');
+            ks.hardRemove('purge_recent');
         });
     });
 
@@ -451,7 +537,7 @@ describe('knowledgeStore', () => {
             const s = ks.stats();
             expect(s.total).toBeGreaterThan(0);
             expect(s.byType.profile).toBeGreaterThanOrEqual(1);
-            ks.remove('stat_test');
+            ks.hardRemove('stat_test');
         });
     });
 
@@ -467,6 +553,7 @@ describe('knowledgeStore', () => {
             const doc = ks.findByRef('persist_test');
             expect(doc).not.toBeNull();
             expect(doc.content).toBe('survives restart');
+            expect(doc.status).toBe('active');
         });
     });
 });

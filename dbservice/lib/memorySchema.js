@@ -71,6 +71,7 @@ function registerDomainPack(domain, pack) {
 
 const VALID_WRITE_CLASSES = new Set(['explicit', 'inferred', 'candidate', 'transient']);
 const VALID_DURABILITIES = new Set(['permanent', 'durable', 'session', 'transient']);
+const VALID_STATUSES = new Set(['active', 'candidate', 'superseded', 'deleted', 'expired']);
 
 /**
  * Validate a document before write.
@@ -143,6 +144,7 @@ module.exports = {
     CONFLICT_POLICIES,
     VALID_WRITE_CLASSES,
     VALID_DURABILITIES,
+    VALID_STATUSES,
     // For testing: reset registry to core types only
     _resetRegistry: () => {
         for (const key of Object.keys(_typeRegistry)) delete _typeRegistry[key];
