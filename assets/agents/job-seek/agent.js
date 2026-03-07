@@ -590,7 +590,7 @@ function moveSubTaskForward(sessionId) {
 
 // --------------- subtask actions (start / restart) ---------------
 
-function handleSubtaskAction(payload = {}) {
+async function handleSubtaskAction(payload = {}) {
     const sessionId = payload.sessionId || state.activeSessionId;
     if (!sessionId || !state.conversations[sessionId]) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
@@ -641,6 +641,15 @@ function handleSubtaskAction(payload = {}) {
 
         // Build dashboard when Profile Collection finishes
         if (subtaskKey === 'profile') {
+            // If profile sections are empty, try extracting from conversation first
+            const currentSections = state.profileSections[sessionId] || {};
+            if (Object.keys(currentSections).length === 0) {
+                try {
+                    await extractProfileFromConversation(sessionId);
+                } catch (exErr) {
+                    console.error('[agent] profile extraction on finish failed:', exErr.message);
+                }
+            }
             try {
                 buildIntentFile(sessionId);
                 // Remove old dashboard artifacts before adding new one
@@ -2094,9 +2103,15 @@ async function extractProfileFromConversation(sessionId) {
             reply = result.content || '';
         }
 
+        console.log(`[agent] extractProfileFromConversation reply length: ${(reply || '').length}`);
         if (reply) {
             const sections = parseResumeSections(reply);
             const sectionKeys = Object.keys(sections);
+            console.log(`[agent] extractProfileFromConversation parsed ${sectionKeys.length} sections: ${sectionKeys.join(', ')}`);
+            if (sectionKeys.length === 0) {
+                console.warn('[agent] extractProfileFromConversation: no sections parsed from reply');
+                appendRuntimeLog(sessionId, 'profile_extraction -> 0 sections parsed, raw reply logged', { source: 'warning' });
+            }
             state.profileSections[sessionId] = sections;
 
             // Store in knowledge store
