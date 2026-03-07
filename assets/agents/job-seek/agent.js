@@ -639,38 +639,27 @@ function handleSubtaskAction(payload = {}) {
             ? `子任务已完成：${subtaskKey}`
             : `Subtask finished: ${subtaskKey}`);
 
-        // Build intent file + dashboard when Profile Collection finishes
+        // Build dashboard when Profile Collection finishes
         if (subtaskKey === 'profile') {
             try {
-                const { filePath: intentPath, version } = buildIntentFile(sessionId);
-                // Remove old intent/dashboard artifacts before adding new ones
+                buildIntentFile(sessionId);
+                // Remove old dashboard artifacts before adding new one
                 if (state.artifacts[sessionId]) {
                     state.artifacts[sessionId] = state.artifacts[sessionId].filter(
-                        (a) => a.type !== 'intent' && a.type !== 'dashboard'
+                        (a) => a.type !== 'dashboard'
                     );
                 }
-                appendArtifact(sessionId, {
-                    id: `intent-${sessionId}-v${version}`,
-                    type: 'intent',
-                    title: isZh() ? `求职意向 (v${version})` : `Job Search Intent (v${version})`,
-                    filePath: intentPath,
-                    openFile: true
-                });
                 const { filePath: dashPath } = buildDashboard(sessionId);
                 appendArtifact(sessionId, {
-                    id: `dashboard-${sessionId}-v${version}`,
+                    id: `dashboard-${sessionId}`,
                     type: 'dashboard',
                     title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
                     filePath: dashPath,
                     openFile: true
                 });
-                appendSubtaskLog(sessionId, subtaskKey,
-                    isZh() ? `意向文件已生成 (v${version})` : `Intent file generated (v${version})`,
-                    { level: 'info' }
-                );
             } catch (err) {
-                console.error('[agent] buildIntentFile/dashboard failed:', err);
-                appendRuntimeLog(sessionId, `intent_build_error -> ${err.message}`, { source: 'error' });
+                console.error('[agent] buildDashboard failed:', err);
+                appendRuntimeLog(sessionId, `dashboard_build_error -> ${err.message}`, { source: 'error' });
             }
         }
 
