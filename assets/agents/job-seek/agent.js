@@ -1946,11 +1946,29 @@ async function checkAndCompleteOnboarding(sessionId) {
     if (!hasResume) {
         const seeded = await seedProfileFromKnowledge(sessionId);
         if (seeded) {
-            // Profile loaded — skip profile collection, go straight to dashboard
+            // Profile loaded — skip profile collection, generate dashboard
             const profileKeys = Object.keys(state.profileSections[sessionId] || {}).filter(k => state.profileSections[sessionId][k]);
             appendConversation(sessionId, 'assistant', isZh()
                 ? `我已找到你之前的档案（${profileKeys.join('、')}）。可以直接用这份档案为新目标生成简历，或者你可以上传新简历 / 通过对话修改档案。`
                 : `I found your profile from a previous session (${profileKeys.join(', ')}). I can use this to generate a resume for your new target, or you can upload a new resume / modify your profile through chat.`);
+            // Auto-generate dashboard
+            try {
+                buildIntentFile(sessionId);
+                if (state.artifacts[sessionId]) {
+                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(a => a.type !== 'dashboard');
+                }
+                const dashUrl = dashboardServer.getDashboardURL(sessionId);
+                appendArtifact(sessionId, {
+                    id: `dashboard-${sessionId}`,
+                    type: 'dashboard',
+                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
+                    url: dashUrl,
+                    openUrl: true
+                });
+            } catch (err) {
+                console.error('[agent] dashboard after seed failed:', err);
+            }
+            syncProfileToMem0(sessionId);
         } else {
             state.profileCollectionMode[sessionId] = true;
             appendConversation(sessionId, 'assistant', isZh()
