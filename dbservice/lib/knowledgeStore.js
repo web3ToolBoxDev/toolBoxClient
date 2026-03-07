@@ -3,13 +3,24 @@
 const fs = require('fs');
 const path = require('path');
 const initSqlJs = require('sql.js');
+const { validateDoc, getConflictPolicy, resolveConflict } = require('./memorySchema');
 
 let db = null;
 let dbPath = '';
 let sqlReady = null;
 
+// ==================== Scope Hierarchy ====================
+
 /**
- * Initialize the SQLite database with FTS5 support.
+ * Default scope resolution order (most specific → least specific).
+ * Callers can customize the scopes array for findResolved().
+ */
+const SCOPE_HIERARCHY = ['session', 'task', 'agent', 'user', 'global'];
+
+// ==================== Init ====================
+
+/**
+ * Initialize the SQLite database.
  * @param {string} savePath - Directory to store the .db file
  */
 async function init(savePath) {
@@ -32,14 +43,14 @@ async function init(savePath) {
                 refId       TEXT PRIMARY KEY,
                 type        TEXT NOT NULL,
                 subType     TEXT DEFAULT '',
-                scope       TEXT DEFAULT 'agent:job-seek',
+                scope       TEXT DEFAULT 'global',
                 tags        TEXT DEFAULT '[]',
                 content     TEXT NOT NULL,
                 summary     TEXT DEFAULT '',
                 source      TEXT DEFAULT '',
                 confidence  REAL DEFAULT 1.0,
                 version     INTEGER DEFAULT 1,
-                current     INTEGER DEFAULT 1,
+                status      TEXT DEFAULT 'active',
                 supersedes  TEXT DEFAULT '',
                 relations   TEXT DEFAULT '[]',
                 ttl         INTEGER DEFAULT 0,
@@ -48,11 +59,31 @@ async function init(savePath) {
             )
         `);
 
-        // FTS4 virtual table for full-text search (sql.js supports fts4, not fts5)
+        // FTS4 virtual table for full-text search
         db.run(`
             CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts4(
                 refId, type, subType, tags, content, summary,
                 tokenize=unicode61
+            )
+        `);
+
+        // Schema migration: add new columns if they don't exist
+        _migrateColumns();
+
+        // Create indexes
+        _createIndexes();
+
+        // Audit trail table
+        db.run(`
+            CREATE TABLE IF NOT EXISTS memory_audit (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                refId       TEXT NOT NULL,
+                action      TEXT NOT NULL,
+                oldVersion  INTEGER DEFAULT 0,
+                newVersion  INTEGER DEFAULT 0,
+                source      TEXT DEFAULT '',
+                detail      TEXT DEFAULT '',
+                createdAt   INTEGER NOT NULL
             )
         `);
 
@@ -61,6 +92,66 @@ async function init(savePath) {
     })();
 
     return sqlReady;
+}
+
+/** Add columns that may not exist in older databases */
+function _migrateColumns() {
+    const migrations = [
+        { col: 'validFrom',       sql: 'ALTER TABLE documents ADD COLUMN validFrom INTEGER DEFAULT 0' },
+        { col: 'validUntil',      sql: 'ALTER TABLE documents ADD COLUMN validUntil INTEGER DEFAULT 0' },
+        { col: 'lastConfirmedAt', sql: 'ALTER TABLE documents ADD COLUMN lastConfirmedAt INTEGER DEFAULT 0' },
+        { col: 'writeClass',      sql: "ALTER TABLE documents ADD COLUMN writeClass TEXT DEFAULT 'explicit'" },
+        { col: 'lastUsedAt',      sql: 'ALTER TABLE documents ADD COLUMN lastUsedAt INTEGER DEFAULT 0' },
+        { col: 'accessCount',     sql: 'ALTER TABLE documents ADD COLUMN accessCount INTEGER DEFAULT 0' },
+        { col: 'status',          sql: "ALTER TABLE documents ADD COLUMN status TEXT DEFAULT 'active'" }
+    ];
+    for (const m of migrations) {
+        try {
+            db.run(m.sql);
+        } catch (err) {
+            // Column already exists — ignore
+            if (!err.message.includes('duplicate column')) {
+                console.error(`[knowledgeStore] migration warning (${m.col}):`, err.message);
+            }
+        }
+    }
+
+    // Migrate legacy `current` column to `status` for old databases
+    _migrateLegacyCurrent();
+}
+
+/** Migrate old `current` INTEGER column values to `status` TEXT */
+function _migrateLegacyCurrent() {
+    try {
+        // Check if `current` column exists
+        const info = db.exec("PRAGMA table_info(documents)");
+        if (!info.length) return;
+        const cols = info[0].values.map(row => row[1]);
+        if (!cols.includes('current')) return;
+
+        // Migrate: current=0 → status='candidate', current=1 → status='active' (if status is still default)
+        db.run("UPDATE documents SET status = 'candidate' WHERE current = 0 AND status = 'active'");
+        // current=1 docs stay as status='active' (already default)
+    } catch {
+        // Table may not have `current` column in fresh databases — ignore
+    }
+}
+
+/** Create indexes for common query patterns */
+function _createIndexes() {
+    const indexes = [
+        'CREATE INDEX IF NOT EXISTS idx_docs_type_subtype ON documents(type, subType)',
+        'CREATE INDEX IF NOT EXISTS idx_docs_scope ON documents(scope)',
+        'CREATE INDEX IF NOT EXISTS idx_docs_status ON documents(status)',
+        'CREATE INDEX IF NOT EXISTS idx_docs_updated ON documents(updatedAt)',
+        'CREATE INDEX IF NOT EXISTS idx_docs_valid_until ON documents(validUntil)',
+        'CREATE INDEX IF NOT EXISTS idx_docs_type_status ON documents(type, status)',
+        'CREATE INDEX IF NOT EXISTS idx_docs_scope_status ON documents(scope, status)',
+        'CREATE INDEX IF NOT EXISTS idx_audit_refid ON memory_audit(refId)'
+    ];
+    for (const sql of indexes) {
+        try { db.run(sql); } catch { /* index may already exist */ }
+    }
 }
 
 /** Save database to disk */
@@ -81,14 +172,75 @@ function genRefId(prefix = 'doc') {
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
 
+// ==================== Usage Tracking ====================
+
+/** Update lastUsedAt and accessCount for a list of refIds (fire-and-forget) */
+function _touchUsage(refIds) {
+    if (!db || !refIds.length) return;
+    const now = Date.now();
+    for (const refId of refIds) {
+        try {
+            db.run(
+                'UPDATE documents SET lastUsedAt = ?, accessCount = accessCount + 1 WHERE refId = ?',
+                [now, refId]
+            );
+        } catch { /* non-critical */ }
+    }
+}
+
+// ==================== Audit ====================
+
+function _audit(refId, action, oldVersion, newVersion, source, detail) {
+    if (!db) return;
+    try {
+        db.run(
+            'INSERT INTO memory_audit (refId, action, oldVersion, newVersion, source, detail, createdAt) VALUES (?,?,?,?,?,?,?)',
+            [refId, action, oldVersion || 0, newVersion || 0, source || '', detail || '', Date.now()]
+        );
+    } catch (err) {
+        console.error('[knowledgeStore] audit write error:', err.message);
+    }
+}
+
+/**
+ * Get audit log for a document.
+ * @param {string} refId
+ * @param {number} [limit=50]
+ * @returns {object[]}
+ */
+function getAuditLog(refId, limit = 50) {
+    if (!db) return [];
+    const stmt = db.prepare('SELECT * FROM memory_audit WHERE refId = ? ORDER BY createdAt DESC LIMIT ?');
+    stmt.bind([refId, limit]);
+    const results = [];
+    while (stmt.step()) {
+        results.push(stmt.getAsObject());
+    }
+    stmt.free();
+    return results;
+}
+
 // ==================== CRUD ====================
 
 /**
- * Insert or update a document.
- * If refId exists, updates it and bumps version.
+ * Insert or update a document with validation, conflict resolution, and audit.
+ * @param {object} doc
+ * @param {object} [opts] - { skipValidation?: boolean }
+ * @returns {string} refId
  */
-function upsert(doc) {
+function upsert(doc, opts = {}) {
     if (!db) throw new Error('KnowledgeStore not initialized');
+
+    // Validation
+    if (!opts.skipValidation) {
+        const validation = validateDoc(doc);
+        if (!validation.valid) {
+            const errMsg = `Validation failed: ${validation.errors.join('; ')}`;
+            console.warn(`[knowledgeStore] ${errMsg}`, doc.refId || '(new)');
+            throw new Error(errMsg);
+        }
+    }
+
     const now = Date.now();
     const refId = doc.refId || genRefId(doc.type || 'doc');
     const tags = Array.isArray(doc.tags) ? JSON.stringify(doc.tags) : (doc.tags || '[]');
@@ -97,17 +249,44 @@ function upsert(doc) {
     const existing = findByRef(refId);
     const finalType = doc.type || (existing ? existing.type : 'unknown');
     const finalSubType = doc.subType ?? (existing ? existing.subType : '');
-    const finalContent = doc.content ?? (existing ? existing.content : '');
     const finalSummary = doc.summary ?? (existing ? existing.summary : '');
+    const writeClass = doc.writeClass || (existing ? existing.writeClass : 'explicit');
+
+    // Determine status
+    const status = writeClass === 'candidate' ? 'candidate' : (doc.status || (existing ? existing.status : 'active'));
+
+    // Resolve content via conflict policy
+    let finalContent;
+    if (existing && doc.content !== undefined) {
+        const policy = getConflictPolicy(finalType);
+        finalContent = resolveConflict(policy, existing.content, doc.content, existing, { ...doc, updatedAt: now });
+    } else {
+        finalContent = doc.content ?? (existing ? existing.content : '');
+    }
+
+    // Dedup check: skip if identical content exists for same type+subType+scope
+    if (!existing && finalContent) {
+        const scope = doc.scope || 'global';
+        const dupes = _queryAll(
+            "SELECT refId FROM documents WHERE type = ? AND subType = ? AND scope = ? AND content = ? AND status = 'active' LIMIT 1",
+            [finalType, finalSubType, scope, finalContent]
+        );
+        if (dupes.length > 0) {
+            return dupes[0].refId;
+        }
+    }
 
     if (existing) {
-        // Remove old FTS entry
+        const oldVersion = existing.version || 1;
+        const newVersion = oldVersion + 1;
         db.run('DELETE FROM documents_fts WHERE refId = ?', [refId]);
         db.run(`
             UPDATE documents SET
                 type=?, subType=?, scope=?, tags=?, content=?, summary=?,
-                source=?, confidence=?, version=?, current=?, supersedes=?,
-                relations=?, ttl=?, updatedAt=?
+                source=?, confidence=?, version=?, status=?, supersedes=?,
+                relations=?, ttl=?, writeClass=?,
+                validFrom=?, validUntil=?, lastConfirmedAt=?,
+                updatedAt=?
             WHERE refId=?
         `, [
             finalType,
@@ -118,50 +297,83 @@ function upsert(doc) {
             finalSummary,
             doc.source ?? existing.source,
             doc.confidence ?? existing.confidence,
-            (existing.version || 1) + 1,
-            doc.current ?? 1,
+            newVersion,
+            status,
             doc.supersedes ?? existing.supersedes,
             relations,
             doc.ttl ?? existing.ttl,
+            writeClass,
+            doc.validFrom ?? existing.validFrom ?? 0,
+            doc.validUntil ?? existing.validUntil ?? 0,
+            doc.lastConfirmedAt ?? now,
             now,
             refId
         ]);
+        _audit(refId, 'update', oldVersion, newVersion, doc.source || '', finalSummary);
     } else {
         db.run(`
             INSERT INTO documents
                 (refId, type, subType, scope, tags, content, summary,
-                 source, confidence, version, current, supersedes,
-                 relations, ttl, createdAt, updatedAt)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 source, confidence, version, status, supersedes,
+                 relations, ttl, writeClass,
+                 validFrom, validUntil, lastConfirmedAt,
+                 lastUsedAt, accessCount,
+                 createdAt, updatedAt)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `, [
             refId,
             finalType,
             finalSubType,
-            doc.scope || 'agent:job-seek',
+            doc.scope || 'global',
             tags,
             finalContent,
             finalSummary,
             doc.source || '',
             doc.confidence ?? 1.0,
             doc.version || 1,
-            doc.current ?? 1,
+            status,
             doc.supersedes || '',
             relations,
             doc.ttl || 0,
+            writeClass,
+            doc.validFrom || 0,
+            doc.validUntil || 0,
+            doc.lastConfirmedAt || 0,
+            0, // lastUsedAt
+            0, // accessCount
             now,
             now
         ]);
+        _audit(refId, 'create', 0, doc.version || 1, doc.source || '', finalSummary);
     }
 
     // Sync FTS
-    db.run(`
-        INSERT INTO documents_fts(refId, type, subType, tags, content, summary)
-        VALUES (?,?,?,?,?,?)
-    `, [refId, finalType, finalSubType, tags, finalContent, finalSummary]);
+    db.run(
+        'INSERT INTO documents_fts(refId, type, subType, tags, content, summary) VALUES (?,?,?,?,?,?)',
+        [refId, finalType, finalSubType, tags, finalContent, finalSummary]
+    );
 
     persist();
     return refId;
 }
+
+/**
+ * Promote a candidate document to active.
+ * @param {string} refId
+ * @returns {boolean}
+ */
+function promote(refId) {
+    if (!db) return false;
+    const doc = findByRef(refId);
+    if (!doc) return false;
+    if (doc.status === 'active') return true;
+    db.run("UPDATE documents SET status = 'active', updatedAt = ? WHERE refId = ?", [Date.now(), refId]);
+    _audit(refId, 'promote', doc.version, doc.version, '', 'candidate promoted to active');
+    persist();
+    return true;
+}
+
+// ==================== Row Mapping ====================
 
 function _rowToDoc(row) {
     if (!row) return null;
@@ -176,10 +388,16 @@ function _rowToDoc(row) {
         source: row.source,
         confidence: row.confidence,
         version: row.version,
-        current: row.current,
+        status: row.status || 'active',
         supersedes: row.supersedes,
         relations: (() => { try { return JSON.parse(row.relations); } catch { return []; } })(),
         ttl: row.ttl,
+        writeClass: row.writeClass || 'explicit',
+        validFrom: row.validFrom || 0,
+        validUntil: row.validUntil || 0,
+        lastConfirmedAt: row.lastConfirmedAt || 0,
+        lastUsedAt: row.lastUsedAt || 0,
+        accessCount: row.accessCount || 0,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt
     };
@@ -197,47 +415,114 @@ function _queryAll(sql, params = []) {
     return results;
 }
 
-/** Find a single document by refId */
+// ==================== Query ====================
+
+/** Find a single document by refId (does NOT filter by status — returns any state) */
 function findByRef(refId) {
     if (!db) return null;
     const rows = _queryAll('SELECT * FROM documents WHERE refId = ?', [refId]);
+    if (rows.length > 0) {
+        _touchUsage([rows[0].refId]);
+    }
     return rows[0] || null;
 }
 
-/** Find all current documents of a given type */
+/** Find all active documents of a given type (optionally filtered by subType) */
 function findByType(type, subType) {
     if (!db) return [];
+    let docs;
     if (subType) {
-        return _queryAll(
-            'SELECT * FROM documents WHERE type = ? AND subType = ? AND current = 1 ORDER BY updatedAt DESC',
+        docs = _queryAll(
+            "SELECT * FROM documents WHERE type = ? AND subType = ? AND status = 'active' ORDER BY updatedAt DESC",
             [type, subType]
         );
+    } else {
+        docs = _queryAll(
+            "SELECT * FROM documents WHERE type = ? AND status = 'active' ORDER BY updatedAt DESC",
+            [type]
+        );
     }
-    return _queryAll(
-        'SELECT * FROM documents WHERE type = ? AND current = 1 ORDER BY updatedAt DESC',
-        [type]
-    );
+    if (docs.length) _touchUsage(docs.map(d => d.refId));
+    return docs;
 }
 
 /** Find documents matching any of the given tags */
 function findByTags(tags) {
     if (!db || !Array.isArray(tags) || !tags.length) return [];
-    // Use LIKE for each tag against JSON array
     const conditions = tags.map(() => "tags LIKE ?");
     const params = tags.map(t => `%"${t}"%`);
-    return _queryAll(
-        `SELECT * FROM documents WHERE (${conditions.join(' OR ')}) AND current = 1 ORDER BY updatedAt DESC`,
+    const docs = _queryAll(
+        `SELECT * FROM documents WHERE (${conditions.join(' OR ')}) AND status = 'active' ORDER BY updatedAt DESC`,
         params
     );
+    if (docs.length) _touchUsage(docs.map(d => d.refId));
+    return docs;
 }
 
-/** Find all current documents matching a scope prefix */
+/** Find all active documents matching a scope */
 function findByScope(scope) {
     if (!db) return [];
-    return _queryAll(
-        'SELECT * FROM documents WHERE scope = ? AND current = 1 ORDER BY updatedAt DESC',
+    const docs = _queryAll(
+        "SELECT * FROM documents WHERE scope = ? AND status = 'active' ORDER BY updatedAt DESC",
         [scope]
     );
+    if (docs.length) _touchUsage(docs.map(d => d.refId));
+    return docs;
+}
+
+/**
+ * Walk scope hierarchy, return first matching document.
+ * @param {string} type
+ * @param {string} subType
+ * @param {string[]} scopes - Ordered from most specific to least
+ * @returns {object|null}
+ */
+function findResolved(type, subType, scopes) {
+    if (!db || !Array.isArray(scopes)) return null;
+    for (const scope of scopes) {
+        const sql = subType
+            ? "SELECT * FROM documents WHERE type = ? AND subType = ? AND scope = ? AND status = 'active' ORDER BY updatedAt DESC LIMIT 1"
+            : "SELECT * FROM documents WHERE type = ? AND scope = ? AND status = 'active' ORDER BY updatedAt DESC LIMIT 1";
+        const params = subType ? [type, subType, scope] : [type, scope];
+        const rows = _queryAll(sql, params);
+        if (rows.length > 0) {
+            _touchUsage([rows[0].refId]);
+            return rows[0];
+        }
+    }
+    return null;
+}
+
+/**
+ * Find active documents that are not stale.
+ * @param {string} type
+ * @param {string} [scope] - Optional scope filter
+ * @param {number} [maxAgeDays=30] - Max age in days from updatedAt
+ * @returns {object[]}
+ */
+function findFresh(type, scope, maxAgeDays = 30) {
+    if (!db) return [];
+    const cutoff = Date.now() - (maxAgeDays * 24 * 60 * 60 * 1000);
+    let docs;
+    if (scope) {
+        docs = _queryAll(
+            `SELECT * FROM documents WHERE type = ? AND scope = ? AND status = 'active'
+             AND updatedAt >= ?
+             AND (validUntil = 0 OR validUntil > ?)
+             ORDER BY updatedAt DESC`,
+            [type, scope, cutoff, Date.now()]
+        );
+    } else {
+        docs = _queryAll(
+            `SELECT * FROM documents WHERE type = ? AND status = 'active'
+             AND updatedAt >= ?
+             AND (validUntil = 0 OR validUntil > ?)
+             ORDER BY updatedAt DESC`,
+            [type, cutoff, Date.now()]
+        );
+    }
+    if (docs.length) _touchUsage(docs.map(d => d.refId));
+    return docs;
 }
 
 /**
@@ -245,42 +530,39 @@ function findByScope(scope) {
  * @param {string} query - Search query
  * @param {string[]} [types] - Optional type filter
  * @param {number} [limit=10] - Max results
+ * @param {string} [scope] - Optional scope filter
  * @returns {Array<{doc: object, rank: number}>}
  */
-function search(query, types, limit = 10) {
+function search(query, types, limit = 10, scope) {
     if (!db || !query) return [];
 
-    // Tokenize query for FTS4 (OR-based matching)
     const tokens = query.split(/\s+/).filter(t => t.length >= 2);
     if (!tokens.length) return [];
     const ftsQuery = tokens.map(t => `${t.replace(/"/g, '')}`).join(' OR ');
 
-    let sql;
-    let params;
+    const conditions = ['documents_fts MATCH ?', "d.status = 'active'"];
+    const params = [ftsQuery];
 
     if (types && types.length > 0) {
         const placeholders = types.map(() => '?').join(',');
-        sql = `
-            SELECT d.*
-            FROM documents_fts f
-            JOIN documents d ON d.refId = f.refId
-            WHERE documents_fts MATCH ?
-              AND d.type IN (${placeholders})
-              AND d.current = 1
-            LIMIT ?
-        `;
-        params = [ftsQuery, ...types, limit];
-    } else {
-        sql = `
-            SELECT d.*
-            FROM documents_fts f
-            JOIN documents d ON d.refId = f.refId
-            WHERE documents_fts MATCH ?
-              AND d.current = 1
-            LIMIT ?
-        `;
-        params = [ftsQuery, limit];
+        conditions.push(`d.type IN (${placeholders})`);
+        params.push(...types);
     }
+
+    if (scope) {
+        conditions.push('d.scope = ?');
+        params.push(scope);
+    }
+
+    params.push(limit);
+
+    const sql = `
+        SELECT d.*
+        FROM documents_fts f
+        JOIN documents d ON d.refId = f.refId
+        WHERE ${conditions.join(' AND ')}
+        LIMIT ?
+    `;
 
     try {
         const stmt = db.prepare(sql);
@@ -291,6 +573,7 @@ function search(query, types, limit = 10) {
             results.push({ doc: _rowToDoc(obj), rank: 0 });
         }
         stmt.free();
+        if (results.length) _touchUsage(results.map(r => r.doc.refId));
         return results;
     } catch (err) {
         console.error('[knowledgeStore] FTS search error:', err.message);
@@ -298,58 +581,95 @@ function search(query, types, limit = 10) {
     }
 }
 
-/** Delete a document by refId */
+// ==================== Delete ====================
+
+/** Soft-delete a document by refId (sets status='deleted') */
 function remove(refId) {
     if (!db) return false;
+    const doc = findByRef(refId);
+    if (!doc) return false;
+    const version = doc.version || 0;
     db.run('DELETE FROM documents_fts WHERE refId = ?', [refId]);
-    db.run('DELETE FROM documents WHERE refId = ?', [refId]);
+    db.run("UPDATE documents SET status = 'deleted', updatedAt = ? WHERE refId = ?", [Date.now(), refId]);
+    _audit(refId, 'delete', version, version, '', 'soft delete');
     persist();
     return true;
 }
 
-/** Delete all documents matching a type (and optional scope) */
+/** Hard-delete a document by refId (physical removal) */
+function hardRemove(refId) {
+    if (!db) return false;
+    const doc = findByRef(refId);
+    const version = doc ? doc.version : 0;
+    db.run('DELETE FROM documents_fts WHERE refId = ?', [refId]);
+    db.run('DELETE FROM documents WHERE refId = ?', [refId]);
+    _audit(refId, 'hard_delete', version, 0, '', '');
+    persist();
+    return true;
+}
+
+/** Soft-delete all documents matching a type (and optional scope) */
 function removeByType(type, scope) {
     if (!db) return 0;
     let before;
     if (scope) {
-        before = _queryAll('SELECT refId FROM documents WHERE type = ? AND scope = ?', [type, scope]);
+        before = _queryAll("SELECT refId FROM documents WHERE type = ? AND scope = ? AND status != 'deleted'", [type, scope]);
     } else {
-        before = _queryAll('SELECT refId FROM documents WHERE type = ?', [type]);
+        before = _queryAll("SELECT refId FROM documents WHERE type = ? AND status != 'deleted'", [type]);
     }
+    const now = Date.now();
     for (const row of before) {
         db.run('DELETE FROM documents_fts WHERE refId = ?', [row.refId]);
-    }
-    if (scope) {
-        db.run('DELETE FROM documents WHERE type = ? AND scope = ?', [type, scope]);
-    } else {
-        db.run('DELETE FROM documents WHERE type = ?', [type]);
+        db.run("UPDATE documents SET status = 'deleted', updatedAt = ? WHERE refId = ?", [now, row.refId]);
+        _audit(row.refId, 'delete', 0, 0, '', `removeByType(${type})`);
     }
     persist();
     return before.length;
 }
 
-/** Clean up expired documents based on TTL */
+/** Mark expired documents (TTL or validUntil) as status='expired' */
 function expireTTL() {
     if (!db) return 0;
     const now = Date.now();
     const expired = _queryAll(
-        'SELECT refId FROM documents WHERE ttl > 0 AND (createdAt + ttl) < ?',
-        [now]
+        `SELECT refId FROM documents WHERE status = 'active' AND (
+            (ttl > 0 AND (createdAt + ttl) < ?)
+            OR (validUntil > 0 AND validUntil < ?)
+        )`,
+        [now, now]
     );
     for (const row of expired) {
         db.run('DELETE FROM documents_fts WHERE refId = ?', [row.refId]);
+        db.run("UPDATE documents SET status = 'expired', updatedAt = ? WHERE refId = ?", [now, row.refId]);
+        _audit(row.refId, 'expire', 0, 0, '', 'TTL/validUntil expired');
     }
     if (expired.length > 0) {
-        db.run(
-            'DELETE FROM documents WHERE ttl > 0 AND (createdAt + ttl) < ?',
-            [now]
-        );
         persist();
     }
     return expired.length;
 }
 
-/** Get stats */
+/**
+ * Purge documents that have been soft-deleted or expired.
+ * @param {number} [olderThanDays=30] - Only purge docs deleted/expired more than N days ago
+ * @returns {number} Number of records purged
+ */
+function purge(olderThanDays = 30) {
+    if (!db) return 0;
+    const cutoff = Date.now() - (olderThanDays * 24 * 60 * 60 * 1000);
+    const targets = _queryAll(
+        "SELECT refId FROM documents WHERE status IN ('deleted', 'expired') AND updatedAt < ?",
+        [cutoff]
+    );
+    for (const row of targets) {
+        db.run('DELETE FROM documents WHERE refId = ?', [row.refId]);
+    }
+    if (targets.length) persist();
+    return targets.length;
+}
+
+// ==================== Stats ====================
+
 function stats() {
     if (!db) return { total: 0, byType: {} };
     const stmt1 = db.prepare('SELECT COUNT(*) as cnt FROM documents');
@@ -358,7 +678,7 @@ function stats() {
     stmt1.free();
 
     const byType = {};
-    const stmt2 = db.prepare('SELECT type, COUNT(*) as cnt FROM documents WHERE current = 1 GROUP BY type');
+    const stmt2 = db.prepare("SELECT type, COUNT(*) as cnt FROM documents WHERE status = 'active' GROUP BY type");
     while (stmt2.step()) {
         const row = stmt2.getAsObject();
         byType[row.type] = row.cnt;
@@ -387,11 +707,6 @@ const EXPAND_RULES = {
     match_result: ['profile', 'job_listing'],
 };
 
-/**
- * Given a list of matched types from search, expand to fetch all related docs.
- * @param {string[]} matchedTypes - Types found in search results
- * @returns {object[]} - All expanded documents
- */
 function expandByTypes(matchedTypes) {
     const typesToFetch = new Set();
     for (const t of matchedTypes) {
@@ -416,19 +731,25 @@ module.exports = {
     persist,
     genRefId,
     upsert,
+    promote,
     findByRef,
     findByType,
     findByTags,
     findByScope,
+    findResolved,
+    findFresh,
     search,
     remove,
+    hardRemove,
     removeByType,
     expireTTL,
+    purge,
+    getAuditLog,
     stats,
     close,
     expandByTypes,
     EXPAND_RULES,
-    // Expose for testing
+    SCOPE_HIERARCHY,
     _getDb: () => db,
     _reset: () => { db = null; sqlReady = null; dbPath = ''; }
 };

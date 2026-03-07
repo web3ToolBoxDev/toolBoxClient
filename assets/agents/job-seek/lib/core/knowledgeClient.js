@@ -99,6 +99,81 @@ async function remove(criteria) {
 }
 
 /**
+ * Promote a candidate document to current.
+ * @param {string} refId
+ */
+async function promote(refId) {
+    try {
+        return await request('POST', '/knowledge/promote', { refId });
+    } catch (err) {
+        console.error('[knowledgeClient] promote failed:', err.message);
+        return { success: false, error: err.message };
+    }
+}
+
+/**
+ * Get audit log for a document.
+ * @param {string} refId
+ * @param {number} [limit=50]
+ */
+async function audit(refId, limit = 50) {
+    try {
+        const result = await request('POST', '/knowledge/audit', { refId, limit });
+        return result?.results || [];
+    } catch (err) {
+        console.error('[knowledgeClient] audit failed:', err.message);
+        return [];
+    }
+}
+
+/**
+ * Walk scope hierarchy, return first matching document.
+ * @param {string} type
+ * @param {string} subType
+ * @param {string[]} scopes
+ */
+async function resolve(type, subType, scopes) {
+    try {
+        const result = await request('POST', '/knowledge/resolve', { type, subType, scopes });
+        return result?.result || null;
+    } catch (err) {
+        console.error('[knowledgeClient] resolve failed:', err.message);
+        return null;
+    }
+}
+
+/**
+ * Find fresh (non-stale) documents.
+ * @param {string} type
+ * @param {string} [scope]
+ * @param {number} [maxAgeDays=30]
+ */
+async function findFresh(type, scope, maxAgeDays = 30) {
+    try {
+        const result = await request('POST', '/knowledge/fresh', { type, scope, maxAgeDays });
+        return result?.results || [];
+    } catch (err) {
+        console.error('[knowledgeClient] findFresh failed:', err.message);
+        return [];
+    }
+}
+
+/**
+ * Register a domain pack with the knowledge store.
+ * @param {string} domain - Domain name (e.g., 'job-seek')
+ * @param {object} types - Type definitions to register
+ * @returns {Promise<{success: boolean}>}
+ */
+async function registerPack(domain, types) {
+    try {
+        return await request('POST', '/knowledge/register-pack', { domain, types });
+    } catch (err) {
+        console.error('[knowledgeClient] registerPack failed:', err.message);
+        return { success: false, error: err.message };
+    }
+}
+
+/**
  * Detect intent from user question and map to document types.
  * When FTS keyword search fails (questions don't contain data keywords),
  * this routes to the right documents based on what the user is asking about.
@@ -150,4 +225,4 @@ async function searchAndExpand(query) {
     return { docs: [], source: 'none' };
 }
 
-module.exports = { upsert, search, find, expand, remove, searchAndExpand, detectIntent };
+module.exports = { upsert, search, find, expand, remove, promote, audit, resolve, findFresh, registerPack, searchAndExpand, detectIntent };

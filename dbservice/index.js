@@ -258,6 +258,73 @@ async function handleKnowledgeStats(req, res) {
     }
 }
 
+async function handleKnowledgePromote(req, res) {
+    const body = await readBody(req);
+    if (!body.refId) {
+        return sendJSON(res, 400, { success: false, error: 'refId is required' });
+    }
+    try {
+        const ok = knowledgeStore.promote(body.refId);
+        sendJSON(res, 200, { success: ok });
+    } catch (err) {
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleKnowledgeAudit(req, res) {
+    const body = await readBody(req);
+    if (!body.refId) {
+        return sendJSON(res, 400, { success: false, error: 'refId is required' });
+    }
+    try {
+        const results = knowledgeStore.getAuditLog(body.refId, body.limit || 50);
+        sendJSON(res, 200, { success: true, results });
+    } catch (err) {
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleKnowledgeResolve(req, res) {
+    const body = await readBody(req);
+    if (!body.type || !Array.isArray(body.scopes)) {
+        return sendJSON(res, 400, { success: false, error: 'type and scopes[] are required' });
+    }
+    try {
+        const doc = knowledgeStore.findResolved(body.type, body.subType || '', body.scopes);
+        sendJSON(res, 200, { success: true, result: doc });
+    } catch (err) {
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleKnowledgeRegisterPack(req, res) {
+    const body = await readBody(req);
+    if (!body.domain || !body.types) {
+        return sendJSON(res, 400, { success: false, error: 'domain and types are required' });
+    }
+    try {
+        const schema = require('./lib/memorySchema');
+        schema.registerDomainPack(body.domain, { types: body.types });
+        sendJSON(res, 200, { success: true, domain: body.domain, typesRegistered: Object.keys(body.types) });
+    } catch (err) {
+        console.error('[dbservice] register-pack error:', err.message);
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleKnowledgeFresh(req, res) {
+    const body = await readBody(req);
+    if (!body.type) {
+        return sendJSON(res, 400, { success: false, error: 'type is required' });
+    }
+    try {
+        const results = knowledgeStore.findFresh(body.type, body.scope, body.maxAgeDays || 30);
+        sendJSON(res, 200, { success: true, results });
+    } catch (err) {
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
 // --------------- server ---------------
 
 const server = http.createServer(async (req, res) => {
@@ -304,6 +371,21 @@ const server = http.createServer(async (req, res) => {
         }
         if (url === '/knowledge/stats' && req.method === 'GET') {
             return await handleKnowledgeStats(req, res);
+        }
+        if (url === '/knowledge/promote' && req.method === 'POST') {
+            return await handleKnowledgePromote(req, res);
+        }
+        if (url === '/knowledge/audit' && req.method === 'POST') {
+            return await handleKnowledgeAudit(req, res);
+        }
+        if (url === '/knowledge/resolve' && req.method === 'POST') {
+            return await handleKnowledgeResolve(req, res);
+        }
+        if (url === '/knowledge/fresh' && req.method === 'POST') {
+            return await handleKnowledgeFresh(req, res);
+        }
+        if (url === '/knowledge/register-pack' && req.method === 'POST') {
+            return await handleKnowledgeRegisterPack(req, res);
         }
         sendJSON(res, 404, { success: false, error: 'Not found' });
     } catch (err) {
