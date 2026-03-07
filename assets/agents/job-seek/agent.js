@@ -298,11 +298,13 @@ function createSession(name = '') {
  * @returns {boolean} true if profile was seeded
  */
 async function seedProfileFromKnowledge(sessionId) {
+    console.log(`[agent:seed] attempting profile seed for session ${sessionId.slice(0, 8)}...`);
     try {
         await _packReady;
 
         let seededCount = 0;
         const profileDocs = await knowledgeClient.findFresh('profile', 'agent:job-seek', 30);
+        console.log(`[agent:seed] findFresh returned ${profileDocs.length} docs`);
         for (const doc of profileDocs) {
             const subType = doc.subType || doc.sub_type;
             const content = doc.content;
@@ -2156,8 +2158,7 @@ async function extractProfileFromConversation(sessionId) {
                 ? `个人档案已构建完成！已存储 ${stored} 个分区（${sectionKeys.join('、')}）。你现在可以开始搜索工作了。`
                 : `Profile built successfully! ${stored} sections stored (${sectionKeys.join(', ')}). You can now start searching for jobs.`);
             appendRuntimeLog(sessionId, `profile_from_conversation -> ${stored}/${sectionKeys.length} sections`, { source: 'knowledge' });
-            // Story 4.2: sync profile milestone to mem0
-            syncProfileToMem0(sessionId);
+            // Story 4.2: mem0 sync handled by subtask finish handler (caller)
             sendSnapshot();
             scheduleSave();
         }
