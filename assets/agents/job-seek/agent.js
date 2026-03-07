@@ -964,30 +964,29 @@ function resolveProvider() {
 
 /**
  * Invoke CLI (codex or claude) with a prompt. Returns Promise<string>.
- * When memoryContext is provided, writes it to a temp file to avoid shell escaping issues.
+ * Context is inlined into the prompt (not as a file path) so the AI never sees file references.
+ * Full prompt is written to a temp file to avoid shell escaping issues.
  */
 function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default') {
     return new Promise((resolve, reject) => {
-        const escaped = prompt.replace(/"/g, '\\"');
         let fullCmd;
         const modelFlag = (model && model !== 'default') ? ` --model ${model}` : '';
         const workspaceDir = path.join(__dirname, 'workspace');
 
-        // Write memory context to temp file if present (avoids shell escaping issues with newlines/special chars)
-        let contextFilePath = '';
-        if (memoryContext) {
-            contextFilePath = path.join(workspaceDir, `_context_${Date.now()}.txt`);
-            fs.writeFileSync(contextFilePath, memoryContext, 'utf-8');
-        }
+        // Build full prompt with context inlined (never expose file paths to the AI)
+        const fullPrompt = memoryContext
+            ? `[CONTEXT]\n${memoryContext}\n[/CONTEXT]\n\n${prompt}`
+            : prompt;
 
-        const contextInstruction = contextFilePath
-            ? `First, read the context file at ${contextFilePath} - it contains important background information about this user. Use that information to answer the following question. `
-            : '';
+        // Write to temp file to avoid shell escaping issues with special chars/newlines
+        const promptFilePath = path.join(workspaceDir, `_prompt_${Date.now()}.txt`);
+        fs.writeFileSync(promptFilePath, fullPrompt, 'utf-8');
+        const pf = promptFilePath.replace(/\\/g, '/');
 
         if (provider === 'codex-cli') {
-            fullCmd = `codex exec${modelFlag} "${contextInstruction}${escaped}"`;
+            fullCmd = `codex exec${modelFlag} "$(cat '${pf}')"`;
         } else {
-            fullCmd = `claude -p "${contextInstruction}${escaped}"${modelFlag}`;
+            fullCmd = `claude -p "$(cat '${pf}')"${modelFlag}`;
         }
         console.log(`[agent:cli] CMD (${provider}): ${fullCmd.slice(0, 200)}...`);
         let stdout = '';
@@ -1004,7 +1003,7 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default')
         child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
         child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
         const cleanupContext = () => {
-            if (contextFilePath) try { fs.unlinkSync(contextFilePath); } catch (_) {}
+            if (promptFilePath) try { fs.unlinkSync(promptFilePath); } catch (_) {}
         };
         child.on('close', (code) => {
             cleanupContext();
