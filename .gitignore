@@ -13,3 +13,4 @@ client/coverage/
 dbservice/node_modules/
 assets/agents/*/workspace/.git/
 assets/agents/*/data/
+tmp/
