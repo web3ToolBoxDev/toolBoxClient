@@ -325,14 +325,34 @@ async function seedSessionFromKnowledge(sessionId) {
         // Seed direction
         let seededDirection = false;
         const directionDocs = await knowledgeClient.findFresh('direction', 'agent:job-seek', 30);
-        if (directionDocs.length > 0) {
-            const dirDoc = directionDocs[0];
+        for (const dirDoc of directionDocs) {
+            if (!dirDoc.content) continue;
+            // Skip history entries — only use target
+            if ((dirDoc.subType || dirDoc.sub_type) === 'history') continue;
             try {
-                const dir = typeof dirDoc.content === 'string' ? JSON.parse(dirDoc.content) : dirDoc.content;
-                if (dir && typeof dir === 'object') {
+                let dir;
+                // applyMarkers stores as JSON, storeDirection stores as plain text
+                try {
+                    dir = JSON.parse(dirDoc.content);
+                } catch {
+                    // Parse plain text format: "Job Title: xxx\nLocation: yyy\n..."
+                    dir = {};
+                    for (const line of dirDoc.content.split('\n')) {
+                        const m = line.match(/^(.+?):\s*(.+)$/);
+                        if (!m) continue;
+                        const key = m[1].trim().toLowerCase();
+                        const val = m[2].trim();
+                        if (key.includes('job title')) dir.q_job_title = val;
+                        else if (key.includes('location')) dir.q_location = val;
+                        else if (key.includes('work mode')) dir.q_work_mode = val;
+                        else if (key.includes('salary')) dir.q_salary = val.replace(/K$/i, '');
+                    }
+                }
+                if (dir && typeof dir === 'object' && Object.keys(dir).length > 0) {
                     Object.assign(state.selectedAnswers[sessionId], dir);
                     state.prompts[sessionId] = _buildPresetPrompt(state.selectedAnswers[sessionId]);
                     seededDirection = true;
+                    break; // use first valid direction
                 }
             } catch (parseErr) {
                 console.warn('[agent:seed] direction parse failed:', parseErr.message);
