@@ -191,7 +191,7 @@ const buildProfileCollectionPrompt = (isZh, direction = {}) => {
 - 从列表移除单项: [PROFILE_REMOVE:skills=Vue]
 - 更新求职方向: [DIRECTION:q_job_title=后端工程师]
 
-section 必须是 basic、skills、experience、education 之一。
+section 必须是 basic、skills、experience、education、highlights 之一。
 当**首次**收集到足够信息后（至少有基本信息和技能），附加 [PROFILE_COMPLETE] 标记。
 注意：用户要求修改（添加/删除/替换）已有信息时，只用 SET/ADD/REMOVE 标记，不要附加 [PROFILE_COMPLETE]。
 用中文回复。`;
@@ -212,7 +212,7 @@ Guide the user step by step, asking about one category at a time. Be friendly an
 - Remove single item from list: [PROFILE_REMOVE:skills=Vue]
 - Update job direction: [DIRECTION:q_job_title=Backend Engineer]
 
-Section must be one of: basic, skills, experience, education.
+Section must be one of: basic, skills, experience, education, highlights.
 When you have enough info for the **first time** (at least basic info and skills), also append [PROFILE_COMPLETE].
 IMPORTANT: When the user asks to modify existing info (add/remove/replace), ONLY use SET/ADD/REMOVE markers. Do NOT append [PROFILE_COMPLETE] for modifications.
 Reply in the same language as the user.`;
@@ -282,7 +282,7 @@ const buildChatPrompt = (isZh) => {
 - 移除单项: [PROFILE_REMOVE:skills=Vue]
 - 更新求职方向: [DIRECTION:q_job_title=后端工程师]
 
-section 必须是 basic、skills、experience、education 之一。
+section 必须是 basic、skills、experience、education、highlights 之一。
 只在用户明确要求修改档案时才使用标记，普通对话不需要。`;
     }
     return `You are a professional career consultant AI assistant. Reply in the same language as the user.
@@ -293,7 +293,7 @@ When the user asks to modify their profile, record changes using markers at the 
 - Remove single item: [PROFILE_REMOVE:skills=Vue]
 - Update job direction: [DIRECTION:q_job_title=Backend Engineer]
 
-Section must be one of: basic, skills, experience, education.
+Section must be one of: basic, skills, experience, education, highlights.
 Only use markers when the user explicitly asks to modify their profile. Normal conversation does not need markers.`;
 };
 

@@ -838,8 +838,12 @@ function buildDashboard(sessionId) {
     ).join('\n');
 
     const sections = state.profileSections[sessionId] || {};
-    const skillsSummary = (sections.skills || '').trim().split('\n').slice(0, 5).join(', ') || '—';
-    const expSummary = (sections.experience || '').trim().split('\n').slice(0, 3).join(' | ') || '—';
+    const escHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const basicSummary = escHtml((sections.basic || '').trim().split('\n').slice(0, 3).join(' | ')) || '—';
+    const skillsSummary = escHtml((sections.skills || '').trim().split('\n').slice(0, 5).join(', ')) || '—';
+    const expSummary = escHtml((sections.experience || '').trim().split('\n').slice(0, 3).join(' | ')) || '—';
+    const eduSummary = escHtml((sections.education || '').trim().split('\n').slice(0, 3).join(' | ')) || '—';
+    const highlightsSummary = escHtml((sections.highlights || '').trim().split('\n').slice(0, 3).join(' | ')) || '';
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -891,8 +895,11 @@ function buildDashboard(sessionId) {
 <h2>Profile</h2>
 <div class="card">
   <div class="profile-summary">
+    <div class="item"><label>Basic Info</label><p>${basicSummary}</p></div>
     <div class="item"><label>Key Skills</label><p>${skillsSummary}</p></div>
     <div class="item"><label>Experience</label><p>${expSummary}</p></div>
+    <div class="item"><label>Education</label><p>${eduSummary}</p></div>${highlightsSummary ? `
+    <div class="item" style="grid-column: 1 / -1;"><label>Highlights</label><p>${highlightsSummary}</p></div>` : ''}
   </div>
 </div>
 

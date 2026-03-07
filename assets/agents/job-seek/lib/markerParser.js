@@ -12,7 +12,7 @@
  *   [ANSWER:field=value]           — onboarding answer extraction (existing)
  */
 
-const VALID_PROFILE_SECTIONS = new Set(['basic', 'skills', 'experience', 'education']);
+const VALID_PROFILE_SECTIONS = new Set(['basic', 'skills', 'experience', 'education', 'highlights']);
 const VALID_DIRECTION_FIELDS = new Set(['q_job_title', 'q_location', 'q_work_mode', 'q_salary']);
 
 const MARKER_REGEX = /\[(?:PROFILE_(SET|ADD|REMOVE)|DIRECTION|ANSWER):([^\]=]+)=([^\]]*)\]/g;
