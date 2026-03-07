@@ -23,6 +23,7 @@ function AgentWorkspace() {
     const [activeSessionId, setActiveSessionId] = useState('');
     const [conversations, setConversations] = useState({});
     const [subtasks, setSubtasks] = useState({});
+    const [subtaskLogs, setSubtaskLogs] = useState({});
     const [artifacts, setArtifacts] = useState({});
     const [runtimeLogs, setRuntimeLogs] = useState({});
     const [prompts, setPrompts] = useState({});
@@ -122,6 +123,7 @@ function AgentWorkspace() {
         setActiveSessionId(nextActiveId);
         setConversations(data.conversations || {});
         setSubtasks(data.subtasks || {});
+        setSubtaskLogs(data.subtaskLogs || {});
         setArtifacts(data.artifacts || {});
         setRuntimeLogs(data.runtimeLogs || {});
         setPrompts(data.prompts || {});
@@ -564,6 +566,11 @@ function AgentWorkspace() {
         sendAgent('agent_execution_control', { sessionId: activeSessionId, action });
     };
 
+    const handleSubtaskAction = useCallback((subtaskKey, action) => {
+        if (!activeSessionId || !isTaskRunning) return;
+        sendAgent('agent_subtask_action', { sessionId: activeSessionId, subtaskKey, action });
+    }, [activeSessionId, isTaskRunning, sendAgent]);
+
     const handleOpenArtifact = useCallback(async (artifact) => {
         const electronAPI = typeof window !== 'undefined' ? window.electronAPI : null;
         if (!electronAPI?.revealInFolder) {
@@ -584,7 +591,8 @@ function AgentWorkspace() {
         const payload = {
             filePath,
             basePath: savePathFromContext,
-            fallbackOpenPath: savePathFromContext
+            fallbackOpenPath: savePathFromContext,
+            openFile: Boolean(artifact?.openFile)
         };
         const result = await electronAPI.revealInFolder(payload);
         if (!result?.success) {
@@ -825,15 +833,17 @@ function AgentWorkspace() {
                             messages={conversations[activeSessionId] || []}
                             prompt={prompts[activeSessionId] || null}
                             subTasks={subtasks[activeSessionId] || []}
+                            subtaskLogs={subtaskLogs[activeSessionId] || {}}
                             artifacts={artifacts[activeSessionId] || []}
                             runtimeLogs={runtimeLogs[activeSessionId] || []}
-                            apiKeyConfigured={apiKeyConfigured}
+                            apiKeyConfigured={selectedProvider !== 'api-key' || apiKeyConfigured}
                             interactionDisabled={!isTaskRunning || activeExecutionState.paused || activeExecutionState.canceled}
                             onSendMessage={handleSendMessage}
                             onSelectOption={handleSelectOption}
                             onSubmitAnswer={handleSubmitAnswer}
                             onSendAttachments={handleSendAttachments}
                             onOpenArtifact={handleOpenArtifact}
+                            onSubtaskAction={handleSubtaskAction}
                             autoOpenPreset={autoOpenPresetSession === activeSessionId}
                             onAutoOpenPresetConsumed={() => setAutoOpenPresetSession('')}
                         />

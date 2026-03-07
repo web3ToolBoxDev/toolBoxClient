@@ -43,10 +43,15 @@ async function revealInFolder(payload = {}) {
   const targetPath = raw
     ? (path.isAbsolute(raw) ? raw : (base ? path.resolve(base, raw) : path.resolve(raw)))
     : '';
+  const shouldOpenFile = typeof payload === 'object' && payload?.openFile === true;
   try {
     if (targetPath && fs.existsSync(targetPath)) {
       const stat = fs.statSync(targetPath);
       if (stat.isFile()) {
+        if (shouldOpenFile) {
+          await shell.openPath(targetPath);
+          return { success: true, mode: 'open-file', path: targetPath };
+        }
         shell.showItemInFolder(targetPath);
         return { success: true, mode: 'select-file', path: targetPath };
       }

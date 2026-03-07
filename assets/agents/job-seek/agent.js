@@ -95,6 +95,7 @@ const state = {
     sessions: [],
     conversations: {},
     subtasks: {},
+    subtaskLogs: {},
     artifacts: {},
     runtimeLogs: {},
     prompts: {},
@@ -112,7 +113,8 @@ const state = {
     chromePath: '',
     savePath: '',
     walletExtensionPath: '',
-    resumeProfile: ''
+    resumeProfile: '',
+    intentFiles: {}
 };
 
 // Track active browser instances (not persisted)
@@ -136,9 +138,19 @@ function restoreState() {
         if (state.onboardingComplete[sid] === undefined) state.onboardingComplete[sid] = false;
         if (!state.profileSections[sid]) state.profileSections[sid] = {};
         if (state.profileCollectionMode[sid] === undefined) state.profileCollectionMode[sid] = false;
+        if (!state.subtaskLogs[sid]) state.subtaskLogs[sid] = {};
         // Refresh prompts from current templates to pick up newly supported kinds / text changes
         if (state.prompts[sid]) {
             state.prompts[sid] = _buildPresetPrompt(state.selectedAnswers[sid] || {});
+        }
+        // Migrate subtasks: remove deprecated keys (match, resume, coverLetter)
+        const VALID_SUBTASK_KEYS = new Set(['onboarding', 'profile', 'search']);
+        if (Array.isArray(state.subtasks[sid])) {
+            const before = state.subtasks[sid].length;
+            state.subtasks[sid] = state.subtasks[sid].filter((t) => VALID_SUBTASK_KEYS.has(t.key));
+            if (state.subtasks[sid].length !== before) {
+                console.log(`[agent] Migrated subtasks for ${sid}: ${before} -> ${state.subtasks[sid].length}`);
+            }
         }
     }
     console.log(`[agent] Restored ${state.sessions.length} sessions`);
@@ -193,6 +205,7 @@ function sendSnapshot() {
         sessions: state.sessions,
         conversations: state.conversations,
         subtasks: state.subtasks,
+        subtaskLogs: state.subtaskLogs,
         artifacts: state.artifacts,
         runtimeLogs: state.runtimeLogs,
         prompts: state.prompts,
@@ -227,6 +240,7 @@ function createSession(name = '') {
     state.activeSessionId = session.id;
     state.conversations[session.id] = [];
     state.subtasks[session.id] = defaultSubTasks(now());
+    state.subtaskLogs[session.id] = {};
     state.artifacts[session.id] = [];
     state.runtimeLogs[session.id] = [];
     state.prompts[session.id] = _buildPresetPrompt(selectedMap);
@@ -242,8 +256,8 @@ function createSession(name = '') {
     state.profileSections[session.id] = {};
     state.profileCollectionMode[session.id] = false;
     appendConversation(session.id, 'assistant', isZh()
-        ? '欢迎使用求职助手！请先回答以下问题来设定本次求职方向。完成后即可开始对话。'
-        : 'Welcome to Job Seek Assistant! Please answer the onboarding questions below to set your job search direction. Chat will be unlocked once required questions are completed.');
+        ? '欢迎使用求职助手！请先点击右上角「运行时设置」选择 AI 供应商并点击「应用模型」启动会话，然后回答预设问题来设定求职方向。'
+        : 'Welcome to Job Seek Assistant! To get started, click "Runtime Settings" in the top right to select your AI provider, then click "Apply Model" to start the session. After that, answer the preset questions to set your job search direction.');
     appendRuntimeLog(session.id, 'Session created', { source: 'system' });
     emitSessionList();
     sendSnapshot();
@@ -256,6 +270,7 @@ function deleteSession(sessionId) {
     state.sessions = state.sessions.filter((item) => item.id !== id);
     delete state.conversations[id];
     delete state.subtasks[id];
+    delete state.subtaskLogs[id];
     delete state.artifacts[id];
     delete state.runtimeLogs[id];
     delete state.prompts[id];
@@ -267,6 +282,7 @@ function deleteSession(sessionId) {
     delete state.onboardingComplete[id];
     delete state.profileSections[id];
     delete state.profileCollectionMode[id];
+    delete state.intentFiles[id];
     if (!state.sessions.length) {
         createSession('');
         return;
@@ -382,6 +398,17 @@ function appendRuntimeLog(sessionId, text, extra = {}) {
 
 // --------------- sub-task progression ---------------
 
+function appendSubtaskLog(sessionId, subtaskKey, text, extra = {}) {
+    if (!state.subtaskLogs[sessionId]) state.subtaskLogs[sessionId] = {};
+    if (!state.subtaskLogs[sessionId][subtaskKey]) state.subtaskLogs[sessionId][subtaskKey] = [];
+    const entry = { id: genId('stlog'), time: now(), text, ...extra };
+    state.subtaskLogs[sessionId][subtaskKey].push(entry);
+    // Keep max 200 logs per subtask
+    if (state.subtaskLogs[sessionId][subtaskKey].length > 200) {
+        state.subtaskLogs[sessionId][subtaskKey] = state.subtaskLogs[sessionId][subtaskKey].slice(-200);
+    }
+}
+
 function updateSubTasks(sessionId, updater) {
     const source = state.subtasks[sessionId] || defaultSubTasks(now());
     const next = updater(source.map((item) => ({ ...item })));
@@ -393,11 +420,13 @@ function updateSubTasks(sessionId, updater) {
     emit('agent_subtask_update', { sessionId, items: next });
     next.forEach((item) => {
         if (prevStatusMap[item.key] !== item.status) {
+            const logText = `${item.key} -> ${item.status}`;
             appendRuntimeLog(
                 sessionId,
-                `${item.key} -> ${item.status}`,
+                logText,
                 { key: item.key, status: item.status, updatedAt: item.updatedAt || now(), source: 'subtask' }
             );
+            appendSubtaskLog(sessionId, item.key, logText, { level: 'info', status: item.status });
         }
     });
 }
@@ -415,6 +444,129 @@ function moveSubTaskForward(sessionId) {
         }
         return items;
     });
+}
+
+// --------------- subtask actions (start / restart) ---------------
+
+function handleSubtaskAction(payload = {}) {
+    const sessionId = payload.sessionId || state.activeSessionId;
+    if (!sessionId || !state.conversations[sessionId]) {
+        emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
+        return;
+    }
+    const subtaskKey = String(payload.subtaskKey || '').trim();
+    const action = String(payload.action || 'start').trim();
+    if (!subtaskKey) return;
+
+    const items = state.subtasks[sessionId] || [];
+    const target = items.find((i) => i.key === subtaskKey);
+    if (!target) return;
+
+    if (target.status === 'pending') {
+        appendConversation(sessionId, 'assistant', isZh()
+            ? `子任务 "${subtaskKey}" 尚未解锁，请先完成前置步骤。`
+            : `Subtask "${subtaskKey}" is not unlocked yet. Please complete prior steps first.`);
+        sendSnapshot();
+        return;
+    }
+
+    // Finish action: mark current subtask done, unlock next pending subtask
+    if (action === 'finish') {
+        if (target.status !== 'running') {
+            sendSnapshot();
+            return;
+        }
+        updateSubTasks(sessionId, (list) => {
+            const idx = list.findIndex((i) => i.key === subtaskKey);
+            if (idx >= 0) {
+                list[idx].status = 'done';
+                list[idx].updatedAt = now();
+                // Unlock next pending subtask
+                if (list[idx + 1] && list[idx + 1].status === 'pending') {
+                    list[idx + 1].status = 'running';
+                    list[idx + 1].updatedAt = now();
+                }
+            }
+            return list;
+        });
+        appendSubtaskLog(sessionId, subtaskKey,
+            isZh() ? '子任务已完成' : 'Subtask finished',
+            { level: 'info' }
+        );
+        appendConversation(sessionId, 'assistant', isZh()
+            ? `子任务已完成：${subtaskKey}`
+            : `Subtask finished: ${subtaskKey}`);
+
+        // Build intent file + dashboard when Profile Collection finishes
+        if (subtaskKey === 'profile') {
+            try {
+                const { filePath: intentPath, version } = buildIntentFile(sessionId);
+                // Remove old intent/dashboard artifacts before adding new ones
+                if (state.artifacts[sessionId]) {
+                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(
+                        (a) => a.type !== 'intent' && a.type !== 'dashboard'
+                    );
+                }
+                appendArtifact(sessionId, {
+                    id: `intent-${sessionId}-v${version}`,
+                    type: 'intent',
+                    title: isZh() ? `求职意向 (v${version})` : `Job Search Intent (v${version})`,
+                    filePath: intentPath,
+                    openFile: true
+                });
+                const { filePath: dashPath } = buildDashboard(sessionId);
+                appendArtifact(sessionId, {
+                    id: `dashboard-${sessionId}-v${version}`,
+                    type: 'dashboard',
+                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
+                    filePath: dashPath,
+                    openFile: true
+                });
+                appendSubtaskLog(sessionId, subtaskKey,
+                    isZh() ? `意向文件已生成 (v${version})` : `Intent file generated (v${version})`,
+                    { level: 'info' }
+                );
+            } catch (err) {
+                console.error('[agent] buildIntentFile/dashboard failed:', err);
+                appendRuntimeLog(sessionId, `intent_build_error -> ${err.message}`, { source: 'error' });
+            }
+        }
+
+        sendSnapshot();
+        scheduleSave();
+        return;
+    }
+
+    const isRestart = action === 'restart' || target.status === 'done' || target.status === 'failed';
+
+    updateSubTasks(sessionId, (list) => {
+        const idx = list.findIndex((i) => i.key === subtaskKey);
+        if (idx < 0) return list;
+        list[idx].status = 'running';
+        list[idx].updatedAt = now();
+        // Reset all downstream subtasks to pending (e.g., restarting profile resets search/match/resume)
+        for (let i = idx + 1; i < list.length; i++) {
+            if (list[i].status !== 'pending') {
+                list[i].status = 'pending';
+                list[i].updatedAt = now();
+            }
+        }
+        return list;
+    });
+
+    appendSubtaskLog(sessionId, subtaskKey,
+        isRestart
+            ? (isZh() ? '子任务已重新启动' : 'Subtask restarted')
+            : (isZh() ? '子任务已启动' : 'Subtask started'),
+        { level: 'info' }
+    );
+
+    appendConversation(sessionId, 'assistant', isZh()
+        ? `${isRestart ? '重新启动' : '启动'}子任务：${subtaskKey}`
+        : `${isRestart ? 'Restarting' : 'Starting'} subtask: ${subtaskKey}`);
+
+    sendSnapshot();
+    scheduleSave();
 }
 
 // --------------- execution control ---------------
@@ -478,6 +630,182 @@ function appendArtifact(sessionId, artifact) {
     state.artifacts[sessionId].push(artifact);
     emit('agent_artifact_update', { sessionId, append: [artifact] });
     appendRuntimeLog(sessionId, `artifact -> ${artifact?.title || artifact?.type || 'artifact'}`, { source: 'artifact' });
+}
+
+// --------------- intent file & dashboard ---------------
+
+function buildIntentFile(sessionId) {
+    const answers = state.selectedAnswers[sessionId] || {};
+    const sections = state.profileSections[sessionId] || {};
+    const resumeRaw = state.resumeProfile || '';
+    const prev = state.intentFiles[sessionId];
+    const version = prev ? (prev.version || 0) + 1 : 1;
+    const builtAt = new Date().toISOString();
+
+    const direction = {
+        jobTitle: answers.q_job_title || '',
+        location: answers.q_location || '',
+        workMode: answers.q_work_mode || '',
+        salary: answers.q_salary || ''
+    };
+
+    // Build markdown
+    const lines = [
+        `# Job Search Intent (v${version})`,
+        `Built: ${builtAt.replace('T', ' ').slice(0, 19)}`,
+        '',
+        '## Direction',
+        direction.jobTitle ? `- **Job Title:** ${direction.jobTitle}` : '',
+        direction.location ? `- **Location:** ${direction.location}` : '',
+        direction.workMode ? `- **Work Mode:** ${direction.workMode}` : '',
+        direction.salary ? `- **Target Salary:** ${direction.salary}K` : '',
+        ''
+    ].filter(Boolean);
+
+    lines.push('## Profile', '');
+    const sectionOrder = ['basic', 'skills', 'experience', 'education'];
+    const sectionLabels = { basic: 'Basic Info', skills: 'Skills', experience: 'Experience', education: 'Education' };
+    for (const key of sectionOrder) {
+        const content = sections[key] || '';
+        if (content.trim()) {
+            lines.push(`### ${sectionLabels[key] || key}`, content.trim(), '');
+        }
+    }
+    // Include any extra sections not in the standard order
+    for (const [key, content] of Object.entries(sections)) {
+        if (!sectionOrder.includes(key) && content && content.trim()) {
+            lines.push(`### ${key}`, content.trim(), '');
+        }
+    }
+
+    if (resumeRaw && !Object.keys(sections).length) {
+        lines.push('### Resume (Raw)', resumeRaw.trim(), '');
+    }
+
+    const markdown = lines.join('\n');
+
+    // Write to workspace
+    const sessionDir = path.join(_workspaceDir, sessionId);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const intentPath = path.join(sessionDir, 'intent.md');
+    fs.writeFileSync(intentPath, markdown, 'utf-8');
+
+    // Store in state
+    state.intentFiles[sessionId] = { version, builtAt, direction, filePath: intentPath };
+
+    return { markdown, filePath: intentPath, version };
+}
+
+function buildDashboard(sessionId) {
+    const intent = state.intentFiles[sessionId];
+    const answers = state.selectedAnswers[sessionId] || {};
+    const subtasks = state.subtasks[sessionId] || [];
+
+    const statusIcon = (s) => s === 'done' ? '✅' : s === 'running' ? '▶️' : s === 'failed' ? '❌' : '⏳';
+    const subtaskRows = subtasks.map((t) =>
+        `<tr><td>${statusIcon(t.status)}</td><td>${t.key}</td><td>${t.status}</td></tr>`
+    ).join('\n');
+
+    const sections = state.profileSections[sessionId] || {};
+    const skillsSummary = (sections.skills || '').trim().split('\n').slice(0, 5).join(', ') || '—';
+    const expSummary = (sections.experience || '').trim().split('\n').slice(0, 3).join(' | ') || '—';
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Search Dashboard</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1b2e; color: #dfe3ff; padding: 2rem; margin: 0; }
+  h1 { color: #8b9aff; border-bottom: 2px solid #2d2f4a; padding-bottom: 0.5rem; }
+  h2 { color: #6a7eff; margin-top: 2rem; }
+  .card { background: #242640; border: 1px solid #2d2f4a; border-radius: 8px; padding: 1.2rem; margin-bottom: 1rem; }
+  .card h3 { margin-top: 0; color: #8b9aff; }
+  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+  th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #2d2f4a; }
+  th { color: #9da0c3; font-weight: 600; }
+  .direction-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .direction-item { background: #2d2f4a; border-radius: 6px; padding: 0.75rem; }
+  .direction-item label { display: block; color: #9da0c3; font-size: 0.8rem; margin-bottom: 0.25rem; }
+  .direction-item span { font-size: 1.1rem; font-weight: 500; }
+  .meta { color: #7a7fa8; font-size: 0.8rem; margin-top: 0.5rem; }
+  .feature-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 0.5rem; }
+  .feature-card { background: #2d2f4a; border: 1px dashed #3d4060; border-radius: 8px; padding: 1.2rem; text-align: center; }
+  .feature-card .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+  .feature-card h4 { color: #8b9aff; margin: 0 0 0.4rem 0; }
+  .feature-card p { color: #9da0c3; font-size: 0.85rem; margin: 0; }
+  .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; background: rgba(106,126,255,0.2); color: #8b9aff; margin-top: 0.5rem; }
+  .profile-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .profile-summary .item { background: #2d2f4a; border-radius: 6px; padding: 0.75rem; }
+  .profile-summary .item label { display: block; color: #9da0c3; font-size: 0.8rem; margin-bottom: 0.25rem; }
+  .profile-summary .item p { margin: 0; font-size: 0.9rem; color: #c4c8ee; }
+</style>
+</head>
+<body>
+<h1>Job Search Dashboard</h1>
+<p class="meta">Session: ${sessionId.slice(0, 8)} | Intent v${intent?.version || 1} | Built: ${intent?.builtAt ? intent.builtAt.replace('T', ' ').slice(0, 19) : 'N/A'}</p>
+
+<h2>Direction</h2>
+<div class="card">
+  <div class="direction-grid">
+    <div class="direction-item"><label>Job Title</label><span>${answers.q_job_title || '—'}</span></div>
+    <div class="direction-item"><label>Location</label><span>${answers.q_location || '—'}</span></div>
+    <div class="direction-item"><label>Work Mode</label><span>${answers.q_work_mode || '—'}</span></div>
+    <div class="direction-item"><label>Target Salary</label><span>${answers.q_salary ? answers.q_salary + 'K' : '—'}</span></div>
+  </div>
+</div>
+
+<h2>Profile</h2>
+<div class="card">
+  <div class="profile-summary">
+    <div class="item"><label>Key Skills</label><p>${skillsSummary}</p></div>
+    <div class="item"><label>Experience</label><p>${expSummary}</p></div>
+  </div>
+</div>
+
+<h2>Workflow Progress</h2>
+<div class="card">
+  <table>
+    <thead><tr><th></th><th>Step</th><th>Status</th></tr></thead>
+    <tbody>
+${subtaskRows}
+    </tbody>
+  </table>
+</div>
+
+<h2>Job Search Tools</h2>
+<div class="feature-grid">
+  <div class="feature-card">
+    <div class="icon">🔍</div>
+    <h4>Match Jobs</h4>
+    <p>Score and rank job postings against your profile and preferences</p>
+    <span class="badge">Coming Soon</span>
+  </div>
+  <div class="feature-card">
+    <div class="icon">📄</div>
+    <h4>Resume Builder</h4>
+    <p>Generate tailored resumes for each job target</p>
+    <span class="badge">Coming Soon</span>
+  </div>
+  <div class="feature-card">
+    <div class="icon">✉️</div>
+    <h4>Cover Letter</h4>
+    <p>Write customized cover letters per application</p>
+    <span class="badge">Coming Soon</span>
+  </div>
+</div>
+
+</body>
+</html>`;
+
+    const sessionDir = path.join(_workspaceDir, sessionId);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const dashboardPath = path.join(sessionDir, 'dashboard.html');
+    fs.writeFileSync(dashboardPath, html, 'utf-8');
+
+    return { filePath: dashboardPath };
 }
 
 // --------------- provider detection & CLI ---------------
@@ -663,13 +991,9 @@ function updateLanguage(nextLang) {
  */
 function extractEnvWalletData(runtimeContext) {
     if (!runtimeContext || typeof runtimeContext !== 'object') return;
-    if (Array.isArray(runtimeContext.envs) && runtimeContext.envs.length) {
-        state.envs = runtimeContext.envs;
-    }
-    if (Array.isArray(runtimeContext.wallets) && runtimeContext.wallets.length) {
-        state.wallets = runtimeContext.wallets;
-    }
-    if (runtimeContext.envsData && typeof runtimeContext.envsData === 'object' && Object.keys(runtimeContext.envsData).length) {
+    state.envs = Array.isArray(runtimeContext.envs) ? runtimeContext.envs : [];
+    state.wallets = Array.isArray(runtimeContext.wallets) ? runtimeContext.wallets : [];
+    if (runtimeContext.envsData && typeof runtimeContext.envsData === 'object') {
         state.envsData = runtimeContext.envsData;
     }
     if (runtimeContext.chromePath) state.chromePath = runtimeContext.chromePath;
@@ -689,12 +1013,13 @@ function announceRuntimeContext() {
     const walletPath = state.walletExtensionPath ? `, metamaskPath=${state.walletExtensionPath}` : '';
     const { provider, reason } = resolveProvider();
     const providerInfo = provider ? `${provider} (${reason})` : `none (${reason})`;
-    appendConversation(
+    // Technical context goes to onboarding subtask log, not main conversation
+    appendSubtaskLog(
         state.activeSessionId,
-        'assistant',
+        'onboarding',
         isZh()
-            ? `运行上下文已加载：provider=${providerInfo}, mode=${mode}, env=[${envNames}](${envCount}), wallet=[${walletNames}](${walletCount}), model=${model}${walletPath}`
-            : `Runtime context loaded: provider=${providerInfo}, mode=${mode}, env=[${envNames}](${envCount}), wallet=[${walletNames}](${walletCount}), model=${model}${walletPath}`
+            ? `运行上下文：provider=${providerInfo}, env=${envCount}, wallet=${walletCount}, model=${model}`
+            : `Runtime context: provider=${providerInfo}, env=${envCount}, wallet=${walletCount}, model=${model}`
     );
     appendRuntimeLog(
         state.activeSessionId,
@@ -886,11 +1211,6 @@ function handleUserOption(payload = {}) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
         return;
     }
-    if (!hasBackend()) {
-        const { reason } = resolveProvider();
-        appendConversation(sessionId, 'assistant', isZh() ? `\u672A\u68C0\u6D4B\u5230\u53EF\u7528\u7684 AI \u540E\u7AEF\uFF1A${reason}\u3002\u8BF7\u5B89\u88C5 Codex CLI / Claude Code\uFF0C\u6216\u586B\u5199 API Key\u3002` : `No AI backend available: ${reason}. Please install Codex CLI / Claude Code, or configure an API Key.`);
-        return;
-    }
     const execution = getExecutionState(sessionId);
     if (execution.canceled) {
         appendConversation(sessionId, 'assistant', isZh() ? '\u5F53\u524D\u4F1A\u8BDD\u5DF2\u53D6\u6D88\uFF0C\u8BF7\u5148\u70B9\u51FB\u91CD\u8BD5\u540E\u7EE7\u7EED\u3002' : 'Current session is canceled. Please retry before continuing.');
@@ -907,27 +1227,22 @@ function handleUserOption(payload = {}) {
     const model = String(payload.model || runtimeContext?.model || state.currentModel || 'default');
     updateModel(model);
     if (!optionLabel || !optionId) return;
-    appendConversation(sessionId, 'user', `[option] ${optionLabel}`);
-    appendRuntimeLog(sessionId, `user_option -> ${questionId || 'unknown'}:${optionId}`, { source: 'user' });
-    appendConversation(sessionId, 'assistant', isZh() ? `\u4F60\u9009\u62E9\u4E86\uFF1A${optionLabel}` : `You selected: ${optionLabel}`);
-    if (runtimeContext && (runtimeContext.mode || (Array.isArray(runtimeContext.envIds) && runtimeContext.envIds.length) || (Array.isArray(runtimeContext.walletIds) && runtimeContext.walletIds.length))) {
-        appendConversation(
-            sessionId,
-            'assistant',
-            isZh()
-                ? `\u5DF2\u5728\u4E0A\u4E0B\u6587\u4E2D\u6267\u884C\uFF1Amode=${runtimeContext.mode || 'unknown'}, model=${model}`
-                : `Executed with context: mode=${runtimeContext.mode || 'unknown'}, model=${model}`
-        );
+    const isPresetQ = _getTemplates().some((q) => q.id === questionId);
+    if (isPresetQ) {
+        // Preset answers go to onboarding subtask log, keep conversation clean
+        appendSubtaskLog(sessionId, 'onboarding', isZh()
+            ? `预设选择：${optionLabel}`
+            : `Preset selected: ${optionLabel}`);
+    } else {
+        appendConversation(sessionId, 'user', `[option] ${optionLabel}`);
+        appendConversation(sessionId, 'assistant', isZh() ? `\u4F60\u9009\u62E9\u4E86\uFF1A${optionLabel}` : `You selected: ${optionLabel}`);
     }
+    appendRuntimeLog(sessionId, `user_option -> ${questionId || 'unknown'}:${optionId}`, { source: 'user' });
     if (!state.selectedAnswers[sessionId] || typeof state.selectedAnswers[sessionId] !== 'object') {
         state.selectedAnswers[sessionId] = {};
     }
     const selectedMap = state.selectedAnswers[sessionId];
-    const beforeAnswered = _getTemplates()
-        .filter((q) => q.type !== 'upload')
-        .filter((q) => String(selectedMap[q.id] || '').trim().length > 0).length;
-    const isPresetQuestion = _getTemplates().some((q) => q.id === questionId);
-    if (questionId && isPresetQuestion) {
+    if (questionId && isPresetQ) {
         selectedMap[questionId] = optionId;
     }
     if (questionId === 'q_execute_mode') {
@@ -961,11 +1276,6 @@ function handleUserAnswer(payload = {}) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
         return;
     }
-    if (!hasBackend()) {
-        const { reason } = resolveProvider();
-        appendConversation(sessionId, 'assistant', isZh() ? `\u672A\u68C0\u6D4B\u5230\u53EF\u7528\u7684 AI \u540E\u7AEF\uFF1A${reason}\u3002\u8BF7\u5B89\u88C5 Codex CLI / Claude Code\uFF0C\u6216\u586B\u5199 API Key\u3002` : `No AI backend available: ${reason}. Please install Codex CLI / Claude Code, or configure an API Key.`);
-        return;
-    }
     const execution = getExecutionState(sessionId);
     if (execution.canceled) {
         appendConversation(sessionId, 'assistant', isZh() ? '\u5F53\u524D\u4F1A\u8BDD\u5DF2\u53D6\u6D88\uFF0C\u8BF7\u5148\u70B9\u51FB\u91CD\u8BD5\u540E\u7EE7\u7EED\u3002' : 'Current session is canceled. Please retry before continuing.');
@@ -985,9 +1295,17 @@ function handleUserAnswer(payload = {}) {
     }
     state.selectedAnswers[sessionId][questionId] = answer;
     state.prompts[sessionId] = _buildPresetPrompt(state.selectedAnswers[sessionId]);
-    appendConversation(sessionId, 'user', `[answer] ${questionText}: ${answer}`);
+    const isPresetQ = _getTemplates().some((q) => q.id === questionId);
+    if (isPresetQ) {
+        // Preset answers go to onboarding subtask log, keep conversation clean
+        appendSubtaskLog(sessionId, 'onboarding', isZh()
+            ? `预设输入 ${questionText}: ${answer}`
+            : `Preset input ${questionText}: ${answer}`);
+    } else {
+        appendConversation(sessionId, 'user', `[answer] ${questionText}: ${answer}`);
+        appendConversation(sessionId, 'assistant', isZh() ? '\u5DF2\u8BB0\u5F55\u8BE5\u8F93\u5165\u3002' : 'Input recorded.');
+    }
     appendRuntimeLog(sessionId, `user_answer -> ${questionId}:${answer}`, { source: 'user' });
-    appendConversation(sessionId, 'assistant', isZh() ? '\u5DF2\u8BB0\u5F55\u8BE5\u8F93\u5165\u3002' : 'Input recorded.');
 
     // Check onboarding completion after answer
     checkAndCompleteOnboarding(sessionId);
@@ -1598,6 +1916,7 @@ function handleExecutionControl(payload = {}) {
     }
     if (action === 'retry') {
         state.subtasks[sessionId] = defaultSubTasks(now());
+        state.subtaskLogs[sessionId] = {};
         state.selectedAnswers[sessionId] = {};
         state.prompts[sessionId] = _buildPresetPrompt({});
         state.executionStates[sessionId] = { paused: true, canceled: false, started: false };
@@ -1631,18 +1950,16 @@ function handleSessionContextUpdate(payload = {}) {
     extractEnvWalletData(runtimeContext);
     const providerDisplay = state.currentProvider || 'auto';
     const modelDisplay = runtimeContext.model || state.currentModel;
-    const envNames = state.envs.map((e) => e.name || e.id || '?').join(', ') || 'none';
-    const walletNames = state.wallets.map((w) => w.name || w.id || '?').join(', ') || 'none';
-    appendConversation(
-        sessionId,
-        'assistant',
-        isZh()
-            ? `会话上下文已更新：mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=[${envNames}](${state.envs.length}), wallet=[${walletNames}](${state.wallets.length}), model=${modelDisplay}`
-            : `Session context updated: mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=[${envNames}](${state.envs.length}), wallet=[${walletNames}](${state.wallets.length}), model=${modelDisplay}`
-    );
+    const envCount = state.envs.length;
+    const walletCount = state.wallets.length;
+    // Technical context details go to onboarding subtask log, not main conversation
+    const contextSummary = `provider=${providerDisplay}, env=${envCount}, wallet=${walletCount}, model=${modelDisplay}`;
+    appendSubtaskLog(sessionId, 'onboarding', isZh()
+        ? `上下文已更新：${contextSummary}`
+        : `Context updated: ${contextSummary}`);
     appendRuntimeLog(
         sessionId,
-        `session_context_updated -> mode=${runtimeContext.mode || 'unknown'}, provider=${providerDisplay}, env=${state.envs.length}, wallet=${state.wallets.length}, model=${modelDisplay}`,
+        `session_context_updated -> mode=${runtimeContext.mode || 'unknown'}, ${contextSummary}`,
         { source: 'context' }
     );
 
@@ -1650,12 +1967,28 @@ function handleSessionContextUpdate(payload = {}) {
     const execState = getExecutionState(sessionId);
     if (!execState.started) {
         setExecutionState(sessionId, { paused: false, canceled: false, started: true });
+        // Start onboarding subtask
+        updateSubTasks(sessionId, (items) => {
+            const ob = items.find((i) => i.key === 'onboarding');
+            if (ob && ob.status === 'pending') {
+                ob.status = 'running';
+                ob.updatedAt = now();
+            }
+            return items;
+        });
         const questionCount = _getTemplates().length;
         appendConversation(sessionId, 'assistant', isZh()
             ? `会话已启动！有 ${questionCount} 个预设问题帮助设定你的求职方向，你可以随时修改。开始求职功能前需要完成必填项。`
             : `Session started! There are ${questionCount} preset questions to set your job search direction. You can change them any time. Required fields must be completed before using job search features.`);
         // Tell frontend to auto-open preset modal
         emit('agent_auto_open_preset', { sessionId });
+    } else {
+        // On subsequent Apply Model, auto-open preset if required answers are still empty
+        const selectedMap = state.selectedAnswers[sessionId] || {};
+        const templates = _getTemplates();
+        if (!isOnboardingComplete(selectedMap, templates)) {
+            emit('agent_auto_open_preset', { sessionId });
+        }
     }
 
     sendSnapshot();
@@ -1861,6 +2194,10 @@ function initWebSocket() {
                 updateLanguage(data?.payload?.language);
                 updateApiKeyConfiguredHint(data?.payload?.apiKeyConfigured);
                 handleExecutionControl(data?.payload || {});
+                break;
+            case 'agent_subtask_action':
+                updateLanguage(data?.payload?.language);
+                handleSubtaskAction(data?.payload || {});
                 break;
             case 'agent_launch_browser':
                 handleLaunchBrowser(data?.payload || {});

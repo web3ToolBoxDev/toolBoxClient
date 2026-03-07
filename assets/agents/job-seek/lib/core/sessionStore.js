@@ -14,6 +14,7 @@ const PERSIST_KEYS = [
     'activeSessionId',
     'conversations',
     'subtasks',
+    'subtaskLogs',
     'artifacts',
     'prompts',
     'stages',
@@ -33,7 +34,8 @@ const PERSIST_KEYS = [
     'chromePath',
     'savePath',
     'walletExtensionPath',
-    'resumeProfile'
+    'resumeProfile',
+    'intentFiles'
 ];
 
 /**

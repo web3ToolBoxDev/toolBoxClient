@@ -81,11 +81,22 @@ describe('prompts.js', () => {
     });
 
     describe('defaultSubTasks', () => {
-        it('includes onboarding as first task', () => {
+        it('returns 3 subtasks: onboarding, profile, search', () => {
             const tasks = defaultSubTasks(Date.now());
+            expect(tasks).toHaveLength(3);
             expect(tasks[0].key).toBe('onboarding');
-            expect(tasks[0].status).toBe('running');
+            expect(tasks[0].status).toBe('pending');
             expect(tasks[1].key).toBe('profile');
+            expect(tasks[2].key).toBe('search');
+        });
+
+        it('includes actionLabel on action subtasks', () => {
+            const tasks = defaultSubTasks(Date.now());
+            const profile = tasks.find((t) => t.key === 'profile');
+            expect(profile.actionLabel).toBe('Collect Profile');
+            const search = tasks.find((t) => t.key === 'search');
+            expect(search.actionLabel).toBe('Start Search');
+            expect(search.actionLabelZh).toBe('开始搜索');
         });
     });
 

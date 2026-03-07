@@ -125,12 +125,9 @@ const isProfileComplete = (profileSections = {}) => {
 };
 
 const defaultSubTasks = (now) => ([
-    { key: 'onboarding', status: 'running', updatedAt: now },
-    { key: 'profile', status: 'pending', updatedAt: now },
-    { key: 'search', status: 'pending', updatedAt: now },
-    { key: 'match', status: 'pending', updatedAt: now },
-    { key: 'resume', status: 'pending', updatedAt: now },
-    { key: 'coverLetter', status: 'pending', updatedAt: now }
+    { key: 'onboarding', status: 'pending', updatedAt: now },
+    { key: 'profile', status: 'pending', actionLabel: 'Collect Profile', actionLabelZh: '收集档案', updatedAt: now },
+    { key: 'search', status: 'pending', actionLabel: 'Start Search', actionLabelZh: '开始搜索', updatedAt: now }
 ]);
 
 const buildPresetPrompt = (isZh, selectedMap = {}, questionTemplates) => ({
