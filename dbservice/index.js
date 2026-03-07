@@ -371,7 +371,7 @@ const server = http.createServer(async (req, res) => {
         if (url === '/memory/search' && req.method === 'POST') {
             return await handleSearch(req, res);
         }
-        if (url === '/memory/clear' && req.method === 'DELETE') {
+        if (url === '/memory/clear' && (req.method === 'POST' || req.method === 'DELETE')) {
             return await handleClear(req, res);
         }
         // knowledge store routes
@@ -387,7 +387,7 @@ const server = http.createServer(async (req, res) => {
         if (url === '/knowledge/expand' && req.method === 'POST') {
             return await handleKnowledgeExpand(req, res);
         }
-        if (url === '/knowledge/remove' && req.method === 'DELETE') {
+        if (url === '/knowledge/remove' && (req.method === 'POST' || req.method === 'DELETE')) {
             return await handleKnowledgeRemove(req, res);
         }
         if (url === '/knowledge/stats' && req.method === 'GET') {

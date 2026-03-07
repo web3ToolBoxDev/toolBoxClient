@@ -91,7 +91,7 @@ async function expand(types) {
  */
 async function remove(criteria) {
     try {
-        return await request('DELETE', '/knowledge/remove', criteria);
+        return await request('POST', '/knowledge/remove', criteria);
     } catch (err) {
         console.error('[knowledgeClient] remove failed:', err.message);
         return { success: false, error: err.message };

@@ -84,7 +84,7 @@ async function search(namespace, query, topK = 5) {
  */
 async function clear(namespace) {
     try {
-        return await request('DELETE', '/memory/clear', { namespace });
+        return await request('POST', '/memory/clear', { namespace });
     } catch (err) {
         console.error('[memoryClient] clear failed:', err.message);
         return { success: false, error: err.message };
