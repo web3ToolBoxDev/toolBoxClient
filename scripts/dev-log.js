@@ -15,11 +15,13 @@ const stream = fs.createWriteStream(logFile, { flags: 'a' });
 stream.write(`=== Dev session started at ${new Date().toISOString()} ===\n`);
 console.log(`Log file: ${logFile}`);
 
-const child = spawn('npx', ['electron', '.'], {
+// Resolve electron binary directly to avoid npx detach issues on Windows
+const electronPath = require('electron');
+
+const child = spawn(electronPath, ['.'], {
     cwd: rootDir,
     env: { ...process.env, IS_BUILD: 'false' },
-    stdio: ['inherit', 'pipe', 'pipe'],
-    shell: true
+    stdio: ['inherit', 'pipe', 'pipe']
 });
 
 child.stdout.on('data', (data) => {
