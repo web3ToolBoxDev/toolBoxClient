@@ -293,18 +293,12 @@ async function resetAgentForTest(maxRetries = 10) {
 
 const DASHBOARD_API = 'http://127.0.0.1:30003/api/dashboard';
 
-/** Get the active (most recent) session ID via REST API */
-async function getActiveSessionId() {
-    try {
-        const resp = await fetch(`${BACKEND_URL}/listAiSessions?taskName=${AGENT_TASK_NAME}`);
-        const body = await resp.json();
-        const sessions = body?.sessions || body?.data || [];
-        if (sessions.length === 0) return '';
-        // Return the last session (most recently created)
-        return sessions[sessions.length - 1]?.id || '';
-    } catch {
-        return '';
-    }
+/** Get the agent's active session ID from the DOM (data-session-id attribute) */
+async function getActiveSessionId(page) {
+    return page.evaluate(() => {
+        const active = document.querySelector('.agent-session-item.active');
+        return active?.getAttribute('data-session-id') || '';
+    });
 }
 
 /** Fetch dashboard JSON and verify it contains expected text in profile.basic.
@@ -473,16 +467,12 @@ test.describe.serial('Memory Recall E2E', () => {
         console.log(`[Test B] AI correctly recalls updated name "${TEST_NAME}"`);
 
         // 11. Verify dashboard data reflects the name change
-        const sessionId = await getActiveSessionId();
-        if (sessionId) {
-            try {
-                const dashData = await waitForDashboardProfile(sessionId, TEST_NAME, 10_000);
-                console.log(`[Test B] Dashboard profile.basic contains "${TEST_NAME}"`);
-            } catch (e) {
-                // Dashboard verification is supplementary — log but don't fail
-                console.warn(`[Test B] Dashboard verification skipped: ${e.message}`);
-            }
-        }
+        const sessionId = await getActiveSessionId(page);
+        expect(sessionId).toBeTruthy();
+        console.log(`[Test B] Checking dashboard for session: ${sessionId}`);
+        const dashData = await waitForDashboardProfile(sessionId, TEST_NAME, 15_000);
+        console.log(`[Test B] Dashboard profile.basic contains "${TEST_NAME}"`);
+        expect(dashData.profile.basic).toContain(TEST_NAME);
 
         // 12. Add skill via chat
         await sendChatAndWaitReply(

@@ -26,7 +26,7 @@ const dashboardServer = require('./lib/dashboardServer');
 // Retries on failure since dbservice may not be ready yet.
 let _packRegistered = false;
 const _packReady = (async () => {
-    for (let attempt = 1; attempt <= 10; attempt++) {
+    for (let attempt = 1; attempt <= 15; attempt++) {
         try {
             const result = await knowledgeClient.registerPack(memoryPack.domain, memoryPack.types);
             if (result?.success) {
@@ -36,12 +36,22 @@ const _packReady = (async () => {
             }
             throw new Error(result?.error || 'registration returned success=false');
         } catch (err) {
-            console.warn(`[agent] domain pack registration attempt ${attempt}/10 failed: ${err.message}`);
-            if (attempt < 10) await new Promise(r => setTimeout(r, 2000));
+            console.warn(`[agent] domain pack registration attempt ${attempt}/15 failed: ${err.message}`);
+            if (attempt < 15) await new Promise(r => setTimeout(r, 3000));
         }
     }
-    console.error('[agent] domain pack registration failed after 10 attempts');
+    console.error('[agent] domain pack registration failed after 15 attempts');
 })();
+
+/** Ensure domain pack is registered (lazy re-registration if startup failed). */
+async function ensurePack() {
+    if (_packRegistered) return true;
+    try {
+        const result = await knowledgeClient.registerPack(memoryPack.domain, memoryPack.types);
+        if (result?.success) { _packRegistered = true; return true; }
+    } catch { /* ignore */ }
+    return false;
+}
 
 // Persistent data directory for this agent
 const _dataDir = path.join(__dirname, 'data');
@@ -301,6 +311,7 @@ async function seedProfileFromKnowledge(sessionId) {
     console.log(`[agent:seed] attempting profile seed for session ${sessionId.slice(0, 8)}...`);
     try {
         await _packReady;
+        await ensurePack(); // lazy re-register if startup failed
 
         let seededCount = 0;
         const profileDocs = await knowledgeClient.findFresh('profile', 'agent:job-seek', 30);
@@ -534,6 +545,15 @@ async function resetAllMemory() {
 async function resetForTest() {
     console.log('[agent] resetForTest — full data wipe');
     await resetAllMemory();
+
+    // Re-register domain pack (may have been lost if dbservice restarted or was unavailable at startup)
+    try {
+        const result = await knowledgeClient.registerPack(memoryPack.domain, memoryPack.types);
+        _packRegistered = !!(result?.success);
+        console.log('[agent] resetForTest: domain pack re-registered:', _packRegistered);
+    } catch (err) {
+        console.warn('[agent] resetForTest: domain pack re-registration failed:', err.message);
+    }
 
     // Delete all sessions (resetAllMemory only clears memory, not sessions)
     const sessionIds = state.sessions.map((s) => s.id);
@@ -1047,11 +1067,7 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default',
         let fullCmd;
         const modelFlag = (model && model !== 'default') ? ` --model ${model}` : '';
         const workspaceDir = path.join(__dirname, 'workspace');
-        // Use a clean temp dir for chat (no files for AI to edit);
-        // use workspace dir when caller needs file access (e.g. resume extraction)
-        const chatDir = path.join(workspaceDir, '_chat');
-        if (!fs.existsSync(chatDir)) fs.mkdirSync(chatDir, { recursive: true });
-        const execDir = options.cwd || chatDir;
+        const execDir = options.cwd || workspaceDir;
 
         // Build full prompt with context inlined (never expose file paths to the AI)
         const fullPrompt = memoryContext
@@ -1066,7 +1082,7 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default',
         if (provider === 'codex-cli') {
             fullCmd = `codex exec${modelFlag} "$(cat '${pf}')"`;
         } else {
-            fullCmd = `claude -p "$(cat '${pf}')"${modelFlag} --max-turns 1`;
+            fullCmd = `claude -p "$(cat '${pf}')"${modelFlag}`;
         }
         console.log(`[agent:cli] CMD (${provider}): ${fullCmd.slice(0, 200)}...`);
         let stdout = '';
@@ -1247,6 +1263,8 @@ async function handleUserInput(payload = {}) {
         appendConversation(sessionId, 'assistant', isZh() ? '\u5F53\u524D\u4F1A\u8BDD\u5DF2\u6682\u505C\uFF0C\u8BF7\u5148\u6062\u590D\u540E\u7EE7\u7EED\u3002' : 'Current session is paused. Please resume before continuing.');
         return;
     }
+
+    await ensurePack(); // lazy re-register domain types if needed
 
     const text = String(payload.text || '').trim();
     const runtimeContext = payload.runtimeContext || state.runtimeContexts[sessionId] || {};
@@ -1802,12 +1820,12 @@ async function extractResumeFromAttachments(sessionId, attachments) {
                     const imgPath = path.join(workspaceDir, `${tmpName}.png`);
                     const imgBuffer = Buffer.from(fileParser.stripDataUriPrefix(attachment.contentBase64), 'base64');
                     fs.writeFileSync(imgPath, imgBuffer);
-                    reply = await invokeCliAsync(activeProvider, `Look at the resume image at ${imgPath}. ${cliExtractInstructions}`, '', model, { cwd: path.join(__dirname, 'workspace') });
+                    reply = await invokeCliAsync(activeProvider, `Look at the resume image at ${imgPath}. ${cliExtractInstructions}`, '', model);
                     try { fs.unlinkSync(imgPath); } catch (_) {}
                 } else {
                     const txtPath = path.join(workspaceDir, `${tmpName}.txt`);
                     fs.writeFileSync(txtPath, parsed.text.slice(0, 12000), 'utf-8');
-                    reply = await invokeCliAsync(activeProvider, `Read the resume file at ${txtPath}. ${cliExtractInstructions}`, '', model, { cwd: path.join(__dirname, 'workspace') });
+                    reply = await invokeCliAsync(activeProvider, `Read the resume file at ${txtPath}. ${cliExtractInstructions}`, '', model);
                     try { fs.unlinkSync(txtPath); } catch (_) {}
                 }
             } else if (activeProvider === 'api-key') {
