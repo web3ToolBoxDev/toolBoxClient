@@ -424,6 +424,12 @@ function AgentWorkspace() {
         sendAgent('agent_session_delete', { sessionId });
     };
 
+    const handleResetAllMemory = () => {
+        if (!isTaskRunning) return;
+        if (!window.confirm(t('agentWorkspace.confirmResetMemory', 'This will clear ALL memory (knowledge store, mem0, profiles, intent files). Continue?'))) return;
+        sendAgent('agent_reset_memory', {});
+    };
+
     const handleSwitchSession = (sessionId) => {
         setActiveSessionId(sessionId);
         sendAgent('agent_session_switch', { sessionId });
@@ -822,6 +828,16 @@ function AgentWorkspace() {
                                         disabled={!isTaskRunning || !activeSessionId}
                                     >
                                         {t('agentWorkspace.cancel', 'Cancel')}
+                                    </Button>
+                                </div>
+                                <div className="runtime-row runtime-row--danger">
+                                    <Button
+                                        size="sm"
+                                        variant="outline-danger"
+                                        onClick={handleResetAllMemory}
+                                        disabled={!isTaskRunning}
+                                    >
+                                        {t('agentWorkspace.resetAllMemory', 'Reset All Memory')}
                                     </Button>
                                 </div>
                             </div>

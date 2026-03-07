@@ -302,7 +302,19 @@ function deleteSession(sessionId) {
     delete state.onboardingComplete[id];
     delete state.profileSections[id];
     delete state.profileCollectionMode[id];
+
+    // Clean up intent file on disk
+    const intentInfo = state.intentFiles[id];
+    if (intentInfo?.filePath) {
+        try { fs.unlinkSync(intentInfo.filePath); } catch {}
+    }
+    const sessionDir = path.join(_workspaceDir, id);
+    try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch {}
     delete state.intentFiles[id];
+
+    // Clean up knowledge store docs for this session
+    knowledgeClient.remove({ refId: `direction_${id}` }).catch(() => {});
+
     if (!state.sessions.length) {
         createSession('');
         return;
@@ -311,6 +323,52 @@ function deleteSession(sessionId) {
         state.activeSessionId = state.sessions[0].id;
     }
     emitSessionList();
+    sendSnapshot();
+    scheduleSave();
+}
+
+/**
+ * Reset ALL memory: knowledge store, mem0, state, intent files.
+ * Used for testing / fresh start.
+ */
+async function resetAllMemory() {
+    console.log('[agent] resetAllMemory — clearing all data');
+
+    // 1. Clear knowledge store (all job-seek types)
+    const types = ['profile', 'direction', 'job_listing', 'match_result'];
+    for (const type of types) {
+        await knowledgeClient.remove({ type, scope: 'agent:job-seek' }).catch(() => {});
+    }
+
+    // 2. Clear mem0 memory
+    const ns = getMemoryNamespace();
+    await memoryClient.clear(ns).catch(() => {});
+
+    // 3. Clear global state
+    state.resumeProfile = '';
+
+    // 4. Clear per-session state
+    for (const sid of Object.keys(state.profileSections)) {
+        state.profileSections[sid] = {};
+    }
+    for (const sid of Object.keys(state.intentFiles)) {
+        const info = state.intentFiles[sid];
+        if (info?.filePath) {
+            try { fs.unlinkSync(info.filePath); } catch {}
+        }
+        const sessionDir = path.join(_workspaceDir, sid);
+        try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch {}
+    }
+    state.intentFiles = {};
+
+    // 5. Notify
+    const sessionId = state.activeSessionId;
+    if (sessionId) {
+        appendConversation(sessionId, 'assistant', isZh()
+            ? '✅ 所有记忆已清除（知识库、mem0、档案、意向文件）。'
+            : '✅ All memory cleared (knowledge store, mem0, profile, intent files).');
+        appendRuntimeLog(sessionId, 'reset_all_memory -> complete', { source: 'system' });
+    }
     sendSnapshot();
     scheduleSave();
 }
@@ -2271,6 +2329,12 @@ function initWebSocket() {
                 updateModel(data?.payload?.model);
                 updateApiKeyConfiguredHint(data?.payload?.apiKeyConfigured);
                 deleteSession(data?.payload?.sessionId);
+                break;
+            case 'agent_reset_memory':
+                updateLanguage(data?.payload?.language);
+                resetAllMemory().catch(err => {
+                    console.error('[agent] resetAllMemory error:', err);
+                });
                 break;
             case 'agent_session_switch':
                 updateLanguage(data?.payload?.language);

@@ -376,6 +376,8 @@
     "agentWorkspace.resume": "Resume",
     "agentWorkspace.retry": "Retry",
     "agentWorkspace.cancel": "Cancel",
+    "agentWorkspace.resetAllMemory": "Reset All Memory",
+    "agentWorkspace.confirmResetMemory": "This will clear ALL memory (knowledge store, mem0, profiles, intent files). Continue?",
     "agentWorkspace.provider": "Provider",
     "agentWorkspace.selectProvider": "Select Provider",
     "agentWorkspace.selectSubProvider": "Select Sub-Provider",
