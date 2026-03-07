@@ -584,6 +584,18 @@ function AgentWorkspace() {
 
     const handleOpenArtifact = useCallback(async (artifact) => {
         const electronAPI = typeof window !== 'undefined' ? window.electronAPI : null;
+
+        // URL-based artifacts (e.g. live dashboard) — open in browser
+        if (artifact?.url || artifact?.openUrl) {
+            const url = artifact.url;
+            if (electronAPI?.openLink) {
+                electronAPI.openLink(url);
+            } else {
+                window.open(url, '_blank');
+            }
+            return;
+        }
+
         if (!electronAPI?.revealInFolder) {
             alert('仅桌面端支持打开产物文件');
             return;

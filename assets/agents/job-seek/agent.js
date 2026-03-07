@@ -20,6 +20,7 @@ const sessionStore = require('./lib/core/sessionStore');
 const browserLauncher = require('./lib/core/browserLauncher');
 const memoryPack = require('./lib/memoryPack');
 const markerParser = require('./lib/markerParser');
+const dashboardServer = require('./lib/dashboardServer');
 
 // Register domain pack at startup (before any upsert can happen).
 // Retries on failure since dbservice may not be ready yet.
@@ -196,9 +197,9 @@ function scheduleSave() {
 }
 
 // Save on exit
-process.on('SIGTERM', () => { saveState(); process.exit(0); });
-process.on('SIGINT', () => { saveState(); process.exit(0); });
-process.on('exit', () => { saveState(); });
+process.on('SIGTERM', () => { dashboardServer.stop(); saveState(); process.exit(0); });
+process.on('SIGINT', () => { dashboardServer.stop(); saveState(); process.exit(0); });
+process.on('exit', () => { dashboardServer.stop(); saveState(); });
 
 // --------------- transport ---------------
 
@@ -658,17 +659,17 @@ async function handleSubtaskAction(payload = {}) {
                         (a) => a.type !== 'dashboard'
                     );
                 }
-                const { filePath: dashPath } = buildDashboard(sessionId);
+                const dashUrl = dashboardServer.getDashboardURL(sessionId);
                 appendArtifact(sessionId, {
                     id: `dashboard-${sessionId}`,
                     type: 'dashboard',
                     title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
-                    filePath: dashPath,
-                    openFile: true
+                    url: dashUrl,
+                    openUrl: true
                 });
             } catch (err) {
-                console.error('[agent] buildDashboard failed:', err);
-                appendRuntimeLog(sessionId, `dashboard_build_error -> ${err.message}`, { source: 'error' });
+                console.error('[agent] dashboard artifact failed:', err);
+                appendRuntimeLog(sessionId, `dashboard_error -> ${err.message}`, { source: 'error' });
             }
         }
 
@@ -693,6 +694,12 @@ async function handleSubtaskAction(payload = {}) {
         }
         return list;
     });
+
+    // When (re)starting the profile subtask, enable profile collection mode
+    // so the AI uses the profile collection prompt with marker instructions.
+    if (subtaskKey === 'profile') {
+        state.profileCollectionMode[sessionId] = true;
+    }
 
     appendSubtaskLog(sessionId, subtaskKey,
         isRestart
@@ -834,125 +841,6 @@ function buildIntentFile(sessionId) {
     state.intentFiles[sessionId] = { version, builtAt, direction, filePath: intentPath };
 
     return { markdown, filePath: intentPath, version };
-}
-
-function buildDashboard(sessionId) {
-    const intent = state.intentFiles[sessionId];
-    const answers = state.selectedAnswers[sessionId] || {};
-    const subtasks = state.subtasks[sessionId] || [];
-
-    const statusIcon = (s) => s === 'done' ? '✅' : s === 'running' ? '▶️' : s === 'failed' ? '❌' : '⏳';
-    const subtaskRows = subtasks.map((t) =>
-        `<tr><td>${statusIcon(t.status)}</td><td>${t.key}</td><td>${t.status}</td></tr>`
-    ).join('\n');
-
-    const sections = state.profileSections[sessionId] || {};
-    const escHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const basicSummary = escHtml((sections.basic || '').trim().split('\n').slice(0, 3).join(' | ')) || '—';
-    const skillsSummary = escHtml((sections.skills || '').trim().split('\n').slice(0, 5).join(', ')) || '—';
-    const expSummary = escHtml((sections.experience || '').trim().split('\n').slice(0, 3).join(' | ')) || '—';
-    const eduSummary = escHtml((sections.education || '').trim().split('\n').slice(0, 3).join(' | ')) || '—';
-    const highlightsSummary = escHtml((sections.highlights || '').trim().split('\n').slice(0, 3).join(' | ')) || '';
-
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Job Search Dashboard</title>
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1b2e; color: #dfe3ff; padding: 2rem; margin: 0; }
-  h1 { color: #8b9aff; border-bottom: 2px solid #2d2f4a; padding-bottom: 0.5rem; }
-  h2 { color: #6a7eff; margin-top: 2rem; }
-  .card { background: #242640; border: 1px solid #2d2f4a; border-radius: 8px; padding: 1.2rem; margin-bottom: 1rem; }
-  .card h3 { margin-top: 0; color: #8b9aff; }
-  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
-  th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #2d2f4a; }
-  th { color: #9da0c3; font-weight: 600; }
-  .direction-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
-  .direction-item { background: #2d2f4a; border-radius: 6px; padding: 0.75rem; }
-  .direction-item label { display: block; color: #9da0c3; font-size: 0.8rem; margin-bottom: 0.25rem; }
-  .direction-item span { font-size: 1.1rem; font-weight: 500; }
-  .meta { color: #7a7fa8; font-size: 0.8rem; margin-top: 0.5rem; }
-  .feature-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 0.5rem; }
-  .feature-card { background: #2d2f4a; border: 1px dashed #3d4060; border-radius: 8px; padding: 1.2rem; text-align: center; }
-  .feature-card .icon { font-size: 2rem; margin-bottom: 0.5rem; }
-  .feature-card h4 { color: #8b9aff; margin: 0 0 0.4rem 0; }
-  .feature-card p { color: #9da0c3; font-size: 0.85rem; margin: 0; }
-  .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; background: rgba(106,126,255,0.2); color: #8b9aff; margin-top: 0.5rem; }
-  .profile-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
-  .profile-summary .item { background: #2d2f4a; border-radius: 6px; padding: 0.75rem; }
-  .profile-summary .item label { display: block; color: #9da0c3; font-size: 0.8rem; margin-bottom: 0.25rem; }
-  .profile-summary .item p { margin: 0; font-size: 0.9rem; color: #c4c8ee; }
-</style>
-</head>
-<body>
-<h1>Job Search Dashboard</h1>
-<p class="meta">Session: ${sessionId.slice(0, 8)} | Intent v${intent?.version || 1} | Built: ${intent?.builtAt ? intent.builtAt.replace('T', ' ').slice(0, 19) : 'N/A'}</p>
-
-<h2>Direction</h2>
-<div class="card">
-  <div class="direction-grid">
-    <div class="direction-item"><label>Job Title</label><span>${answers.q_job_title || '—'}</span></div>
-    <div class="direction-item"><label>Location</label><span>${answers.q_location || '—'}</span></div>
-    <div class="direction-item"><label>Work Mode</label><span>${answers.q_work_mode || '—'}</span></div>
-    <div class="direction-item"><label>Target Salary</label><span>${answers.q_salary ? answers.q_salary + 'K' : '—'}</span></div>
-  </div>
-</div>
-
-<h2>Profile</h2>
-<div class="card">
-  <div class="profile-summary">
-    <div class="item"><label>Basic Info</label><p>${basicSummary}</p></div>
-    <div class="item"><label>Key Skills</label><p>${skillsSummary}</p></div>
-    <div class="item"><label>Experience</label><p>${expSummary}</p></div>
-    <div class="item"><label>Education</label><p>${eduSummary}</p></div>${highlightsSummary ? `
-    <div class="item" style="grid-column: 1 / -1;"><label>Highlights</label><p>${highlightsSummary}</p></div>` : ''}
-  </div>
-</div>
-
-<h2>Workflow Progress</h2>
-<div class="card">
-  <table>
-    <thead><tr><th></th><th>Step</th><th>Status</th></tr></thead>
-    <tbody>
-${subtaskRows}
-    </tbody>
-  </table>
-</div>
-
-<h2>Job Search Tools</h2>
-<div class="feature-grid">
-  <div class="feature-card">
-    <div class="icon">🔍</div>
-    <h4>Match Jobs</h4>
-    <p>Score and rank job postings against your profile and preferences</p>
-    <span class="badge">Coming Soon</span>
-  </div>
-  <div class="feature-card">
-    <div class="icon">📄</div>
-    <h4>Resume Builder</h4>
-    <p>Generate tailored resumes for each job target</p>
-    <span class="badge">Coming Soon</span>
-  </div>
-  <div class="feature-card">
-    <div class="icon">✉️</div>
-    <h4>Cover Letter</h4>
-    <p>Write customized cover letters per application</p>
-    <span class="badge">Coming Soon</span>
-  </div>
-</div>
-
-</body>
-</html>`;
-
-    const sessionDir = path.join(_workspaceDir, sessionId);
-    fs.mkdirSync(sessionDir, { recursive: true });
-    const dashboardPath = path.join(sessionDir, 'dashboard.html');
-    fs.writeFileSync(dashboardPath, html, 'utf-8');
-
-    return { filePath: dashboardPath };
 }
 
 // --------------- provider detection & CLI ---------------
@@ -2060,12 +1948,11 @@ async function applyMarkers(sessionId, markers) {
     }
 
     if (profileChanged || directionChanged) {
-        // Rebuild dashboard/intent file to reflect changes
+        // Rebuild intent file to reflect changes (dashboard is live via dashboardServer)
         try {
             buildIntentFile(sessionId);
-            buildDashboard(sessionId);
         } catch (err) {
-            console.error('[agent:marker] dashboard rebuild failed:', err.message);
+            console.error('[agent:marker] intent rebuild failed:', err.message);
         }
         sendSnapshot();
         scheduleSave();
@@ -2135,7 +2022,7 @@ async function extractProfileFromConversation(sessionId) {
             state.resumeProfile = reply;
             moveSubTaskForward(sessionId); // profile -> done
 
-            // Rebuild dashboard with the full extracted profile
+            // Add dashboard artifact (live via dashboardServer)
             try {
                 buildIntentFile(sessionId);
                 if (state.artifacts[sessionId]) {
@@ -2143,16 +2030,16 @@ async function extractProfileFromConversation(sessionId) {
                         (a) => a.type !== 'dashboard'
                     );
                 }
-                const { filePath: dashPath } = buildDashboard(sessionId);
+                const dashUrl = dashboardServer.getDashboardURL(sessionId);
                 appendArtifact(sessionId, {
                     id: `dashboard-${sessionId}`,
                     type: 'dashboard',
                     title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
-                    filePath: dashPath,
-                    openFile: true
+                    url: dashUrl,
+                    openUrl: true
                 });
             } catch (dashErr) {
-                console.error('[agent] dashboard build after extraction failed:', dashErr);
+                console.error('[agent] dashboard artifact after extraction failed:', dashErr);
             }
 
             appendConversation(sessionId, 'assistant', isZh()
@@ -2388,6 +2275,8 @@ function initWebSocket() {
     ws.on('open', () => {
         startHeartBeat();
         send({ type: 'request_task_data', data: '' });
+        // Start dashboard server (idempotent — only starts once)
+        dashboardServer.start(() => state);
     });
 
     ws.on('message', (raw) => {
@@ -2527,6 +2416,7 @@ function initWebSocket() {
             clearInterval(heartBeatTimer);
             heartBeatTimer = null;
         }
+        dashboardServer.stop();
     });
 }
 
