@@ -1793,6 +1793,9 @@ async function extractResumeFromAttachments(sessionId, attachments) {
                     const sectionKeys = Object.keys(sections);
                     console.log(`[agent:knowledge] Parsed ${sectionKeys.length} sections: ${sectionKeys.join(', ')}`);
 
+                    // Update in-memory profile so dashboard reflects new resume
+                    state.profileSections[sessionId] = sections;
+
                     // Clear old profile docs before storing new ones
                     await knowledgeClient.remove({ type: 'profile', scope: 'agent:job-seek' });
 
