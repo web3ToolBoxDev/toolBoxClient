@@ -1,0 +1,29 @@
+RESUME - Alex Chen
+
+CONTACT
+- Name: Alex Chen
+- Location: London, UK
+- Phone: +44 7700-900123
+- Email: alex.chen@example.com
+- LinkedIn: linkedin.com/in/alexchen
+
+SKILLS
+- Frontend: React, Vue.js, TypeScript, Next.js, Tailwind CSS
+- Backend: Node.js, Express, NestJS, GraphQL, REST API
+- Cloud: AWS (EC2, S3, Lambda), Docker, Kubernetes
+- Databases: PostgreSQL, MongoDB, Redis
+- Tools: Git, GitHub Actions, Terraform
+
+EXPERIENCE
+- Senior Fullstack Engineer at TechCorp (2022-2025) — Led team of 5, built microservices
+- Fullstack Developer at StartupXYZ (2019-2022) — React + Node.js SaaS product
+- Junior Developer at WebAgency (2017-2019) — Client websites and CMS
+
+EDUCATION
+- University of Manchester — MSc Computer Science (2017)
+- Peking University — BSc Software Engineering (2015)
+
+HIGHLIGHTS
+- AWS Certified Solutions Architect
+- Speaker at NodeConf EU 2023
+- Open source maintainer of vue-data-grid (500+ stars)

@@ -527,6 +527,37 @@ async function resetAllMemory() {
     scheduleSave();
 }
 
+/**
+ * Full reset for E2E testing: clear all memory + delete every session.
+ * Returns a promise that resolves when done.
+ */
+async function resetForTest() {
+    console.log('[agent] resetForTest — full data wipe');
+    await resetAllMemory();
+
+    // Delete all sessions (resetAllMemory only clears memory, not sessions)
+    const sessionIds = state.sessions.map((s) => s.id);
+    for (const sid of sessionIds) {
+        deleteSession(sid);
+    }
+
+    // After deleteSession loop, state.sessions may have a fresh empty session
+    // created by deleteSession when list becomes empty — delete its artifacts too
+    for (const sid of Object.keys(state.conversations)) {
+        state.conversations[sid] = [];
+    }
+    for (const sid of Object.keys(state.subtaskLogs)) {
+        state.subtaskLogs[sid] = [];
+    }
+    for (const sid of Object.keys(state.runtimeLogs)) {
+        state.runtimeLogs[sid] = [];
+    }
+
+    sendSnapshot();
+    scheduleSave();
+    console.log('[agent] resetForTest complete — sessions:', state.sessions.length);
+}
+
 function switchSession(sessionId) {
     const id = String(sessionId || '').trim();
     const exists = state.sessions.some((item) => item.id === id);
@@ -1175,6 +1206,22 @@ function getConversationForAI(sessionId) {
         .map((m) => ({ role: m.role, text: m.content || '' }));
 }
 
+/**
+ * Build a condensed conversation history string for CLI providers.
+ * Includes the last N user/assistant turns so the CLI has context
+ * for short replies like "y", "ok", "change that", etc.
+ * Returns empty string if there's only 1 or fewer messages.
+ */
+function buildConversationHistory(sessionId, maxTurns = 6) {
+    const msgs = getConversationForAI(sessionId);
+    if (msgs.length <= 1) return '';
+    // Take last maxTurns messages (excluding the current user message which is passed as the prompt)
+    const recent = msgs.slice(-maxTurns - 1, -1);
+    if (recent.length === 0) return '';
+    const lines = recent.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`);
+    return `[CONVERSATION HISTORY]\n${lines.join('\n\n')}\n[/CONVERSATION HISTORY]`;
+}
+
 async function handleUserInput(payload = {}) {
     const sessionId = payload.sessionId || state.activeSessionId;
     if (!sessionId || !state.conversations[sessionId]) {
@@ -1256,9 +1303,11 @@ async function handleUserInput(payload = {}) {
             : buildChatPrompt(isZh());
 
         if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
-            const cliContext = inProfileCollection
-                ? (memoryContext ? `${systemPrompt}\n\n${memoryContext}` : systemPrompt)
-                : memoryContext;
+            const convHistory = buildConversationHistory(sessionId);
+            const contextParts = [systemPrompt];
+            if (memoryContext) contextParts.push(memoryContext);
+            if (convHistory) contextParts.push(convHistory);
+            const cliContext = contextParts.join('\n\n');
             reply = await invokeCliAsync(activeProvider, text, cliContext, model);
         } else if (activeProvider === 'api-key') {
             const subProvider = state.currentSubProvider || 'openai';
@@ -2475,6 +2524,15 @@ function initWebSocket() {
                 updateLanguage(data?.payload?.language);
                 resetAllMemory().catch(err => {
                     console.error('[agent] resetAllMemory error:', err);
+                });
+                break;
+            case 'agent_reset_for_test':
+                updateLanguage(data?.payload?.language);
+                resetForTest().then(() => {
+                    emit('agent_reset_for_test_done', { success: true });
+                }).catch(err => {
+                    console.error('[agent] resetForTest error:', err);
+                    emit('agent_reset_for_test_done', { success: false, error: err.message });
                 });
                 break;
             case 'agent_session_switch':

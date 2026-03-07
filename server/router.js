@@ -156,6 +156,14 @@ router.post('/updateAiSubTask', async (req, res) => {
   const result = await taskService.updateAiSubTask(taskName, subTaskKey, status, sessionId);
   res.send(result);
 });
+router.post('/resetAgentForTest', async (req, res) => {
+  const { taskName } = req.body || {};
+  const result = await taskService.sendAgentCommand(
+    taskName,
+    JSON.stringify({ type: 'agent_reset_for_test', payload: {} })
+  );
+  res.send(result);
+});
 router.delete('/deleteTask', async(req, res) => {
   console.log('req.body:', req.body.taskNames);
   const taskNames = req.body.taskNames;
