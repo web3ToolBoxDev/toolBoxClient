@@ -9,7 +9,8 @@ const {
     defaultSubTasks,
     buildPresetPrompt,
     buildAttachmentActionQuestion,
-    buildProfileCollectionPrompt
+    buildProfileCollectionPrompt,
+    buildChatPrompt
 } = require('./lib/prompts');
 const { callAPI, buildMultimodalContent } = require('./lib/aiClient');
 const memoryClient = require('./lib/core/memoryClient');
@@ -1209,9 +1210,7 @@ async function handleUserInput(payload = {}) {
         const direction = state.selectedAnswers[sessionId] || {};
         const systemPrompt = inProfileCollection
             ? buildProfileCollectionPrompt(isZh(), direction)
-            : (isZh()
-                ? '\u4F60\u662F\u4E00\u4E2A\u6709\u7528\u7684 AI \u52A9\u624B\u3002\u8BF7\u7528\u4E0E\u7528\u6237\u76F8\u540C\u7684\u8BED\u8A00\u56DE\u590D\u3002'
-                : 'You are a helpful AI assistant. Reply in the same language as the user.');
+            : buildChatPrompt(isZh());
 
         if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
             const cliContext = inProfileCollection
@@ -1980,6 +1979,13 @@ async function applyMarkers(sessionId, markers) {
     }
 
     if (profileChanged || directionChanged) {
+        // Rebuild dashboard/intent file to reflect changes
+        try {
+            buildIntentFile(sessionId);
+            buildDashboard(sessionId);
+        } catch (err) {
+            console.error('[agent:marker] dashboard rebuild failed:', err.message);
+        }
         sendSnapshot();
         scheduleSave();
     }

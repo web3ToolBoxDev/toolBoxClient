@@ -7,7 +7,8 @@ const {
     defaultSubTasks,
     buildPresetPrompt,
     buildProfileCollectionPrompt,
-    buildOnboardingPrompt
+    buildOnboardingPrompt,
+    buildChatPrompt
 } = require('./prompts');
 
 describe('prompts.js', () => {
@@ -160,6 +161,24 @@ describe('prompts.js', () => {
             const prompt = buildOnboardingPrompt(true, {});
             expect(prompt).toContain('目标职位名称');
             expect(prompt).toContain('[ANSWER:q_job_title=');
+        });
+    });
+
+    describe('buildChatPrompt', () => {
+        it('includes marker instructions in English', () => {
+            const prompt = buildChatPrompt(false);
+            expect(prompt).toContain('[PROFILE_SET:');
+            expect(prompt).toContain('[PROFILE_ADD:');
+            expect(prompt).toContain('[PROFILE_REMOVE:');
+            expect(prompt).toContain('[DIRECTION:');
+        });
+
+        it('includes marker instructions in Chinese', () => {
+            const prompt = buildChatPrompt(true);
+            expect(prompt).toContain('[PROFILE_SET:');
+            expect(prompt).toContain('[PROFILE_ADD:');
+            expect(prompt).toContain('[PROFILE_REMOVE:');
+            expect(prompt).toContain('[DIRECTION:');
         });
     });
 });

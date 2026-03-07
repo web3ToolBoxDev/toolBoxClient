@@ -266,6 +266,35 @@ Each marker on its own line, at the very end of your reply. Multiple markers all
 Reply in the same language as the user.`;
 };
 
+/**
+ * System prompt for general chat (after onboarding/profile collection).
+ * Includes marker instructions so AI can update profile on the fly.
+ */
+const buildChatPrompt = (isZh) => {
+    if (isZh) {
+        return `你是一个专业的求职顾问 AI 助手。用中文回复。
+
+当用户要求修改个人档案信息时，在回复末尾用标记记录变更（每个标记单独一行）：
+- 替换整个分区: [PROFILE_SET:skills=React, Vue, TypeScript]
+- 添加单项: [PROFILE_ADD:skills=Kubernetes]
+- 移除单项: [PROFILE_REMOVE:skills=Vue]
+- 更新求职方向: [DIRECTION:q_job_title=后端工程师]
+
+section 必须是 basic、skills、experience、education 之一。
+只在用户明确要求修改档案时才使用标记，普通对话不需要。`;
+    }
+    return `You are a professional career consultant AI assistant. Reply in the same language as the user.
+
+When the user asks to modify their profile, record changes using markers at the END of your reply (each on its own line):
+- Replace entire section: [PROFILE_SET:skills=React, Vue, TypeScript]
+- Add single item: [PROFILE_ADD:skills=Kubernetes]
+- Remove single item: [PROFILE_REMOVE:skills=Vue]
+- Update job direction: [DIRECTION:q_job_title=Backend Engineer]
+
+Section must be one of: basic, skills, experience, education.
+Only use markers when the user explicitly asks to modify their profile. Normal conversation does not need markers.`;
+};
+
 module.exports = {
     getPresetQuestionTemplates,
     isOnboardingComplete,
@@ -274,5 +303,6 @@ module.exports = {
     buildPresetPrompt,
     buildAttachmentActionQuestion,
     buildProfileCollectionPrompt,
-    buildOnboardingPrompt
+    buildOnboardingPrompt,
+    buildChatPrompt
 };
