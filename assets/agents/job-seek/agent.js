@@ -255,7 +255,7 @@ function upsertSession(session) {
     }
 }
 
-async function createSession(name = '') {
+function createSession(name = '') {
     const selectedMap = {};
     const session = {
         id: genId('session'),
@@ -282,20 +282,9 @@ async function createSession(name = '') {
     state.profileSections[session.id] = {};
     state.profileCollectionMode[session.id] = false;
 
-    // --- Story 4.1: Seed from knowledgeStore ---
-    const seeded = await seedSessionFromKnowledge(session.id);
-
-    if (seeded) {
-        const dir = state.selectedAnswers[session.id] || {};
-        const profileKeys = Object.keys(state.profileSections[session.id] || {}).filter(k => state.profileSections[session.id][k]);
-        appendConversation(session.id, 'assistant', isZh()
-            ? `欢迎回来！已从上次会话加载你的档案（${profileKeys.join('、')}）和求职方向（${dir.q_job_title || ''} / ${dir.q_location || ''}）。点击右上角「运行时设置」选择 AI 供应商并应用模型，即可继续。你也可以随时修改档案。`
-            : `Welcome back! Loaded your profile (${profileKeys.join(', ')}) and direction (${dir.q_job_title || ''} / ${dir.q_location || ''}) from a previous session. Click "Runtime Settings" to select your AI provider and apply model to continue. You can modify your profile at any time.`);
-    } else {
-        appendConversation(session.id, 'assistant', isZh()
-            ? '欢迎使用求职助手！请先点击右上角「运行时设置」选择 AI 供应商并点击「应用模型」启动会话，然后回答预设问题来设定求职方向。'
-            : 'Welcome to Job Seek Assistant! To get started, click "Runtime Settings" in the top right to select your AI provider, then click "Apply Model" to start the session. After that, answer the preset questions to set your job search direction.');
-    }
+    appendConversation(session.id, 'assistant', isZh()
+        ? '欢迎使用求职助手！请先点击右上角「运行时设置」选择 AI 供应商并点击「应用模型」启动会话，然后回答预设问题来设定求职方向。'
+        : 'Welcome to Job Seek Assistant! To get started, click "Runtime Settings" in the top right to select your AI provider, then click "Apply Model" to start the session. After that, answer the preset questions to set your job search direction.');
     appendRuntimeLog(session.id, 'Session created', { source: 'system' });
     emitSessionList();
     sendSnapshot();
@@ -303,116 +292,55 @@ async function createSession(name = '') {
 }
 
 /**
- * Story 4.1: Seed a new session with profile and direction from knowledgeStore.
- * Only uses data updated within the last 30 days.
+ * Story 4.1: Seed profile from knowledgeStore after onboarding completes.
+ * Each session has its own direction (new job target), but profile is reusable.
+ * Only uses profile data updated within the last 30 days.
+ * @returns {boolean} true if profile was seeded
  */
-async function seedSessionFromKnowledge(sessionId) {
+async function seedProfileFromKnowledge(sessionId) {
     try {
         await _packReady;
 
-        // Seed profile sections
-        let seededProfileCount = 0;
+        let seededCount = 0;
         const profileDocs = await knowledgeClient.findFresh('profile', 'agent:job-seek', 30);
         for (const doc of profileDocs) {
             const subType = doc.subType || doc.sub_type;
             const content = doc.content;
             if (subType && content) {
                 state.profileSections[sessionId][subType] = content;
-                seededProfileCount++;
+                seededCount++;
             }
         }
 
-        // Seed direction
-        let seededDirection = false;
-        const directionDocs = await knowledgeClient.findFresh('direction', 'agent:job-seek', 30);
-        for (const dirDoc of directionDocs) {
-            if (!dirDoc.content) continue;
-            // Skip history entries — only use target
-            if ((dirDoc.subType || dirDoc.sub_type) === 'history') continue;
-            try {
-                let dir;
-                // applyMarkers stores as JSON, storeDirection stores as plain text
-                try {
-                    dir = JSON.parse(dirDoc.content);
-                } catch {
-                    // Parse plain text format: "Job Title: xxx\nLocation: yyy\n..."
-                    dir = {};
-                    for (const line of dirDoc.content.split('\n')) {
-                        const m = line.match(/^(.+?):\s*(.+)$/);
-                        if (!m) continue;
-                        const key = m[1].trim().toLowerCase();
-                        const val = m[2].trim();
-                        if (key.includes('job title')) dir.q_job_title = val;
-                        else if (key.includes('location')) dir.q_location = val;
-                        else if (key.includes('work mode')) dir.q_work_mode = val;
-                        else if (key.includes('salary')) dir.q_salary = val.replace(/K$/i, '');
-                    }
-                }
-                if (dir && typeof dir === 'object' && Object.keys(dir).length > 0) {
-                    Object.assign(state.selectedAnswers[sessionId], dir);
-                    state.prompts[sessionId] = _buildPresetPrompt(state.selectedAnswers[sessionId]);
-                    seededDirection = true;
-                    break; // use first valid direction
-                }
-            } catch (parseErr) {
-                console.warn('[agent:seed] direction parse failed:', parseErr.message);
-            }
-        }
-
-        if (seededProfileCount === 0 && !seededDirection) {
-            console.log('[agent:seed] no previous data found — starting fresh');
+        if (seededCount === 0 || !isProfileComplete(state.profileSections[sessionId])) {
+            console.log('[agent:seed] no usable profile found — starting profile collection');
             return false;
         }
 
-        // Skip onboarding if direction has required fields
-        const answers = state.selectedAnswers[sessionId];
-        const templates = getPresetQuestionTemplates(isZh());
-        if (seededDirection && isOnboardingComplete(answers, templates)) {
-            state.onboardingComplete[sessionId] = true;
-            updateSubTasks(sessionId, (list) => {
-                const ob = list.find(t => t.key === 'onboarding');
-                if (ob && ob.status === 'pending') {
-                    ob.status = 'done';
-                    ob.updatedAt = now();
-                }
-                const pr = list.find(t => t.key === 'profile');
-                if (pr && pr.status === 'pending') {
-                    pr.status = 'running';
-                    pr.updatedAt = now();
-                }
-                return list;
-            });
-            appendRuntimeLog(sessionId, `seed_direction -> ${answers.q_job_title || ''} / ${answers.q_location || ''} / ${answers.q_work_mode || ''}`, { source: 'knowledge' });
-        }
-
-        // Skip profile if we have at least basic + skills
-        if (seededProfileCount >= 2 && isProfileComplete(state.profileSections[sessionId])) {
-            updateSubTasks(sessionId, (list) => {
-                const pr = list.find(t => t.key === 'profile');
-                if (pr && (pr.status === 'pending' || pr.status === 'running')) {
-                    pr.status = 'done';
-                    pr.updatedAt = now();
-                }
-                const sr = list.find(t => t.key === 'search');
-                if (sr && sr.status === 'pending') {
-                    sr.status = 'running';
-                    sr.updatedAt = now();
-                }
-                return list;
-            });
-            state.profileCollectionMode[sessionId] = false;
-            appendRuntimeLog(sessionId, `seed_profile -> ${seededProfileCount} sections loaded`, { source: 'knowledge' });
-        }
+        // Profile is complete — skip profile subtask, advance to dashboard
+        state.profileCollectionMode[sessionId] = false;
+        updateSubTasks(sessionId, (list) => {
+            const pr = list.find(t => t.key === 'profile');
+            if (pr && (pr.status === 'pending' || pr.status === 'running')) {
+                pr.status = 'done';
+                pr.updatedAt = now();
+            }
+            const sr = list.find(t => t.key === 'search');
+            if (sr && sr.status === 'pending') {
+                sr.status = 'running';
+                sr.updatedAt = now();
+            }
+            return list;
+        });
 
         const daysAgo = profileDocs.length > 0
             ? Math.round((Date.now() - new Date(profileDocs[0].updatedAt || profileDocs[0].updated_at || 0).getTime()) / 86400000)
             : '?';
-        console.log(`[agent:seed] seeded ${seededProfileCount} profile sections, direction=${seededDirection} (${daysAgo} days ago)`);
-        appendRuntimeLog(sessionId, `session_seeded -> ${seededProfileCount} profile sections, direction=${seededDirection} (${daysAgo}d ago)`, { source: 'knowledge' });
+        console.log(`[agent:seed] seeded ${seededCount} profile sections (${daysAgo}d ago)`);
+        appendRuntimeLog(sessionId, `profile_seeded -> ${seededCount} sections (${daysAgo}d ago)`, { source: 'knowledge' });
         return true;
     } catch (err) {
-        console.error('[agent:seed] seeding failed:', err.message);
-        // Non-fatal — session starts normally without seeded data
+        console.error('[agent:seed] profile seeding failed:', err.message);
         return false;
     }
 }
@@ -2011,11 +1939,22 @@ function checkAndCompleteOnboarding(sessionId) {
 
     // Check if resume was uploaded
     const hasResume = Boolean(selectedMap.q_upload_profile);
+
+    // Story 4.1: Try seeding profile from knowledgeStore
     if (!hasResume) {
-        state.profileCollectionMode[sessionId] = true;
-        appendConversation(sessionId, 'assistant', isZh()
-            ? '你还没有上传简历，可以随时上传，或者通过对话告诉我你的技能和经历来构建档案。'
-            : 'You haven\'t uploaded a resume yet. You can upload one any time, or tell me about your skills and experience through chat to build your profile.');
+        const seeded = await seedProfileFromKnowledge(sessionId);
+        if (seeded) {
+            // Profile loaded — skip profile collection, go straight to dashboard
+            const profileKeys = Object.keys(state.profileSections[sessionId] || {}).filter(k => state.profileSections[sessionId][k]);
+            appendConversation(sessionId, 'assistant', isZh()
+                ? `我已找到你之前的档案（${profileKeys.join('、')}）。可以直接用这份档案为新目标生成简历，或者你可以上传新简历 / 通过对话修改档案。`
+                : `I found your profile from a previous session (${profileKeys.join(', ')}). I can use this to generate a resume for your new target, or you can upload a new resume / modify your profile through chat.`);
+        } else {
+            state.profileCollectionMode[sessionId] = true;
+            appendConversation(sessionId, 'assistant', isZh()
+                ? '你还没有上传简历，可以随时上传，或者通过对话告诉我你的技能和经历来构建档案。'
+                : 'You haven\'t uploaded a resume yet. You can upload one any time, or tell me about your skills and experience through chat to build your profile.');
+        }
     }
     appendRuntimeLog(sessionId, `onboarding_complete -> hasResume=${hasResume}`, { source: 'onboarding' });
     scheduleSave();
