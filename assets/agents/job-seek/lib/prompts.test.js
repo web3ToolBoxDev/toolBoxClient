@@ -96,8 +96,8 @@ describe('prompts.js', () => {
             const profile = tasks.find((t) => t.key === 'profile');
             expect(profile.actionLabel).toBe('Collect Profile');
             const search = tasks.find((t) => t.key === 'search');
-            expect(search.actionLabel).toBe('Start Search');
-            expect(search.actionLabelZh).toBe('开始搜索');
+            expect(search.actionLabel).toBe('Build Dashboard');
+            expect(search.actionLabelZh).toBe('构建仪表盘');
         });
     });
 
