@@ -79,6 +79,7 @@ jest.mock('../../components/taskOffcanvas/AITaskPanel', () => {
                 <div data-testid="panel-task">{props.activeTask?.displayName || ''}</div>
                 <div data-testid="panel-message-count">{(props.messages || []).length}</div>
                 <div data-testid="panel-interaction-disabled">{props.interactionDisabled ? 'true' : 'false'}</div>
+                <div data-testid="panel-auto-open-preset">{props.autoOpenPreset ? 'true' : 'false'}</div>
                 <button type="button" onClick={() => props.onSendMessage && props.onSendMessage('mock input')}>
                     mock-send
                 </button>
@@ -972,5 +973,98 @@ describe('AgentWorkspace protocol regression', () => {
 
         await waitFor(() => expect(window.alert).toHaveBeenCalledWith('AI task stopped'));
         expect(await screen.findByTestId('task-manage-page')).toBeInTheDocument();
+    });
+
+    it('auto-opens preset modal when snapshot contains autoOpenPresetSessionId', async () => {
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+
+        // Initial snapshot: session not started, no auto-open flag
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: { s1: { text: 'Answer questions', questions: [{ id: 'q_job_title', type: 'input', text: 'Job title', required: true }] } },
+                    executionStates: { s1: { paused: true, started: false, canceled: false } },
+                    autoOpenPresetSessionId: ''
+                }
+            });
+        });
+
+        // Preset modal should NOT be auto-opened yet
+        await waitFor(() => expect(screen.getByTestId('panel-auto-open-preset').textContent).toBe('false'));
+
+        // Simulate Apply Model response: backend sends snapshot with autoOpenPresetSessionId
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [{ id: 'm1', role: 'assistant', content: 'Session started!', createdAt: Date.now() }] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: { s1: { text: 'Answer questions', questions: [{ id: 'q_job_title', type: 'input', text: 'Job title', required: true }] } },
+                    executionStates: { s1: { paused: false, started: true, canceled: false } },
+                    autoOpenPresetSessionId: 's1'
+                }
+            });
+        });
+
+        // Now autoOpenPreset should be true for the active session
+        await waitFor(() => expect(screen.getByTestId('panel-auto-open-preset').textContent).toBe('true'));
+    });
+
+    it('sends agent_reset_memory when Reset All Memory button is clicked', async () => {
+        window.confirm = jest.fn().mockReturnValue(true);
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '求职AI助手',
+                data: {
+                    sessions: [{ id: 's1', name: 'Test', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {},
+                    executionStates: { s1: { paused: false, started: true } }
+                }
+            });
+        });
+
+        fireEvent.click(screen.getByLabelText('toggle-runtime-settings'));
+        mockWsManager.sendMessage.mockClear();
+        fireEvent.click(screen.getByRole('button', { name: 'Reset All Memory' }));
+
+        expect(window.confirm).toHaveBeenCalled();
+        expectSent((msg) => msg.type === 'agent_reset_memory');
     });
 });

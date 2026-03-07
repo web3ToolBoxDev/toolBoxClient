@@ -234,7 +234,8 @@ function sendSnapshot() {
         onboardingComplete: state.onboardingComplete,
         envs: state.envs,
         wallets: state.wallets,
-        activeBrowserEnvIds: Object.keys(_activeBrowsers)
+        activeBrowserEnvIds: Object.keys(_activeBrowsers),
+        autoOpenPresetSessionId: state._autoOpenPresetSessionId || ''
     });
 }
 
@@ -2151,18 +2152,20 @@ function handleSessionContextUpdate(payload = {}) {
         appendConversation(sessionId, 'assistant', isZh()
             ? `会话已启动！有 ${questionCount} 个预设问题帮助设定你的求职方向，你可以随时修改。开始求职功能前需要完成必填项。`
             : `Session started! There are ${questionCount} preset questions to set your job search direction. You can change them any time. Required fields must be completed before using job search features.`);
-        // Tell frontend to auto-open preset modal
-        emit('agent_auto_open_preset', { sessionId });
+        // Tell frontend to auto-open preset modal (via snapshot flag)
+        state._autoOpenPresetSessionId = sessionId;
     } else {
         // On subsequent Apply Model, auto-open preset if required answers are still empty
         const selectedMap = state.selectedAnswers[sessionId] || {};
         const templates = _getTemplates();
         if (!isOnboardingComplete(selectedMap, templates)) {
-            emit('agent_auto_open_preset', { sessionId });
+            state._autoOpenPresetSessionId = sessionId;
         }
     }
 
     sendSnapshot();
+    // Clear after sending so it's only included once
+    state._autoOpenPresetSessionId = '';
     scheduleSave();
 }
 

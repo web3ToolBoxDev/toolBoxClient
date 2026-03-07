@@ -135,6 +135,10 @@ function AgentWorkspace() {
             // Setting them here would overwrite the user's in-progress dropdown
             // selections whenever a snapshot arrives (e.g., after Apply Model).
         }
+        // Auto-open preset modal if flagged in snapshot (e.g., after Apply Model)
+        if (data.autoOpenPresetSessionId) {
+            setAutoOpenPresetSession(data.autoOpenPresetSessionId);
+        }
     }, []);
 
     const handleTaskStopped = useCallback((reason = 'AI task stopped') => {
@@ -196,6 +200,7 @@ function AgentWorkspace() {
                 break;
             }
             case 'agent_auto_open_preset': {
+                // Legacy: still support separate message for backwards compatibility
                 const sid = info?.data?.sessionId;
                 if (sid) setAutoOpenPresetSession(sid);
                 break;
