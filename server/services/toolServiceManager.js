@@ -1,0 +1,175 @@
+'use strict';
+
+const { spawn } = require('child_process');
+const http = require('http');
+const path = require('path');
+const fs = require('fs');
+const config = require('../../config').getInstance();
+
+const TOOL_SERVICE_PORT = 30004;
+const TOOL_SERVICE_URL = `http://127.0.0.1:${TOOL_SERVICE_PORT}`;
+
+let toolProcess = null;
+let isStarting = false;
+
+/**
+ * Spawn the toolService process using the bundled Node.js.
+ * Same pattern as memoryService.js → dbservice.
+ */
+function startToolService() {
+    if (toolProcess || isStarting) return;
+    isStarting = true;
+
+    const execPath = config.getDefaultExecPath();
+    const toolServicePath = path.resolve(__dirname, '../../toolService/index.js');
+
+    // Read chromePath from savePath.json
+    let chromePath = '';
+    let savePath = '';
+    try {
+        const savePathConfig = config.getSavePath();
+        savePath = (savePathConfig && savePathConfig.path) || '';
+    } catch (_) {}
+    try {
+        const chromePathConfig = config.getChromePath();
+        chromePath = (chromePathConfig && chromePathConfig.path) || '';
+    } catch (_) {}
+
+    // Fallback: read from assets/savePath.json directly
+    if (!chromePath) {
+        try {
+            const savePathJson = path.resolve(__dirname, '../../assets/savePath.json');
+            if (fs.existsSync(savePathJson)) {
+                const data = JSON.parse(fs.readFileSync(savePathJson, 'utf-8'));
+                chromePath = data.chromePath || '';
+                if (!savePath) savePath = data.path || '';
+            }
+        } catch (_) {}
+    }
+
+    const env = {
+        ...process.env,
+        TOOL_SERVICE_PORT: String(TOOL_SERVICE_PORT),
+        TOOL_SERVICE_CHROME_PATH: chromePath,
+        TOOL_SERVICE_SAVE_PATH: savePath
+    };
+
+    console.log(`[toolServiceManager] Spawning toolService: ${execPath} ${toolServicePath}`);
+
+    toolProcess = spawn(execPath, [toolServicePath], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env,
+        windowsHide: true
+    });
+
+    toolProcess.stdout.on('data', (data) => {
+        console.log(`[toolService] ${data.toString().trim()}`);
+    });
+    toolProcess.stderr.on('data', (data) => {
+        console.error(`[toolService:err] ${data.toString().trim()}`);
+    });
+    toolProcess.on('exit', (code, signal) => {
+        console.log(`[toolServiceManager] toolService exited (code=${code}, signal=${signal})`);
+        toolProcess = null;
+        isStarting = false;
+    });
+    toolProcess.on('error', (err) => {
+        console.error('[toolServiceManager] Failed to spawn toolService:', err.message);
+        toolProcess = null;
+        isStarting = false;
+    });
+
+    isStarting = false;
+}
+
+/**
+ * Stop the toolService process.
+ */
+function stopToolService() {
+    if (toolProcess) {
+        toolProcess.kill('SIGTERM');
+        toolProcess = null;
+    }
+}
+
+/**
+ * Forward an HTTP request to the toolService.
+ */
+function proxyToToolService(method, urlPath, body) {
+    return new Promise((resolve, reject) => {
+        const options = {
+            hostname: '127.0.0.1',
+            port: TOOL_SERVICE_PORT,
+            path: urlPath,
+            method,
+            headers: { 'Content-Type': 'application/json' }
+        };
+
+        const req = http.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+                try {
+                    resolve({ statusCode: res.statusCode, data: JSON.parse(data) });
+                } catch {
+                    resolve({ statusCode: res.statusCode, data });
+                }
+            });
+        });
+
+        req.on('error', (err) => reject(err));
+        req.setTimeout(120000, () => {
+            req.destroy(new Error('Proxy request to toolService timed out'));
+        });
+
+        if (body) req.write(JSON.stringify(body));
+        req.end();
+    });
+}
+
+// --- Express route handlers (proxy to toolService) ---
+
+async function handleHealth(req, res) {
+    try {
+        const result = await proxyToToolService('GET', '/health');
+        res.status(result.statusCode).json(result.data);
+    } catch (err) {
+        res.status(503).json({ success: false, error: 'Tool service unavailable', detail: err.message });
+    }
+}
+
+async function handleListTools(req, res) {
+    try {
+        const result = await proxyToToolService('GET', '/tools/list');
+        res.status(result.statusCode).json(result.data);
+    } catch (err) {
+        res.status(503).json({ success: false, error: 'Tool service unavailable', detail: err.message });
+    }
+}
+
+async function handleRegisterTool(req, res) {
+    try {
+        const result = await proxyToToolService('POST', '/tools/register', req.body);
+        res.status(result.statusCode).json(result.data);
+    } catch (err) {
+        res.status(503).json({ success: false, error: 'Tool service unavailable', detail: err.message });
+    }
+}
+
+async function handleExecuteTool(req, res) {
+    try {
+        const result = await proxyToToolService('POST', '/tools/execute', req.body);
+        res.status(result.statusCode).json(result.data);
+    } catch (err) {
+        res.status(503).json({ success: false, error: 'Tool service unavailable', detail: err.message });
+    }
+}
+
+module.exports = {
+    startToolService,
+    stopToolService,
+    handleHealth,
+    handleListTools,
+    handleRegisterTool,
+    handleExecuteTool
+};

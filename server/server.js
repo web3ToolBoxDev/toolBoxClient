@@ -20,6 +20,10 @@ app.listen(port, async () => {
   // Start the memory dbservice process
   const memoryService = require('./services/memoryService');
   memoryService.startDbService();
+
+  // Start the tool service process
+  const toolServiceManager = require('./services/toolServiceManager');
+  toolServiceManager.startToolService();
 });
 
 module.exports = app
