@@ -129,6 +129,9 @@ app.post('/test/browser-close', async (req, res) => {
 const browserTools = require('./lib/browserTools');
 browserTools.registerAll();
 
+const httpFetcher = require('./lib/httpFetcher');
+httpFetcher.registerAll();
+
 // ─── Start ───
 const server = app.listen(PORT, () => {
     console.log(`[toolService] running on :${PORT}`);
