@@ -8,7 +8,9 @@ const {
     buildPresetPrompt,
     buildProfileCollectionPrompt,
     buildOnboardingPrompt,
-    buildChatPrompt
+    buildChatPrompt,
+    buildToolContext,
+    buildToolDefinitions
 } = require('./prompts');
 
 describe('prompts.js', () => {
@@ -96,8 +98,8 @@ describe('prompts.js', () => {
             const profile = tasks.find((t) => t.key === 'profile');
             expect(profile.actionLabel).toBe('Collect Profile');
             const search = tasks.find((t) => t.key === 'search');
-            expect(search.actionLabel).toBe('Start Search');
-            expect(search.actionLabelZh).toBe('开始搜索');
+            expect(search.actionLabel).toBe('Build Dashboard');
+            expect(search.actionLabelZh).toBe('构建仪表盘');
         });
     });
 
@@ -179,6 +181,81 @@ describe('prompts.js', () => {
             expect(prompt).toContain('[PROFILE_ADD:');
             expect(prompt).toContain('[PROFILE_REMOVE:');
             expect(prompt).toContain('[DIRECTION:');
+        });
+    });
+
+    describe('buildToolContext', () => {
+        const sampleTools = [
+            {
+                name: 'http_fetch',
+                description: 'Fetch a URL via HTTP',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        url: { type: 'string', description: 'URL to fetch' },
+                        extract: { type: 'boolean', description: 'Auto-extract HTML content' }
+                    },
+                    required: ['url']
+                },
+                category: 'http'
+            },
+            {
+                name: 'browser_launch',
+                description: 'Launch a browser instance',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        headless: { type: 'boolean', description: 'Run headless' }
+                    }
+                },
+                category: 'browser'
+            }
+        ];
+
+        it('returns empty string when no tools provided', () => {
+            expect(buildToolContext([], false)).toBe('');
+            expect(buildToolContext(null, false)).toBe('');
+        });
+
+        it('generates English tool context with descriptions', () => {
+            const context = buildToolContext(sampleTools, false);
+            expect(context).toContain('Available Tools');
+            expect(context).toContain('http_fetch');
+            expect(context).toContain('browser_launch');
+            expect(context).toContain('TOOL_CALL');
+            expect(context).toContain('url: string (required)');
+            expect(context).toContain('extract: boolean');
+        });
+
+        it('generates Chinese tool context', () => {
+            const context = buildToolContext(sampleTools, true);
+            expect(context).toContain('可用工具');
+            expect(context).toContain('http_fetch');
+            expect(context).toContain('TOOL_CALL');
+        });
+
+        it('includes example tool call syntax', () => {
+            const context = buildToolContext(sampleTools, false);
+            expect(context).toContain('[TOOL_CALL:http_fetch(url="https://example.com"');
+        });
+    });
+
+    describe('buildToolDefinitions', () => {
+        it('returns empty array when no tools', () => {
+            expect(buildToolDefinitions([])).toEqual([]);
+            expect(buildToolDefinitions(null)).toEqual([]);
+        });
+
+        it('returns cleaned tool definitions', () => {
+            const tools = [
+                { name: 'test', description: 'Test tool', parameters: { type: 'object', properties: {} }, category: 'test', handler: () => {} }
+            ];
+            const defs = buildToolDefinitions(tools);
+            expect(defs).toHaveLength(1);
+            expect(defs[0].name).toBe('test');
+            expect(defs[0].description).toBe('Test tool');
+            expect(defs[0]).not.toHaveProperty('handler');
+            expect(defs[0]).not.toHaveProperty('category');
         });
     });
 });

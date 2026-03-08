@@ -297,6 +297,84 @@ Section must be one of: basic, skills, experience, education, highlights.
 Only use markers when the user explicitly asks to modify their profile. Normal conversation does not need markers.`;
 };
 
+/**
+ * Build tool context block for CLI prompts.
+ * Generates a structured description of available tools so the AI knows how to call them.
+ *
+ * @param {Array<{name, description, parameters, category}>} tools
+ * @param {boolean} isZh
+ * @returns {string} Tool context block to inject into system prompt
+ */
+const buildToolContext = (tools, isZh) => {
+    if (!tools || !tools.length) return '';
+
+    const toolDescriptions = tools.map(t => {
+        const params = t.parameters?.properties || {};
+        const required = t.parameters?.required || [];
+        const paramLines = Object.entries(params).map(([key, schema]) => {
+            const req = required.includes(key) ? ' (required)' : '';
+            return `    - ${key}: ${schema.type || 'string'}${req} — ${schema.description || ''}`;
+        });
+        return `  ${t.name}: ${t.description}\n${paramLines.join('\n')}`;
+    }).join('\n\n');
+
+    if (isZh) {
+        return `\n\n## 可用工具
+
+你可以使用以下工具来完成任务。当需要使用工具时，在回复末尾添加标记（每个标记单独一行）：
+
+格式：[TOOL_CALL:工具名称(参数1="值1", 参数2=值2)]
+
+可用工具：
+${toolDescriptions}
+
+示例：
+[TOOL_CALL:http_fetch(url="https://example.com", extract=true)]
+[TOOL_CALL:browser_launch(headless=true)]
+[TOOL_CALL:page_goto(browserId="browser_123", url="https://example.com")]
+
+注意：
+- 字符串参数用引号包裹，布尔值和数字不需要引号
+- 每次最多调用一个工具
+- 工具执行结果会在下一轮对话中提供给你`;
+    }
+
+    return `\n\n## Available Tools
+
+You can use the following tools to complete tasks. When you need to use a tool, add a marker at the END of your reply (each on its own line):
+
+Format: [TOOL_CALL:tool_name(param1="value1", param2=value2)]
+
+Available tools:
+${toolDescriptions}
+
+Examples:
+[TOOL_CALL:http_fetch(url="https://example.com", extract=true)]
+[TOOL_CALL:browser_launch(headless=true)]
+[TOOL_CALL:page_goto(browserId="browser_123", url="https://example.com")]
+
+Notes:
+- String parameters should be quoted, booleans and numbers do not need quotes
+- Call one tool at a time
+- Tool execution results will be provided in the next conversation turn`;
+};
+
+/**
+ * Build tool definitions for API function calling.
+ * Filters and formats tools for the API provider's native tool calling format.
+ *
+ * @param {Array<{name, description, parameters, category}>} tools
+ * @returns {Array<{name, description, parameters}>} Cleaned tool definitions
+ */
+const buildToolDefinitions = (tools) => {
+    if (!tools || !tools.length) return [];
+    return tools.map(t => ({
+        name: t.name,
+        description: t.description || '',
+        parameters: t.parameters || { type: 'object', properties: {} }
+    }));
+};
+
 module.exports = {
     getPresetQuestionTemplates,
     isOnboardingComplete,
@@ -306,5 +384,7 @@ module.exports = {
     buildAttachmentActionQuestion,
     buildProfileCollectionPrompt,
     buildOnboardingPrompt,
-    buildChatPrompt
+    buildChatPrompt,
+    buildToolContext,
+    buildToolDefinitions
 };
