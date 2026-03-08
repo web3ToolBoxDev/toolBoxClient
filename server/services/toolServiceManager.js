@@ -93,6 +93,25 @@ function stopToolService() {
 }
 
 /**
+ * Restart toolService (stop + start). For dev hot-reload of toolService code.
+ */
+async function restartToolService() {
+    stopToolService();
+    // Wait for process to exit
+    await new Promise(r => setTimeout(r, 1000));
+    startToolService();
+    // Wait for it to be ready
+    for (let i = 0; i < 10; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        try {
+            const result = await proxyToToolService('GET', '/health');
+            if (result.statusCode === 200) return { success: true };
+        } catch {}
+    }
+    return { success: false, error: 'toolService did not become healthy after restart' };
+}
+
+/**
  * Forward an HTTP request to the toolService.
  */
 function proxyToToolService(method, urlPath, body) {
@@ -165,11 +184,22 @@ async function handleExecuteTool(req, res) {
     }
 }
 
+async function handleRestart(req, res) {
+    try {
+        const result = await restartToolService();
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     startToolService,
     stopToolService,
+    restartToolService,
     handleHealth,
     handleListTools,
     handleRegisterTool,
-    handleExecuteTool
+    handleExecuteTool,
+    handleRestart
 };

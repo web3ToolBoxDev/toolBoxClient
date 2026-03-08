@@ -198,11 +198,8 @@ async function getPage(browserId) {
     const browser = getBrowser(browserId);
     if (!browser) throw new Error(`Browser ${browserId} not found`);
     const pages = await browser.pages();
-    // Reuse first blank page if available
-    if (pages.length === 1) {
-        const url = pages[0].url();
-        if (url === 'about:blank' || url === '') return pages[0];
-    }
+    // Return the last (most recently active) page, or create one if none exist
+    if (pages.length > 0) return pages[pages.length - 1];
     return browser.newPage();
 }
 

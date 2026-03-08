@@ -125,6 +125,10 @@ app.post('/test/browser-close', async (req, res) => {
     }
 });
 
+// ─── Register built-in tools ───
+const browserTools = require('./lib/browserTools');
+browserTools.registerAll();
+
 // ─── Start ───
 const server = app.listen(PORT, () => {
     console.log(`[toolService] running on :${PORT}`);

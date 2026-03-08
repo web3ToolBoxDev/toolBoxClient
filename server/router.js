@@ -323,5 +323,6 @@ router.get('/tools/health', toolServiceManager.handleHealth);
 router.get('/tools/list', toolServiceManager.handleListTools);
 router.post('/tools/register', toolServiceManager.handleRegisterTool);
 router.post('/tools/execute', toolServiceManager.handleExecuteTool);
+router.post('/tools/restart', toolServiceManager.handleRestart);
 
 module.exports = router;
