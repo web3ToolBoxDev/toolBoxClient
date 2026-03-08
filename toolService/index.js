@@ -135,6 +135,9 @@ httpFetcher.registerAll();
 const captchaSolver = require('./lib/captchaSolver');
 captchaSolver.registerAll();
 
+const artifactRenderer = require('./lib/artifactRenderer');
+artifactRenderer.registerAll();
+
 // ─── Start ───
 const server = app.listen(PORT, () => {
     console.log(`[toolService] running on :${PORT}`);
