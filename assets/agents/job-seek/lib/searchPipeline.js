@@ -170,8 +170,7 @@ async function _runPipeline(sessionId) {
             try {
                 const parsed = await parseListingHandler({
                     url: listing.url,
-                    rawHtml: listing.description || '',
-                    mode: 'http'
+                    useBrowser: false
                 });
                 requirements = parsed;
                 pipeline.progress.parsed++;
@@ -182,18 +181,21 @@ async function _runPipeline(sessionId) {
             }
 
             // Match against profile
-            const matchResult = await matchProfileHandler({
+            const matchResult = matchProfileHandler({
                 profile,
-                jobRequirements: requirements || {
-                    technical: [],
-                    experience: [],
-                    education: [],
-                    title: listing.title || ''
+                requirements: requirements || {
+                    title: listing.title || '',
+                    sections: {
+                        technical: '',
+                        experience: '',
+                        education: '',
+                        soft_skills: ''
+                    }
                 },
                 jobTitle: listing.title
             });
 
-            const score = matchResult.overall || 0;
+            const score = matchResult.overallScore || 0;
             pipeline.progress.matched++;
 
             // Update job card with score
@@ -257,11 +259,11 @@ async function generateResume(sessionId, jobUrl, profile) {
     if (!job) return { error: 'Job not found' };
 
     try {
-        const result = await resumeGenHandler({
+        const result = resumeGenHandler({
             profile,
             jobTitle: job.title,
-            jobRequirements: job.artifacts?.requirements || {},
-            matchedSkills: []
+            company: job.company,
+            requirements: job.artifacts?.requirements || {}
         });
 
         dashboardServer.upsertJobCard(sessionId, {
@@ -285,11 +287,11 @@ async function generateCoverLetter(sessionId, jobUrl, profile) {
     if (!job) return { error: 'Job not found' };
 
     try {
-        const result = await coverLetterHandler({
+        const result = coverLetterHandler({
             profile,
             company: job.company,
             jobTitle: job.title,
-            jobRequirements: job.artifacts?.requirements || {}
+            requirements: job.artifacts?.requirements || {}
         });
 
         dashboardServer.upsertJobCard(sessionId, {

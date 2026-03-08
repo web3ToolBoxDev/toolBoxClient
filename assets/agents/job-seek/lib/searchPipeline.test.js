@@ -158,7 +158,7 @@ describe('searchPipeline', () => {
                     { url: 'https://j.com/2', title: 'SWE', company: 'BigCo' }
                 ]
             });
-            matchProfileHandler.mockResolvedValue({ overall: 75 });
+            matchProfileHandler.mockReturnValue({ overallScore: 75 });
 
             pipeline.startPipeline('exec-test-1', { minScore: 50, targetCount: 5 }, DIRECTION, PROFILE);
             // Wait for async pipeline
@@ -176,7 +176,7 @@ describe('searchPipeline', () => {
                     { url: 'https://dup.com/1', title: 'Dev duplicate' }
                 ]
             });
-            matchProfileHandler.mockResolvedValue({ overall: 80 });
+            matchProfileHandler.mockReturnValue({ overallScore: 80 });
 
             pipeline.startPipeline('dedup-test-1', { minScore: 50 }, DIRECTION, PROFILE);
             await new Promise(r => setTimeout(r, 200));
@@ -202,7 +202,7 @@ describe('searchPipeline', () => {
                 listings.push({ url: `https://target.com/${i}`, title: `Job ${i}` });
             }
             jobSearchHandler.mockResolvedValue({ listings });
-            matchProfileHandler.mockResolvedValue({ overall: 90 });
+            matchProfileHandler.mockReturnValue({ overallScore: 90 });
 
             pipeline.startPipeline('target-test-1', { minScore: 50, targetCount: 3 }, DIRECTION, PROFILE);
             await new Promise(r => setTimeout(r, 500));
@@ -227,7 +227,7 @@ describe('searchPipeline', () => {
             jobSearchHandler.mockResolvedValue({
                 listings: [{ url: 'https://matcherr.com/1', title: 'Dev' }]
             });
-            matchProfileHandler.mockRejectedValue(new Error('AI unavailable'));
+            matchProfileHandler.mockImplementation(() => { throw new Error('AI unavailable'); });
 
             pipeline.startPipeline('matcherr-test-1', {}, DIRECTION, PROFILE);
             await new Promise(r => setTimeout(r, 200));
@@ -249,7 +249,7 @@ describe('searchPipeline', () => {
             dashboardServer.getJobCards.mockReturnValue([
                 { url: 'https://gen.com/1', title: 'Dev', artifacts: { requirements: {} } }
             ]);
-            resumeGenHandler.mockResolvedValue({ markdown: '# Resume\n\nTailored content' });
+            resumeGenHandler.mockReturnValue({ markdown: '# Resume\n\nTailored content' });
 
             const result = await pipeline.generateResume('gen-resume-2', 'https://gen.com/1', PROFILE);
             expect(result.success).toBe(true);
@@ -263,7 +263,7 @@ describe('searchPipeline', () => {
             dashboardServer.getJobCards.mockReturnValue([
                 { url: 'https://gen.com/2', title: 'Dev' }
             ]);
-            resumeGenHandler.mockRejectedValue(new Error('AI down'));
+            resumeGenHandler.mockImplementation(() => { throw new Error('AI down'); });
 
             const result = await pipeline.generateResume('gen-resume-3', 'https://gen.com/2', PROFILE);
             expect(result.error).toBe('AI down');
@@ -282,7 +282,7 @@ describe('searchPipeline', () => {
             dashboardServer.getJobCards.mockReturnValue([
                 { url: 'https://cl.com/1', title: 'Dev', company: 'Acme', artifacts: {} }
             ]);
-            coverLetterHandler.mockResolvedValue({ markdown: '# Cover Letter\n\nDear Hiring Manager' });
+            coverLetterHandler.mockReturnValue({ markdown: '# Cover Letter\n\nDear Hiring Manager' });
 
             const result = await pipeline.generateCoverLetter('gen-cl-2', 'https://cl.com/1', PROFILE);
             expect(result.success).toBe(true);

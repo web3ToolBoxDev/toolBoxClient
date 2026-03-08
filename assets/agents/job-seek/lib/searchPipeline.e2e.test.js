@@ -21,16 +21,21 @@ jest.mock('./tools/jobSearch', () => ({
     })
 }));
 jest.mock('./tools/parseListing', () => ({
-    handler: jest.fn().mockResolvedValue({ technical: ['React', 'Node'], experience: ['3+ years'], education: [] })
+    handler: jest.fn().mockResolvedValue({
+        title: 'React Developer',
+        sections: { technical: 'React, Node, TypeScript', experience: '3+ years', education: 'Bachelor degree', soft_skills: '' },
+        url: '',
+        parsedAt: new Date().toISOString()
+    })
 }));
 jest.mock('./tools/matchProfile', () => ({
-    handler: jest.fn().mockResolvedValue({ overall: 78 })
+    handler: jest.fn().mockReturnValue({ overallScore: 78, breakdown: { skills: { score: 80, matched: ['react'], missing: [] }, experience: { score: 70, detail: '' }, education: { score: 80, detail: '' } } })
 }));
 jest.mock('./tools/resumeGen', () => ({
-    handler: jest.fn().mockResolvedValue({ markdown: '# Tailored Resume\n\nJohn Doe — React Developer' })
+    handler: jest.fn().mockReturnValue({ markdown: '# Tailored Resume\n\nJohn Doe — React Developer' })
 }));
 jest.mock('./tools/coverLetter', () => ({
-    handler: jest.fn().mockResolvedValue({ markdown: '# Cover Letter\n\nDear Hiring Manager' })
+    handler: jest.fn().mockReturnValue({ markdown: '# Cover Letter\n\nDear Hiring Manager' })
 }));
 
 const dashboardServer = require('./dashboardServer');
