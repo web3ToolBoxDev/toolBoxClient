@@ -214,4 +214,210 @@ describe('dashboardServer', () => {
             expect(count).toBe(1);
         });
     });
+
+    // ─── Job Workflow State ───
+    describe('job workflow state', () => {
+        const { upsertJobCard, updateJobStatus, getJobCards, getJobStats } = dashboardServer;
+
+        // Use unique session IDs per test to avoid cross-contamination
+        let jobTestCounter = 0;
+        function jobSid() { return `job-test-${++jobTestCounter}-${Date.now()}`; }
+
+        describe('upsertJobCard', () => {
+            it('creates a new job card with defaults', () => {
+                const sid = jobSid();
+                upsertJobCard(sid, { url: 'https://example.com/j/1', title: 'Dev', company: 'Acme' });
+                const cards = getJobCards(sid);
+                expect(cards).toHaveLength(1);
+                expect(cards[0].url).toBe('https://example.com/j/1');
+                expect(cards[0].title).toBe('Dev');
+                expect(cards[0].company).toBe('Acme');
+                expect(cards[0].status).toBe('discovered');
+                expect(cards[0].matchScore).toBeNull();
+                expect(cards[0].createdAt).toBeDefined();
+                expect(cards[0].updatedAt).toBeDefined();
+            });
+
+            it('merges updates into existing card', () => {
+                const sid = jobSid();
+                upsertJobCard(sid, { url: 'https://example.com/j/2', title: 'Dev' });
+                upsertJobCard(sid, { url: 'https://example.com/j/2', company: 'BigCo', matchScore: 85 });
+                const cards = getJobCards(sid);
+                expect(cards).toHaveLength(1);
+                expect(cards[0].title).toBe('Dev');
+                expect(cards[0].company).toBe('BigCo');
+                expect(cards[0].matchScore).toBe(85);
+            });
+
+            it('ignores null or missing url', () => {
+                const sid = jobSid();
+                upsertJobCard(sid, null);
+                upsertJobCard(sid, { title: 'No URL' });
+                expect(getJobCards(sid)).toHaveLength(0);
+            });
+
+            it('merges artifacts from separate upserts', () => {
+                const sid = jobSid();
+                upsertJobCard(sid, { url: 'https://example.com/j/3', artifacts: { resume: 'v1.md' } });
+                upsertJobCard(sid, { url: 'https://example.com/j/3', artifacts: { coverLetter: 'cl.md' } });
+                const card = getJobCards(sid)[0];
+                expect(card.artifacts.resume).toBe('v1.md');
+                expect(card.artifacts.coverLetter).toBe('cl.md');
+            });
+
+            it('preserves createdAt on update', () => {
+                const sid = jobSid();
+                upsertJobCard(sid, { url: 'https://example.com/j/4', title: 'Old' });
+                const created = getJobCards(sid)[0].createdAt;
+                upsertJobCard(sid, { url: 'https://example.com/j/4', title: 'New' });
+                expect(getJobCards(sid)[0].createdAt).toBe(created);
+            });
+        });
+
+        describe('updateJobStatus', () => {
+            it('updates existing card status', () => {
+                const sid = jobSid();
+                upsertJobCard(sid, { url: 'https://example.com/s/1', title: 'X' });
+                updateJobStatus(sid, 'https://example.com/s/1', 'matched');
+                expect(getJobCards(sid)[0].status).toBe('matched');
+            });
+
+            it('does nothing for nonexistent job', () => {
+                const sid = jobSid();
+                upsertJobCard(sid, { url: 'https://example.com/s/2' });
+                updateJobStatus(sid, 'https://nonexist.com', 'submitted');
+                expect(getJobCards(sid)[0].status).toBe('discovered');
+            });
+        });
+
+        describe('getJobCards', () => {
+            it('returns empty array for new session', () => {
+                expect(getJobCards(jobSid())).toEqual([]);
+            });
+
+            it('sorts by matchScore descending', () => {
+                const sid = jobSid();
+                upsertJobCard(sid, { url: 'https://a.com/1', matchScore: 50 });
+                upsertJobCard(sid, { url: 'https://a.com/2', matchScore: 90 });
+                upsertJobCard(sid, { url: 'https://a.com/3', matchScore: 70 });
+                const cards = getJobCards(sid);
+                expect(cards[0].matchScore).toBe(90);
+                expect(cards[1].matchScore).toBe(70);
+                expect(cards[2].matchScore).toBe(50);
+            });
+
+            it('null scores come after scored cards', () => {
+                const sid = jobSid();
+                upsertJobCard(sid, { url: 'https://b.com/1' });
+                upsertJobCard(sid, { url: 'https://b.com/2', matchScore: 60 });
+                const cards = getJobCards(sid);
+                expect(cards[0].matchScore).toBe(60);
+                expect(cards[1].matchScore).toBeNull();
+            });
+        });
+
+        describe('getJobStats', () => {
+            it('returns total and counts by status', () => {
+                const sid = jobSid();
+                upsertJobCard(sid, { url: 'https://c.com/1', status: 'discovered' });
+                upsertJobCard(sid, { url: 'https://c.com/2', status: 'matched' });
+                upsertJobCard(sid, { url: 'https://c.com/3', status: 'matched' });
+                upsertJobCard(sid, { url: 'https://c.com/4', status: 'submitted' });
+                const stats = getJobStats(sid);
+                expect(stats.total).toBe(4);
+                expect(stats.discovered).toBe(1);
+                expect(stats.matched).toBe(2);
+                expect(stats.submitted).toBe(1);
+            });
+
+            it('returns total 0 for empty session', () => {
+                expect(getJobStats(jobSid()).total).toBe(0);
+            });
+        });
+    });
+
+    // ─── Job Workflow HTTP API ───
+    describe('job workflow HTTP API', () => {
+        const { upsertJobCard, getJobCards } = dashboardServer;
+
+        function postJSON(path, body) {
+            return new Promise((resolve, reject) => {
+                const postData = JSON.stringify(body);
+                const req = http.request({
+                    hostname: '127.0.0.1',
+                    port: TEST_PORT,
+                    path,
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
+                }, (res) => {
+                    let data = '';
+                    res.on('data', c => { data += c; });
+                    res.on('end', () => {
+                        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+                        catch (e) { reject(new Error(`Parse failed: ${data}`)); }
+                    });
+                });
+                req.on('error', reject);
+                req.write(postData);
+                req.end();
+            });
+        }
+
+        it('POST /api/jobs/:sessionId upserts job card', async () => {
+            const sid = `http-job-${Date.now()}`;
+            const res = await postJSON(`/api/jobs/${sid}`, { url: 'https://test.com/j1', title: 'QA', company: 'TestCo' });
+            expect(res.status).toBe(200);
+            expect(res.body.success).toBe(true);
+            const cards = getJobCards(sid);
+            expect(cards.find(c => c.url === 'https://test.com/j1')).toBeDefined();
+        });
+
+        it('POST /api/jobs/:sessionId/status updates job status', async () => {
+            const sid = `http-status-${Date.now()}`;
+            upsertJobCard(sid, { url: 'https://test.com/j2', title: 'Dev2' });
+
+            const res = await postJSON(`/api/jobs/${sid}/status`, { jobUrl: 'https://test.com/j2', status: 'submitted' });
+            expect(res.status).toBe(200);
+            expect(res.body.success).toBe(true);
+            const card = getJobCards(sid).find(c => c.url === 'https://test.com/j2');
+            expect(card.status).toBe('submitted');
+        });
+
+        it('POST /api/jobs/:sessionId returns 400 for invalid JSON', async () => {
+            return new Promise((resolve, reject) => {
+                const req = http.request({
+                    hostname: '127.0.0.1',
+                    port: TEST_PORT,
+                    path: `/api/jobs/bad-json-test`,
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Content-Length': 11 }
+                }, (res) => {
+                    let data = '';
+                    res.on('data', c => { data += c; });
+                    res.on('end', () => {
+                        expect(res.statusCode).toBe(400);
+                        resolve();
+                    });
+                });
+                req.on('error', reject);
+                req.write('not-json!!!');
+                req.end();
+            });
+        });
+
+        it('dashboard data includes job cards and stats', async () => {
+            const sid = `http-data-${Date.now()}`;
+            stateRef.selectedAnswers[sid] = { q_job_title: 'Tester' };
+            stateRef.profileSections[sid] = { basic: 'Jane' };
+            stateRef.subtasks[sid] = [];
+            stateRef.intentFiles[sid] = { version: 1 };
+
+            upsertJobCard(sid, { url: 'https://test.com/data1', title: 'Job A', matchScore: 80 });
+            upsertJobCard(sid, { url: 'https://test.com/data2', title: 'Job B', status: 'matched' });
+
+            const data = await fetchJSON(sid);
+            expect(data.jobs).toHaveLength(2);
+            expect(data.jobStats.total).toBe(2);
+        });
+    });
 });

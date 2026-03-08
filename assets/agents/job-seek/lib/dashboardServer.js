@@ -20,7 +20,7 @@ function start(getState, port) {
 
     _server = http.createServer((req, res) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
         if (req.method === 'OPTIONS') {
@@ -37,6 +37,46 @@ function start(getState, port) {
             const data = getDashboardData(sessionId);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify(data));
+        }
+
+        // POST /api/jobs/:sessionId/status — update job status (must come before /api/jobs/:sessionId)
+        const statusMatch = url.match(/^\/api\/jobs\/(.+)\/status$/);
+        if (statusMatch && req.method === 'POST') {
+            const sessionId = decodeURIComponent(statusMatch[1]);
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                try {
+                    const { jobUrl, status } = JSON.parse(body);
+                    updateJobStatus(sessionId, jobUrl, status);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true }));
+                } catch (e) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // POST /api/jobs/:sessionId — upsert a job card
+        const jobsMatch = url.match(/^\/api\/jobs\/(.+)$/);
+        if (jobsMatch && req.method === 'POST') {
+            const sessionId = decodeURIComponent(jobsMatch[1]);
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                try {
+                    const job = JSON.parse(body);
+                    upsertJobCard(sessionId, job);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true }));
+                } catch (e) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
         }
 
         // GET /dashboard/:sessionId — return HTML page
@@ -75,6 +115,90 @@ function stop() {
     });
 }
 
+// ─── Job workflow state ───
+// Jobs tracked per session: sessionId → Map<jobUrl, JobWorkflowCard>
+const _jobCards = new Map();
+
+/**
+ * Get or create job cards map for a session.
+ * @param {string} sessionId
+ * @returns {Map}
+ */
+function _getJobCards(sessionId) {
+    if (!_jobCards.has(sessionId)) {
+        _jobCards.set(sessionId, new Map());
+    }
+    return _jobCards.get(sessionId);
+}
+
+/**
+ * Add or update a job workflow card.
+ * @param {string} sessionId
+ * @param {object} job - { url, title, company, location, salary, matchScore, status, artifacts }
+ */
+function upsertJobCard(sessionId, job) {
+    if (!job || !job.url) return;
+    const cards = _getJobCards(sessionId);
+    const existing = cards.get(job.url) || {};
+    cards.set(job.url, {
+        url: job.url,
+        title: job.title || existing.title || '',
+        company: job.company || existing.company || '',
+        location: job.location || existing.location || '',
+        salary: job.salary || existing.salary || '',
+        matchScore: job.matchScore ?? existing.matchScore ?? null,
+        status: job.status || existing.status || 'discovered',
+        artifacts: { ...(existing.artifacts || {}), ...(job.artifacts || {}) },
+        updatedAt: new Date().toISOString(),
+        createdAt: existing.createdAt || new Date().toISOString()
+    });
+}
+
+/**
+ * Update job card status.
+ * @param {string} sessionId
+ * @param {string} jobUrl
+ * @param {string} status - discovered|fetched|parsed|matched|tailored|reviewed|submitted|followed_up|archived
+ */
+function updateJobStatus(sessionId, jobUrl, status) {
+    const cards = _getJobCards(sessionId);
+    const card = cards.get(jobUrl);
+    if (card) {
+        card.status = status;
+        card.updatedAt = new Date().toISOString();
+    }
+}
+
+/**
+ * Get all job cards for a session.
+ * @param {string} sessionId
+ * @returns {Array<object>}
+ */
+function getJobCards(sessionId) {
+    const cards = _getJobCards(sessionId);
+    return Array.from(cards.values()).sort((a, b) => {
+        // Sort by matchScore desc, then by updatedAt desc
+        if (a.matchScore !== null && b.matchScore !== null) return b.matchScore - a.matchScore;
+        if (a.matchScore !== null) return -1;
+        if (b.matchScore !== null) return 1;
+        return new Date(b.updatedAt) - new Date(a.updatedAt);
+    });
+}
+
+/**
+ * Get job cards count by status.
+ * @param {string} sessionId
+ * @returns {object}
+ */
+function getJobStats(sessionId) {
+    const cards = getJobCards(sessionId);
+    const stats = { total: cards.length };
+    for (const card of cards) {
+        stats[card.status] = (stats[card.status] || 0) + 1;
+    }
+    return stats;
+}
+
 function getDashboardData(sessionId) {
     const state = _stateGetter ? _stateGetter() : {};
     const answers = state.selectedAnswers?.[sessionId] || {};
@@ -102,6 +226,8 @@ function getDashboardData(sessionId) {
         },
         subtasks: subtasks.map(t => ({ key: t.key, status: t.status })),
         intentVersion: intent?.version || 1,
+        jobs: getJobCards(sessionId),
+        jobStats: getJobStats(sessionId),
         builtAt: new Date().toISOString()
     };
 }
@@ -130,11 +256,27 @@ function buildDashboardHTML(sessionId) {
   table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
   th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #2d2f4a; }
   th { color: #9da0c3; font-weight: 600; }
-  .feature-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 0.5rem; }
-  .feature-card { background: #2d2f4a; border: 1px dashed #3d4060; border-radius: 8px; padding: 1.2rem; text-align: center; }
-  .feature-card .icon { font-size: 2rem; margin-bottom: 0.5rem; }
-  .feature-card h4 { color: #8b9aff; margin: 0 0 0.4rem 0; }
-  .feature-card p { color: #9da0c3; font-size: 0.85rem; margin: 0; }
+  .pipeline { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .pipeline .stage { background: #2d2f4a; border-radius: 6px; padding: 0.5rem 0.75rem; text-align: center; min-width: 80px; }
+  .pipeline .stage .count { font-size: 1.4rem; font-weight: 700; color: #8b9aff; }
+  .pipeline .stage .label { font-size: 0.7rem; color: #9da0c3; margin-top: 2px; }
+  .pipeline .stage.active { border: 1px solid #8b9aff; }
+  .job-cards { display: grid; gap: 0.75rem; }
+  .job-card { background: #242640; border: 1px solid #2d2f4a; border-radius: 8px; padding: 1rem; display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: start; }
+  .job-card .title { font-weight: 600; color: #dfe3ff; font-size: 1rem; }
+  .job-card .company { color: #9da0c3; font-size: 0.85rem; }
+  .job-card .location { color: #7a7fa8; font-size: 0.8rem; }
+  .job-card .score { font-size: 1.3rem; font-weight: 700; text-align: center; }
+  .job-card .score.high { color: #4ade80; }
+  .job-card .score.mid { color: #fbbf24; }
+  .job-card .score.low { color: #f87171; }
+  .job-card .status-badge { font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; display: inline-block; margin-top: 0.3rem; }
+  .job-card .status-badge.discovered { background: rgba(106,126,255,0.2); color: #8b9aff; }
+  .job-card .status-badge.matched { background: rgba(74,222,128,0.2); color: #4ade80; }
+  .job-card .status-badge.tailored { background: rgba(251,191,36,0.2); color: #fbbf24; }
+  .job-card .status-badge.submitted { background: rgba(96,165,250,0.2); color: #60a5fa; }
+  .job-card .status-badge.archived { background: rgba(156,163,175,0.2); color: #9ca3af; }
+  .job-card .artifacts { margin-top: 0.3rem; font-size: 0.75rem; color: #7a7fa8; }
   .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; background: rgba(106,126,255,0.2); color: #8b9aff; margin-top: 0.5rem; }
   .refresh-indicator { position: fixed; top: 8px; right: 12px; font-size: 0.7rem; color: #555; }
 </style>
@@ -162,26 +304,15 @@ function buildDashboardHTML(sessionId) {
   </table>
 </div>
 
-<h2>Job Search Tools</h2>
-<div class="feature-grid">
-  <div class="feature-card">
-    <div class="icon">&#x1F50D;</div>
-    <h4>Match Jobs</h4>
-    <p>Score and rank job postings against your profile and preferences</p>
-    <span class="badge">Coming Soon</span>
-  </div>
-  <div class="feature-card">
-    <div class="icon">&#x1F4C4;</div>
-    <h4>Resume Builder</h4>
-    <p>Generate tailored resumes for each job target</p>
-    <span class="badge">Coming Soon</span>
-  </div>
-  <div class="feature-card">
-    <div class="icon">&#x2709;&#xFE0F;</div>
-    <h4>Cover Letter</h4>
-    <p>Write customized cover letters per application</p>
-    <span class="badge">Coming Soon</span>
-  </div>
+<h2>Application Pipeline</h2>
+<div class="card">
+  <div class="pipeline" id="pipeline"></div>
+</div>
+
+<h2>Job Listings</h2>
+<div id="jobCards" class="job-cards"></div>
+<div id="noJobs" class="card" style="text-align:center;color:#9da0c3;">
+  No job listings yet. Use the AI chat to search for jobs.
 </div>
 
 <script>
@@ -199,16 +330,52 @@ function renderItem(label, value, fullWidth) {
     return '<div class="' + cls + '"><label>' + esc(label) + '</label><div class="' + valCls + '">' + esc(value || '\\u2014') + '</div></div>';
 }
 
+const STAGES = ['discovered','fetched','parsed','matched','tailored','reviewed','submitted','followed_up','archived'];
+
+function renderPipeline(stats) {
+    return STAGES.map(function(s) {
+        var count = stats[s] || 0;
+        var cls = count > 0 ? 'stage active' : 'stage';
+        return '<div class="' + cls + '"><div class="count">' + count + '</div><div class="label">' + s + '</div></div>';
+    }).join('');
+}
+
+function scoreClass(score) {
+    if (score >= 70) return 'high';
+    if (score >= 40) return 'mid';
+    return 'low';
+}
+
+function renderJobCard(job) {
+    var scoreHtml = job.matchScore !== null && job.matchScore !== undefined
+        ? '<div class="score ' + scoreClass(job.matchScore) + '">' + job.matchScore + '%</div>'
+        : '<div class="score" style="color:#555">—</div>';
+    var artifacts = job.artifacts || {};
+    var artList = Object.keys(artifacts).filter(function(k) { return artifacts[k]; });
+    var artHtml = artList.length ? '<div class="artifacts">' + artList.join(' | ') + '</div>' : '';
+    var statusCls = 'status-badge ' + (job.status || 'discovered');
+    return '<div class="job-card">' +
+        '<div>' +
+            '<div class="title">' + esc(job.title || 'Untitled') + '</div>' +
+            '<div class="company">' + esc(job.company || '') + '</div>' +
+            '<div class="location">' + esc(job.location || '') + (job.salary ? ' | ' + esc(job.salary) : '') + '</div>' +
+            '<span class="' + statusCls + '">' + esc(job.status || 'discovered') + '</span>' +
+            artHtml +
+        '</div>' +
+        scoreHtml +
+    '</div>';
+}
+
 function render(data) {
-    const d = data.direction || {};
+    var d = data.direction || {};
     document.getElementById('direction').innerHTML =
         renderItem('Job Title', d.jobTitle) +
         renderItem('Location', d.location) +
         renderItem('Work Mode', d.workMode) +
         renderItem('Target Salary', d.salary ? d.salary + 'K' : '');
 
-    const p = data.profile || {};
-    let profileHtml =
+    var p = data.profile || {};
+    var profileHtml =
         renderItem('Basic Info', p.basic) +
         renderItem('Key Skills', p.skills) +
         renderItem('Experience', p.experience) +
@@ -218,13 +385,29 @@ function render(data) {
     }
     document.getElementById('profile').innerHTML = profileHtml;
 
-    const subtasksEl = document.getElementById('subtasks');
+    var subtasksEl = document.getElementById('subtasks');
     subtasksEl.innerHTML = (data.subtasks || []).map(function(t) {
         return '<tr><td>' + statusIcon(t.status) + '</td><td>' + esc(t.key) + '</td><td>' + esc(t.status) + '</td></tr>';
     }).join('');
 
+    // Pipeline
+    document.getElementById('pipeline').innerHTML = renderPipeline(data.jobStats || {});
+
+    // Job cards
+    var jobs = data.jobs || [];
+    var jobCardsEl = document.getElementById('jobCards');
+    var noJobsEl = document.getElementById('noJobs');
+    if (jobs.length > 0) {
+        jobCardsEl.innerHTML = jobs.map(renderJobCard).join('');
+        noJobsEl.style.display = 'none';
+    } else {
+        jobCardsEl.innerHTML = '';
+        noJobsEl.style.display = 'block';
+    }
+
     document.getElementById('meta').textContent =
         'Session: ' + (data.sessionId || '').slice(0, 8) +
+        ' | Jobs: ' + (data.jobStats?.total || 0) +
         ' | Intent v' + (data.intentVersion || 1) +
         ' | Updated: ' + new Date().toLocaleString();
 }
@@ -253,4 +436,8 @@ function getDashboardURL(sessionId) {
     return `http://127.0.0.1:${_port}/dashboard/${encodeURIComponent(sessionId)}`;
 }
 
-module.exports = { start, stop, getDashboardURL, DASHBOARD_PORT };
+module.exports = {
+    start, stop, getDashboardURL, DASHBOARD_PORT,
+    // Job workflow
+    upsertJobCard, updateJobStatus, getJobCards, getJobStats
+};
