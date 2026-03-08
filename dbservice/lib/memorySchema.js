@@ -72,6 +72,7 @@ function registerDomainPack(domain, pack) {
 const VALID_WRITE_CLASSES = new Set(['explicit', 'inferred', 'candidate', 'transient']);
 const VALID_DURABILITIES = new Set(['permanent', 'durable', 'session', 'transient']);
 const VALID_STATUSES = new Set(['active', 'candidate', 'superseded', 'deleted', 'expired']);
+const VALID_SOURCE_TYPES = new Set(['user_explicit', 'assistant_inferred', 'system_extracted', 'imported']);
 
 /**
  * Validate a document before write.
@@ -108,6 +109,34 @@ function validateDoc(doc) {
         }
     }
 
+    // Story 8.4: sourceType validation
+    if (doc.sourceType && !VALID_SOURCE_TYPES.has(doc.sourceType)) {
+        errors.push(`invalid sourceType: ${doc.sourceType}. Valid: ${[...VALID_SOURCE_TYPES].join(', ')}`);
+    }
+
+    // Story 8.4: payload must be valid JSON object if provided
+    if (doc.payload !== undefined && doc.payload !== null) {
+        if (typeof doc.payload === 'string') {
+            try { JSON.parse(doc.payload); } catch {
+                errors.push('payload must be a valid JSON string');
+            }
+        } else if (typeof doc.payload !== 'object') {
+            errors.push('payload must be an object or JSON string');
+        }
+    }
+
+    // Story 8.4: tags must be array of strings
+    if (doc.tags !== undefined && doc.tags !== null) {
+        if (Array.isArray(doc.tags)) {
+            for (const tag of doc.tags) {
+                if (typeof tag !== 'string') {
+                    errors.push('tags must be an array of strings');
+                    break;
+                }
+            }
+        }
+    }
+
     return { valid: errors.length === 0, errors };
 }
 
@@ -133,6 +162,41 @@ function getAllTypes() {
     return { ..._typeRegistry };
 }
 
+// ==================== Cross-Agent Access Control (Story 8.3) ====================
+
+/**
+ * Check if an agent can read a document based on scope.
+ * Agents can read: their own scope, user:global, global
+ * @param {string} agentId - e.g., 'agent:job-seek'
+ * @param {string} docScope - Document scope
+ * @returns {boolean}
+ */
+function canRead(agentId, docScope) {
+    if (!docScope || docScope === 'global' || docScope === 'user:global') return true;
+    if (docScope.startsWith('agent:')) {
+        return docScope === agentId || docScope === `agent:${agentId}`;
+    }
+    // Session scopes are readable by any agent
+    if (docScope.startsWith('session:')) return true;
+    return true;
+}
+
+/**
+ * Check if an agent can write to a scope.
+ * Agents can write to: their own scope, user:global, global
+ * @param {string} agentId
+ * @param {string} targetScope
+ * @returns {boolean}
+ */
+function canWrite(agentId, targetScope) {
+    if (!targetScope || targetScope === 'global' || targetScope === 'user:global') return true;
+    if (targetScope.startsWith('agent:')) {
+        return targetScope === agentId || targetScope === `agent:${agentId}`;
+    }
+    if (targetScope.startsWith('session:')) return true;
+    return true;
+}
+
 module.exports = {
     registerTypes,
     registerDomainPack,
@@ -141,10 +205,13 @@ module.exports = {
     getConflictPolicy,
     resolveConflict,
     getAllTypes,
+    canRead,
+    canWrite,
     CONFLICT_POLICIES,
     VALID_WRITE_CLASSES,
     VALID_DURABILITIES,
     VALID_STATUSES,
+    VALID_SOURCE_TYPES,
     // For testing: reset registry to core types only
     _resetRegistry: () => {
         for (const key of Object.keys(_typeRegistry)) delete _typeRegistry[key];

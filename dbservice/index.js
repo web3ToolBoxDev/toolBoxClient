@@ -346,6 +346,105 @@ async function handleKnowledgeFresh(req, res) {
     }
 }
 
+// --------------- Phase 8 handlers ---------------
+
+const contextAssembly = require('./lib/contextAssembly');
+const memoryRelations = require('./lib/memoryRelations');
+
+async function handleAssembleContext(req, res) {
+    const body = await readBody(req);
+    if (!body.taskType) {
+        return sendJSON(res, 400, { success: false, error: 'taskType is required' });
+    }
+    try {
+        const results = contextAssembly.assembleContext(body.taskType, body.options || {});
+        sendJSON(res, 200, { success: true, results, totalDocs: results.length, totalTokens: results.reduce((s, r) => s + r.tokens, 0) });
+    } catch (err) {
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleRelations(req, res) {
+    const body = await readBody(req);
+    if (!body.action) {
+        return sendJSON(res, 400, { success: false, error: 'action is required' });
+    }
+    try {
+        switch (body.action) {
+            case 'add': {
+                const id = memoryRelations.addRelation(body.fromRefId, body.relation, body.toRefId, body.metadata);
+                return sendJSON(res, 200, { success: true, id });
+            }
+            case 'from':
+                return sendJSON(res, 200, { success: true, results: memoryRelations.findRelationsFrom(body.fromRefId, body.relation) });
+            case 'to':
+                return sendJSON(res, 200, { success: true, results: memoryRelations.findRelationsTo(body.toRefId, body.relation) });
+            case 'by_relation':
+                return sendJSON(res, 200, { success: true, results: memoryRelations.findByRelation(body.relation) });
+            case 'remove':
+                return sendJSON(res, 200, { success: true, removed: memoryRelations.removeRelation(body.id) });
+            case 'remove_for':
+                return sendJSON(res, 200, { success: true, removed: memoryRelations.removeRelationsFor(body.refId) });
+            default:
+                return sendJSON(res, 400, { success: false, error: `Unknown action: ${body.action}` });
+        }
+    } catch (err) {
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleEvents(req, res) {
+    const body = await readBody(req);
+    if (!body.action) {
+        return sendJSON(res, 400, { success: false, error: 'action is required' });
+    }
+    try {
+        switch (body.action) {
+            case 'log': {
+                const id = memoryRelations.logEvent(body.eventType, body);
+                return sendJSON(res, 200, { success: true, id });
+            }
+            case 'get':
+                return sendJSON(res, 200, { success: true, results: memoryRelations.getEvents(body.refId, body.limit) });
+            case 'by_type':
+                return sendJSON(res, 200, { success: true, results: memoryRelations.getEventsByType(body.eventType, body.limit) });
+            case 'by_actor':
+                return sendJSON(res, 200, { success: true, results: memoryRelations.getEventsByActor(body.actorId, body.limit) });
+            default:
+                return sendJSON(res, 400, { success: false, error: `Unknown action: ${body.action}` });
+        }
+    } catch (err) {
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleFindByKey(req, res) {
+    const body = await readBody(req);
+    if (!body.memoryKey) {
+        return sendJSON(res, 400, { success: false, error: 'memoryKey is required' });
+    }
+    try {
+        const doc = knowledgeStore.findByMemoryKey(body.memoryKey);
+        sendJSON(res, 200, { success: true, result: doc });
+    } catch (err) {
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
+async function handleCleanup(req, res) {
+    const body = await readBody(req);
+    try {
+        if (body.dryRun) {
+            const cold = knowledgeStore.findColdMemories(body);
+            return sendJSON(res, 200, { success: true, dryRun: true, wouldArchive: cold.length, docs: cold.map(d => ({ refId: d.refId, type: d.type, lastUsedAt: d.lastUsedAt, accessCount: d.accessCount })) });
+        }
+        const result = knowledgeStore.cleanupColdMemories(body);
+        sendJSON(res, 200, { success: true, ...result });
+    } catch (err) {
+        sendJSON(res, 500, { success: false, error: err.message });
+    }
+}
+
 // --------------- server ---------------
 
 const server = http.createServer(async (req, res) => {
@@ -407,6 +506,25 @@ const server = http.createServer(async (req, res) => {
         }
         if (url === '/knowledge/register-pack' && req.method === 'POST') {
             return await handleKnowledgeRegisterPack(req, res);
+        }
+        // Story 8.1: Context assembly
+        if (url === '/knowledge/assemble-context' && req.method === 'POST') {
+            return await handleAssembleContext(req, res);
+        }
+        // Story 8.2: Relations & Events
+        if (url === '/knowledge/relations' && req.method === 'POST') {
+            return await handleRelations(req, res);
+        }
+        if (url === '/knowledge/events' && req.method === 'POST') {
+            return await handleEvents(req, res);
+        }
+        // Story 8.4: Find by memoryKey
+        if (url === '/knowledge/find-by-key' && req.method === 'POST') {
+            return await handleFindByKey(req, res);
+        }
+        // Story 8.5: Cold memory cleanup
+        if (url === '/knowledge/cleanup' && req.method === 'POST') {
+            return await handleCleanup(req, res);
         }
         sendJSON(res, 404, { success: false, error: 'Not found' });
     } catch (err) {

@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const initSqlJs = require('sql.js');
 const { validateDoc, getConflictPolicy, resolveConflict } = require('./memorySchema');
+const memoryRelations = require('./memoryRelations');
 
 let db = null;
 let dbPath = '';
@@ -87,6 +88,9 @@ async function init(savePath) {
             )
         `);
 
+        // Initialize relations & events tables
+        memoryRelations.init(db);
+
         console.log(`[knowledgeStore] Initialized at ${dbPath}`);
         persist();
     })();
@@ -103,7 +107,13 @@ function _migrateColumns() {
         { col: 'writeClass',      sql: "ALTER TABLE documents ADD COLUMN writeClass TEXT DEFAULT 'explicit'" },
         { col: 'lastUsedAt',      sql: 'ALTER TABLE documents ADD COLUMN lastUsedAt INTEGER DEFAULT 0' },
         { col: 'accessCount',     sql: 'ALTER TABLE documents ADD COLUMN accessCount INTEGER DEFAULT 0' },
-        { col: 'status',          sql: "ALTER TABLE documents ADD COLUMN status TEXT DEFAULT 'active'" }
+        { col: 'status',          sql: "ALTER TABLE documents ADD COLUMN status TEXT DEFAULT 'active'" },
+        // Story 8.4: Advanced schema features
+        { col: 'memoryKey',       sql: "ALTER TABLE documents ADD COLUMN memoryKey TEXT DEFAULT ''" },
+        { col: 'payload',         sql: "ALTER TABLE documents ADD COLUMN payload TEXT DEFAULT '{}'" },
+        { col: 'sourceType',      sql: "ALTER TABLE documents ADD COLUMN sourceType TEXT DEFAULT 'user_explicit'" },
+        // Story 8.3: Cross-agent tracking
+        { col: 'actorId',         sql: "ALTER TABLE documents ADD COLUMN actorId TEXT DEFAULT ''" }
     ];
     for (const m of migrations) {
         try {
@@ -147,7 +157,9 @@ function _createIndexes() {
         'CREATE INDEX IF NOT EXISTS idx_docs_valid_until ON documents(validUntil)',
         'CREATE INDEX IF NOT EXISTS idx_docs_type_status ON documents(type, status)',
         'CREATE INDEX IF NOT EXISTS idx_docs_scope_status ON documents(scope, status)',
-        'CREATE INDEX IF NOT EXISTS idx_audit_refid ON memory_audit(refId)'
+        'CREATE INDEX IF NOT EXISTS idx_audit_refid ON memory_audit(refId)',
+        'CREATE INDEX IF NOT EXISTS idx_docs_memorykey ON documents(memoryKey)',
+        'CREATE INDEX IF NOT EXISTS idx_docs_actorid ON documents(actorId)'
     ];
     for (const sql of indexes) {
         try { db.run(sql); } catch { /* index may already exist */ }
@@ -311,6 +323,7 @@ function upsert(doc, opts = {}) {
         ]);
         _audit(refId, 'update', oldVersion, newVersion, doc.source || '', finalSummary);
     } else {
+        const payload = doc.payload ? (typeof doc.payload === 'string' ? doc.payload : JSON.stringify(doc.payload)) : '{}';
         db.run(`
             INSERT INTO documents
                 (refId, type, subType, scope, tags, content, summary,
@@ -318,8 +331,9 @@ function upsert(doc, opts = {}) {
                  relations, ttl, writeClass,
                  validFrom, validUntil, lastConfirmedAt,
                  lastUsedAt, accessCount,
+                 memoryKey, payload, sourceType, actorId,
                  createdAt, updatedAt)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `, [
             refId,
             finalType,
@@ -341,6 +355,10 @@ function upsert(doc, opts = {}) {
             doc.lastConfirmedAt || 0,
             0, // lastUsedAt
             0, // accessCount
+            doc.memoryKey || '',
+            payload,
+            doc.sourceType || 'user_explicit',
+            doc.actorId || '',
             now,
             now
         ]);
@@ -398,6 +416,10 @@ function _rowToDoc(row) {
         lastConfirmedAt: row.lastConfirmedAt || 0,
         lastUsedAt: row.lastUsedAt || 0,
         accessCount: row.accessCount || 0,
+        memoryKey: row.memoryKey || '',
+        payload: (() => { try { return JSON.parse(row.payload || '{}'); } catch { return {}; } })(),
+        sourceType: row.sourceType || 'user_explicit',
+        actorId: row.actorId || '',
         createdAt: row.createdAt,
         updatedAt: row.updatedAt
     };
@@ -687,6 +709,104 @@ function stats() {
     return { total, byType };
 }
 
+// ==================== Story 8.4: Find by memoryKey ====================
+
+/**
+ * Find a document by its memoryKey (logical slot key).
+ * @param {string} memoryKey
+ * @returns {object|null}
+ */
+function findByMemoryKey(memoryKey) {
+    if (!db || !memoryKey) return null;
+    const docs = _queryAll(
+        "SELECT * FROM documents WHERE memoryKey = ? AND status = 'active' ORDER BY updatedAt DESC LIMIT 1",
+        [memoryKey]
+    );
+    if (docs.length > 0) _touchUsage([docs[0].refId]);
+    return docs[0] || null;
+}
+
+/**
+ * Find documents by actorId (Story 8.3).
+ * @param {string} actorId
+ * @returns {object[]}
+ */
+function findByActor(actorId) {
+    if (!db || !actorId) return [];
+    const docs = _queryAll(
+        "SELECT * FROM documents WHERE actorId = ? AND status = 'active' ORDER BY updatedAt DESC",
+        [actorId]
+    );
+    if (docs.length) _touchUsage(docs.map(d => d.refId));
+    return docs;
+}
+
+// ==================== Story 8.5: Hot Memory Cleanup ====================
+
+/**
+ * Find cold (unused/stale) documents that are candidates for cleanup.
+ * Cold = low accessCount + old lastUsedAt + not permanent durability
+ * @param {object} [options]
+ * @param {number} [options.lastUsedDays=60] - Days since last use
+ * @param {number} [options.maxAccessCount=2] - Max access count threshold
+ * @param {string[]} [options.excludeTypes] - Types to exclude from cleanup
+ * @returns {object[]}
+ */
+function findColdMemories(options = {}) {
+    if (!db) return [];
+    const {
+        lastUsedDays = 60,
+        maxAccessCount = 2,
+        excludeTypes = ['identity', 'decision']
+    } = options;
+
+    const cutoff = Date.now() - (lastUsedDays * 24 * 60 * 60 * 1000);
+    const excludePlaceholders = excludeTypes.map(() => '?').join(',');
+
+    let sql, params;
+    if (excludeTypes.length > 0) {
+        sql = `SELECT * FROM documents
+               WHERE status = 'active'
+               AND (lastUsedAt = 0 OR lastUsedAt < ?)
+               AND accessCount <= ?
+               AND type NOT IN (${excludePlaceholders})
+               ORDER BY lastUsedAt ASC, accessCount ASC`;
+        params = [cutoff, maxAccessCount, ...excludeTypes];
+    } else {
+        sql = `SELECT * FROM documents
+               WHERE status = 'active'
+               AND (lastUsedAt = 0 OR lastUsedAt < ?)
+               AND accessCount <= ?
+               ORDER BY lastUsedAt ASC, accessCount ASC`;
+        params = [cutoff, maxAccessCount];
+    }
+
+    return _queryAll(sql, params);
+}
+
+/**
+ * Clean up cold memories by archiving (soft-delete).
+ * @param {object} [options] - Same as findColdMemories
+ * @returns {{ archived: number, refIds: string[] }}
+ */
+function cleanupColdMemories(options = {}) {
+    if (!db) return { archived: 0, refIds: [] };
+
+    const cold = findColdMemories(options);
+    const now = Date.now();
+    const refIds = [];
+
+    for (const doc of cold) {
+        db.run('DELETE FROM documents_fts WHERE refId = ?', [doc.refId]);
+        db.run("UPDATE documents SET status = 'deleted', updatedAt = ? WHERE refId = ?", [now, doc.refId]);
+        _audit(doc.refId, 'cold_cleanup', doc.version, doc.version, '', 'cold memory archived');
+        refIds.push(doc.refId);
+    }
+
+    if (refIds.length > 0) persist();
+    return { archived: refIds.length, refIds };
+}
+
 /** Close database */
 function close() {
     if (db) {
@@ -738,12 +858,16 @@ module.exports = {
     findByScope,
     findResolved,
     findFresh,
+    findByMemoryKey,
+    findByActor,
     search,
     remove,
     hardRemove,
     removeByType,
     expireTTL,
     purge,
+    findColdMemories,
+    cleanupColdMemories,
     getAuditLog,
     stats,
     close,
