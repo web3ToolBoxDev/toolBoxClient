@@ -2,9 +2,12 @@
 
 const { TOOL_DEF, handler } = require('./jobSearch');
 
-// Mock the indeed adapter
+// Mock source adapters
 jest.mock('../sources/indeed', () => ({
     search: jest.fn()
+}));
+jest.mock('../sources/google', () => ({
+    search: jest.fn().mockResolvedValue({ listings: [], method: 'http' })
 }));
 const indeed = require('../sources/indeed');
 
@@ -92,14 +95,14 @@ describe('job_search tool', () => {
             expect(result.listings).toHaveLength(3);
         });
 
-        test('indicates browser method in source', async () => {
+        test('indicates source used in result', async () => {
             indeed.search.mockResolvedValueOnce({
                 listings: [{ title: 'X', company: 'Y', url: 'http://x.com' }],
                 method: 'browser'
             });
 
-            const result = await handler({ query: 'eng' });
-            expect(result.source).toContain('browser');
+            const result = await handler({ query: 'eng', source: 'indeed' });
+            expect(result.source).toBe('indeed');
         });
 
         test('defaults location to any', async () => {
