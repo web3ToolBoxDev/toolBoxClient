@@ -63,6 +63,68 @@ app.get('/config', (_req, res) => {
     });
 });
 
+// ─── Browser Pool endpoints ───
+const browserPool = require('./lib/browserPool');
+
+// Launch browser, navigate to URL, return title
+app.post('/browser/launch', async (req, res) => {
+    try {
+        const { env, headless } = req.body;
+        const { browserId, mode } = await browserPool.launch({
+            chromePath: CHROME_PATH,
+            savePath: SAVE_PATH,
+            env: env || undefined,
+            headless: headless !== false
+        });
+        res.json({ success: true, browserId, mode });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Close browser
+app.post('/browser/close', async (req, res) => {
+    try {
+        await browserPool.close(req.body.browserId);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// List active browsers
+app.get('/browser/list', (_req, res) => {
+    res.json({ success: true, browsers: browserPool.listBrowsers() });
+});
+
+// E2E test endpoint — launch, navigate, get title, close
+app.post('/test/browser-launch', async (req, res) => {
+    try {
+        const { url, env, headless } = req.body;
+        const { browserId, mode } = await browserPool.launch({
+            chromePath: CHROME_PATH,
+            savePath: SAVE_PATH,
+            env: env || undefined,
+            headless: headless !== false
+        });
+        const page = await browserPool.getPage(browserId);
+        await page.goto(url || 'about:blank', { waitUntil: 'domcontentloaded', timeout: 30000 });
+        const title = await page.title();
+        res.json({ success: true, browserId, mode, title });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/test/browser-close', async (req, res) => {
+    try {
+        await browserPool.close(req.body.browserId);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ─── Start ───
 const server = app.listen(PORT, () => {
     console.log(`[toolService] running on :${PORT}`);
