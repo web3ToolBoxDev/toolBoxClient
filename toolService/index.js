@@ -132,6 +132,9 @@ browserTools.registerAll();
 const httpFetcher = require('./lib/httpFetcher');
 httpFetcher.registerAll();
 
+const captchaSolver = require('./lib/captchaSolver');
+captchaSolver.registerAll();
+
 // ─── Start ───
 const server = app.listen(PORT, () => {
     console.log(`[toolService] running on :${PORT}`);
