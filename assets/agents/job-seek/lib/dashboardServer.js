@@ -1,9 +1,15 @@
 'use strict';
 
 const http = require('http');
-const searchPipeline = require('./searchPipeline');
 
 const DASHBOARD_PORT = 30003;
+
+// Lazy-require to break circular dependency (searchPipeline requires dashboardServer)
+let _searchPipeline = null;
+function getSearchPipeline() {
+    if (!_searchPipeline) _searchPipeline = require('./searchPipeline');
+    return _searchPipeline;
+}
 let _port = DASHBOARD_PORT;
 let _server = null;
 let _stateGetter = null; // function that returns current agent state
@@ -94,7 +100,7 @@ function start(getState, port) {
                     const state = _stateGetter ? _stateGetter() : {};
                     const answers = state.selectedAnswers?.[sessionId] || {};
                     const sections = state.profileSections?.[sessionId] || {};
-                    const result = searchPipeline.startPipeline(
+                    const result = getSearchPipeline().startPipeline(
                         sessionId,
                         { minScore, targetCount, maxResults },
                         answers,
@@ -114,7 +120,7 @@ function start(getState, port) {
         const pipeStopMatch = url.match(/^\/api\/pipeline\/(.+)\/stop$/);
         if (pipeStopMatch && req.method === 'POST') {
             const sessionId = decodeURIComponent(pipeStopMatch[1]);
-            const result = searchPipeline.stopPipeline(sessionId);
+            const result = getSearchPipeline().stopPipeline(sessionId);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify(result));
         }
@@ -123,7 +129,7 @@ function start(getState, port) {
         const pipeStatusMatch = url.match(/^\/api\/pipeline\/(.+)\/status$/);
         if (pipeStatusMatch && req.method === 'GET') {
             const sessionId = decodeURIComponent(pipeStatusMatch[1]);
-            const result = searchPipeline.getPipelineStatus(sessionId);
+            const result = getSearchPipeline().getPipelineStatus(sessionId);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify(result));
         }
@@ -139,7 +145,7 @@ function start(getState, port) {
                     const { jobUrl } = JSON.parse(body);
                     const state = _stateGetter ? _stateGetter() : {};
                     const sections = state.profileSections?.[sessionId] || {};
-                    const result = await searchPipeline.generateResume(sessionId, jobUrl, sections);
+                    const result = await getSearchPipeline().generateResume(sessionId, jobUrl, sections);
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(result));
                 } catch (e) {
@@ -161,7 +167,7 @@ function start(getState, port) {
                     const { jobUrl } = JSON.parse(body);
                     const state = _stateGetter ? _stateGetter() : {};
                     const sections = state.profileSections?.[sessionId] || {};
-                    const result = await searchPipeline.generateCoverLetter(sessionId, jobUrl, sections);
+                    const result = await getSearchPipeline().generateCoverLetter(sessionId, jobUrl, sections);
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(result));
                 } catch (e) {
@@ -181,7 +187,7 @@ function start(getState, port) {
             req.on('end', () => {
                 try {
                     const { jobUrl, note } = JSON.parse(body);
-                    const result = searchPipeline.markApplied(sessionId, jobUrl, note);
+                    const result = getSearchPipeline().markApplied(sessionId, jobUrl, note);
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(result));
                 } catch (e) {
@@ -196,7 +202,7 @@ function start(getState, port) {
         const historyMatch = url.match(/^\/api\/pipeline\/(.+)\/history$/);
         if (historyMatch && req.method === 'GET') {
             const sessionId = decodeURIComponent(historyMatch[1]);
-            const result = searchPipeline.getHistory(sessionId);
+            const result = getSearchPipeline().getHistory(sessionId);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify(result));
         }
