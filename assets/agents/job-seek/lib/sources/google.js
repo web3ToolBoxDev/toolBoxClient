@@ -149,10 +149,12 @@ async function searchViaHttp({ query, location, maxResults = 10 }) {
 /**
  * Search via browser (fallback).
  */
-async function searchViaBrowser({ query, location, maxResults = 10 }) {
+async function searchViaBrowser({ query, location, maxResults = 10, envId }) {
     const searchUrl = buildSearchUrl({ query, location });
 
-    const launch = await toolServiceClient.executeTool('browser_launch', { headless: true });
+    const launchParams = { headless: !envId };
+    if (envId) launchParams.envId = envId;
+    const launch = await toolServiceClient.executeTool('browser_launch', launchParams);
     if (!launch.success) throw new Error(`Browser launch failed: ${launch.error}`);
     const browserId = launch.result.browserId;
 
@@ -166,7 +168,7 @@ async function searchViaBrowser({ query, location, maxResults = 10 }) {
         return {
             listings: listings.slice(0, maxResults),
             searchUrl,
-            method: 'browser'
+            method: envId ? 'fingerprint-browser' : 'browser'
         };
     } finally {
         await toolServiceClient.executeTool('browser_close', { browserId });
@@ -177,7 +179,7 @@ async function searchViaBrowser({ query, location, maxResults = 10 }) {
  * Search with HTTP-first, browser fallback.
  */
 async function search(params) {
-    if (params.browserOnly) return searchViaBrowser(params);
+    if (params.browserOnly || params.envId) return searchViaBrowser(params);
 
     try {
         const result = await searchViaHttp(params);

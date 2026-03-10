@@ -206,11 +206,13 @@ async function searchViaHttp({ query, location, maxResults = 10 }) {
  * @param {number} [params.maxResults=10]
  * @returns {Promise<{ listings: Array<object>, searchUrl: string, method: string }>}
  */
-async function searchViaBrowser({ query, location, maxResults = 10 }) {
+async function searchViaBrowser({ query, location, maxResults = 10, envId }) {
     const searchUrl = buildSearchUrl({ query, location });
 
-    // Launch browser
-    const launchResult = await toolServiceClient.executeTool('browser_launch', { headless: true });
+    // Launch browser (with fingerprint if envId provided)
+    const launchParams = { headless: !envId };
+    if (envId) launchParams.envId = envId;
+    const launchResult = await toolServiceClient.executeTool('browser_launch', launchParams);
     if (!launchResult.success) {
         throw new Error(`Browser launch failed: ${launchResult.error}`);
     }
@@ -241,7 +243,7 @@ async function searchViaBrowser({ query, location, maxResults = 10 }) {
         return {
             listings: listings.slice(0, maxResults),
             searchUrl,
-            method: 'browser'
+            method: envId ? 'fingerprint-browser' : 'browser'
         };
     } finally {
         // Always close browser
@@ -259,7 +261,7 @@ async function searchViaBrowser({ query, location, maxResults = 10 }) {
  * @returns {Promise<{ listings: Array<object>, searchUrl: string, method: string }>}
  */
 async function search(params) {
-    if (params.browserOnly) {
+    if (params.browserOnly || params.envId) {
         return searchViaBrowser(params);
     }
 

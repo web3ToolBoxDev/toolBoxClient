@@ -13,6 +13,7 @@ const { handler: parseListingHandler } = require('./tools/parseListing');
 const { handler: matchProfileHandler } = require('./tools/matchProfile');
 const { handler: resumeGenHandler } = require('./tools/resumeGen');
 const { handler: coverLetterHandler } = require('./tools/coverLetter');
+const { getSourcesForLocation } = require('./sources/locationSources');
 const dashboardServer = require('./dashboardServer');
 
 // Active pipeline runs: sessionId → PipelineState
@@ -22,7 +23,15 @@ const _pipelines = new Map();
  * Generate search queries based on user's direction (job title, location, skills).
  * Returns an array of query objects for different job sites.
  */
-function buildSearchQueries(direction, profile) {
+/**
+ * Generate search queries based on user's direction (job title, location, skills).
+ * Dynamically selects job sources based on location.
+ * @param {object} direction - { q_job_title, q_location, q_work_mode, q_salary }
+ * @param {object} profile - { basic, skills, experience, education }
+ * @param {object} [options] - { envId } fingerprint browser env
+ * @returns {Array<{query, location, source, envId?}>}
+ */
+function buildSearchQueries(direction, profile, options = {}) {
     const queries = [];
     const jobTitle = direction.q_job_title || direction.jobTitle || '';
     const location = direction.q_location || direction.location || '';
@@ -30,17 +39,29 @@ function buildSearchQueries(direction, profile) {
 
     if (!jobTitle) return queries;
 
-    // Primary query: exact job title
-    queries.push({ query: jobTitle, location, source: 'indeed' });
+    // Get sources based on location (e.g. Canada → indeed, linkedin, jobbank, google)
+    const sources = getSourcesForLocation(location);
+    const primarySource = sources[0] || 'indeed';
 
-    // Skill-augmented query
-    if (skills.length > 0) {
-        queries.push({ query: `${jobTitle} ${skills[0]}`, location, source: 'indeed' });
+    const base = {};
+    if (options.envId) base.envId = options.envId;
+
+    // Primary query: exact job title on best source for this location
+    queries.push({ ...base, query: jobTitle, location, source: primarySource });
+
+    // Try second source if available
+    if (sources.length > 1) {
+        queries.push({ ...base, query: jobTitle, location, source: sources[1] });
     }
 
-    // Broader query without location (remote jobs)
-    if (location) {
-        queries.push({ query: jobTitle, location: '', source: 'indeed' });
+    // Skill-augmented query on primary source
+    if (skills.length > 0) {
+        queries.push({ ...base, query: `${jobTitle} ${skills[0]}`, location, source: primarySource });
+    }
+
+    // Broader query without location (remote jobs) on a different source
+    if (location && sources.length > 2) {
+        queries.push({ ...base, query: jobTitle, location: '', source: sources[2] });
     }
 
     return queries;
@@ -66,7 +87,8 @@ function startPipeline(sessionId, config, direction, profile) {
         config: {
             minScore: config.minScore || 60,
             targetCount: config.targetCount || 10,
-            maxResults: config.maxResults || 30
+            maxResults: config.maxResults || 30,
+            envId: config.envId || null
         },
         direction,
         profile,
@@ -77,7 +99,8 @@ function startPipeline(sessionId, config, direction, profile) {
             matched: 0,
             qualified: 0,
             total: 0,
-            errors: []
+            errors: [],
+            logs: []
         },
         stoppedAt: null
     };
@@ -106,12 +129,25 @@ async function _runPipeline(sessionId) {
     if (!pipeline) return;
 
     const { config, direction, profile } = pipeline;
-    const queries = buildSearchQueries(direction, profile);
+    const queries = buildSearchQueries(direction, profile, { envId: config.envId });
+    const _log = (msg) => {
+        const entry = { time: new Date().toISOString(), msg };
+        pipeline.progress.logs.push(entry);
+        console.log(`[pipeline:${sessionId.slice(0, 8)}] ${msg}`);
+    };
+
+    const jobTitle = direction.q_job_title || direction.jobTitle || '';
+    const location = direction.q_location || direction.location || '';
+    const mode = config.envId ? 'fingerprint browser' : 'API (HTTP)';
+    _log(`Starting search: "${jobTitle}" in "${location || 'any'}" via ${mode}`);
+    _log(`Config: minScore=${config.minScore}, target=${config.targetCount}, max=${config.maxResults}`);
+    _log(`Queries: ${queries.map(q => `[${q.source}] "${q.query}" @ ${q.location || 'remote'}`).join(' | ')}`);
 
     if (queries.length === 0) {
         pipeline.running = false;
         pipeline.progress.phase = 'error';
         pipeline.progress.errors.push('No job title set — cannot search');
+        _log('ERROR: No job title set — cannot search');
         return;
     }
 
@@ -123,18 +159,26 @@ async function _runPipeline(sessionId) {
     for (const q of queries) {
         if (!pipeline.running) break; // Check for stop signal
 
+        _log(`Searching [${q.source}] "${q.query}" @ ${q.location || 'remote'}${q.envId ? ' (fingerprint)' : ''}...`);
+
         try {
             const result = await jobSearchHandler({
                 query: q.query,
                 location: q.location,
                 maxResults: Math.ceil(config.maxResults / queries.length),
-                source: q.source
+                source: q.source,
+                envId: q.envId
             });
+
+            const newCount = (result.listings || []).filter(l => l.url && !seenUrls.has(l.url)).length;
+            _log(`[${q.source}] Found ${(result.listings || []).length} results (${newCount} new) via ${result.source || q.source}`);
 
             for (const listing of (result.listings || [])) {
                 if (listing.url && !seenUrls.has(listing.url)) {
                     seenUrls.add(listing.url);
                     allListings.push(listing);
+
+                    _log(`+ "${listing.title}" @ ${listing.company || '?'} (${listing.location || '?'})`);
 
                     // Record as discovered
                     dashboardServer.upsertJobCard(sessionId, {
@@ -151,14 +195,18 @@ async function _runPipeline(sessionId) {
             pipeline.progress.searched++;
             pipeline.progress.total = allListings.length;
         } catch (err) {
+            _log(`ERROR [${q.source}]: ${err.message}`);
             pipeline.progress.errors.push(`Search error: ${err.message}`);
         }
     }
+
+    _log(`Search complete: ${allListings.length} unique listings from ${pipeline.progress.searched} queries`);
 
     if (!pipeline.running) { _finishPipeline(sessionId, 'stopped'); return; }
 
     // Phase 2: Parse & Match
     pipeline.progress.phase = 'matching';
+    _log(`Matching ${allListings.length} listings against profile (minScore: ${config.minScore}%)...`);
 
     for (const listing of allListings) {
         if (!pipeline.running) break;
@@ -198,23 +246,29 @@ async function _runPipeline(sessionId) {
             const score = matchResult.overallScore || 0;
             pipeline.progress.matched++;
 
+            const qualified = score >= config.minScore;
+            _log(`${qualified ? '✓' : '✗'} "${listing.title}" @ ${listing.company || '?'} → score: ${score}%${qualified ? ' QUALIFIED' : ''}`);
+
             // Update job card with score
             dashboardServer.upsertJobCard(sessionId, {
                 url: listing.url,
                 matchScore: score,
-                status: score >= config.minScore ? 'matched' : 'discovered',
+                status: qualified ? 'matched' : 'discovered',
                 artifacts: requirements ? { requirements: true } : {}
             });
 
-            if (score >= config.minScore) {
+            if (qualified) {
                 pipeline.progress.qualified++;
             }
         } catch (err) {
+            _log(`ERROR matching "${listing.title}": ${err.message}`);
             pipeline.progress.errors.push(`Match error (${listing.url}): ${err.message}`);
         }
     }
 
-    _finishPipeline(sessionId, pipeline.progress.qualified >= config.targetCount ? 'completed' : 'done');
+    const p = pipeline.progress;
+    _log(`Done: ${p.qualified} qualified / ${p.matched} scored / ${allListings.length} found (${p.errors.length} errors)`);
+    _finishPipeline(sessionId, p.qualified >= config.targetCount ? 'completed' : 'done');
 }
 
 function _finishPipeline(sessionId, reason) {

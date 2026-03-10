@@ -13,17 +13,21 @@
 
 const indeed = require('../sources/indeed');
 const google = require('../sources/google');
+const linkedin = require('../sources/linkedin');
+const jobbank = require('../sources/jobbank');
+const { getSourcesForLocation } = require('../sources/locationSources');
 
 const TOOL_DEF = {
     name: 'job_search',
-    description: 'Search for job listings based on query, location, and filters. Returns structured job listings with title, company, location, salary, and URL. Supports multiple sources: indeed, google, all (tries all sources).',
+    description: 'Search for job listings based on query, location, and filters. Returns structured job listings with title, company, location, salary, and URL. Supports multiple sources: indeed, google, linkedin, jobbank, all (tries all sources based on location).',
     parameters: {
         type: 'object',
         properties: {
             query: { type: 'string', description: 'Job title or keywords to search for' },
             location: { type: 'string', description: 'Location to search in (city, state, country)' },
             maxResults: { type: 'number', description: 'Maximum number of results to return (default 10)' },
-            source: { type: 'string', description: 'Job source: indeed, google, all (default: all — tries all sources with fallback)' }
+            source: { type: 'string', description: 'Job source: indeed, google, linkedin, jobbank, all (default: all — auto-selects sources based on location)' },
+            envId: { type: 'string', description: 'Fingerprint browser environment ID for anti-detection scraping' }
         },
         required: ['query']
     },
@@ -35,6 +39,8 @@ const TOOL_DEF = {
  */
 const SOURCES = {
     indeed: { adapter: indeed, label: 'indeed' },
+    linkedin: { adapter: linkedin, label: 'linkedin' },
+    jobbank: { adapter: jobbank, label: 'jobbank' },
     google: { adapter: google, label: 'google' }
 };
 
@@ -61,43 +67,52 @@ async function searchSource(name, params) {
 }
 
 /**
+ * Get ordered source list for a search.
+ * When source='all', uses location-based selection.
+ * When source is specific, returns that source (with fallbacks).
+ */
+function getSourceOrder(source, location) {
+    if (source === 'all') {
+        return getSourcesForLocation(location);
+    }
+    // Specific source requested — try it first, then fallback to others
+    const all = Object.keys(SOURCES);
+    return [source, ...all.filter(s => s !== source)];
+}
+
+/**
  * Execute job search with multi-source fallback.
  */
-async function handler({ query, location, maxResults = 10, source = 'all' }) {
+async function handler({ query, location, maxResults = 10, source = 'all', envId }) {
     if (!query) throw new Error('query is required');
 
     let results = null;
     let usedSource = source;
 
-    if (source === 'all') {
-        // Try each source in order until we get results
-        for (const [name] of Object.entries(SOURCES)) {
-            results = await searchSource(name, { query, location, maxResults });
-            if (results && results.listings.length > 0) {
-                usedSource = name;
-                break;
-            }
+    // Get source order based on location (or specific source with fallbacks)
+    const sourceOrder = getSourceOrder(source, location);
+    const searchParams = { query, location, maxResults };
+    if (envId) searchParams.envId = envId;
+
+    // Try sources in order until we get results
+    for (const name of sourceOrder) {
+        results = await searchSource(name, searchParams);
+        if (results && results.listings.length > 0) {
+            usedSource = (source !== 'all' && name !== source)
+                ? `${source}→${name}` : name;
+            break;
         }
-        if (!results) {
-            // All sources failed — return empty
-            return { query, location: location || 'any', source: 'all (failed)', totalFound: 0, listings: [] };
-        }
-    } else {
-        results = await searchSource(source, { query, location, maxResults });
-        if (!results) {
-            // Primary source failed, try fallback
-            for (const [name] of Object.entries(SOURCES)) {
-                if (name === source) continue;
-                results = await searchSource(name, { query, location, maxResults });
-                if (results && results.listings.length > 0) {
-                    usedSource = `${source}→${name}`;
-                    break;
-                }
-            }
-        }
-        if (!results) {
-            return { query, location: location || 'any', source: `${source} (failed)`, totalFound: 0, listings: [] };
-        }
+    }
+
+    if (!results) {
+        return {
+            query,
+            location: location || 'any',
+            source: `${source} (failed)`,
+            sourceOrder,
+            totalFound: 0,
+            listings: []
+        };
     }
 
     // Deduplicate by URL

@@ -1702,6 +1702,9 @@ async function extractResumeFromAttachments(sessionId, attachments) {
                     const sectionKeys = Object.keys(sections);
                     console.log(`[agent:knowledge] Parsed ${sectionKeys.length} sections: ${sectionKeys.join(', ')}`);
 
+                    // Ensure domain pack is registered before any upsert
+                    await _packReady;
+
                     // Clear old profile docs before storing new ones
                     await knowledgeClient.remove({ type: 'profile', scope: 'agent:job-seek' });
 
@@ -1893,11 +1896,12 @@ async function applyMarkers(sessionId, markers) {
             profileChanged = true;
             console.log(`[agent:marker-debug] PROFILE_${m.op} ${m.field}: "${prev}" -> "${sections[m.field]}"`);
             appendRuntimeLog(sessionId, `marker_apply -> PROFILE_${m.op} ${m.field}="${sections[m.field]}"`, { source: 'knowledge' });
-        } else if (m.type === 'direction') {
+        } else if (m.type === 'direction' || m.type === 'answer') {
+            // Both DIRECTION and ANSWER markers update selectedAnswers (onboarding direction fields)
             if (!state.selectedAnswers[sessionId]) state.selectedAnswers[sessionId] = {};
             state.selectedAnswers[sessionId][m.field] = m.value;
             directionChanged = true;
-            appendRuntimeLog(sessionId, `marker_apply -> DIRECTION ${m.field}="${m.value}"`, { source: 'knowledge' });
+            appendRuntimeLog(sessionId, `marker_apply -> ${m.type.toUpperCase()} ${m.field}="${m.value}"`, { source: 'knowledge' });
         } else if (m.type === 'profile_complete') {
             // Skip re-extraction if explicit SET/ADD/REMOVE markers are present (they're more precise)
             if (hasExplicitProfileOps) {
@@ -1957,6 +1961,11 @@ async function applyMarkers(sessionId, markers) {
         state.prompts[sessionId] = _buildPresetPrompt(dir);
     }
 
+    // Check onboarding completion when ANSWER markers update selectedAnswers
+    if (directionChanged) {
+        checkAndCompleteOnboarding(sessionId);
+    }
+
     if (profileChanged || directionChanged) {
         // Rebuild intent file to reflect changes (dashboard is live via dashboardServer)
         try {
@@ -1974,6 +1983,7 @@ async function applyMarkers(sessionId, markers) {
  * Parses the conversation to build profile sections and stores in knowledge store.
  */
 async function extractProfileFromConversation(sessionId) {
+    await _packReady;
     const { provider: activeProvider } = resolveProvider();
     if (!activeProvider) return;
 

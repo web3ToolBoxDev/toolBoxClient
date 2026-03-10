@@ -4,6 +4,9 @@ const http = require('http');
 
 const DASHBOARD_PORT = 30003;
 
+// Unique token to identify this server instance (used for takeover)
+const _instanceId = `dash_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
+
 // Lazy-require to break circular dependency (searchPipeline requires dashboardServer)
 let _searchPipeline = null;
 function getSearchPipeline() {
@@ -21,8 +24,8 @@ let _stateGetter = null; // function that returns current agent state
  * @param {number} [port] - optional port override (for testing)
  */
 function start(getState, port) {
+    _stateGetter = getState; // Always update stateGetter even if server already running
     if (_server) return _port;
-    _stateGetter = getState;
     _port = port || DASHBOARD_PORT;
 
     _server = http.createServer((req, res) => {
@@ -36,6 +39,37 @@ function start(getState, port) {
         }
 
         const url = (req.url || '').split('?')[0];
+
+        // GET /api/envs — return fingerprint browser environments
+        if (url === '/api/envs' && req.method === 'GET') {
+            const state = _stateGetter ? _stateGetter() : {};
+            const envs = (state.envs || []).map(e => ({
+                id: e.id || e._id,
+                name: e.name || e.id || e._id
+            }));
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(envs));
+        }
+
+        // GET /api/active-session — return active session id
+        if (url === '/api/active-session' && req.method === 'GET') {
+            const state = _stateGetter ? _stateGetter() : {};
+            const activeId = state.activeSessionId || '';
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ sessionId: activeId }));
+        }
+
+        // GET /dashboard (no sessionId) — redirect to active session
+        if (url === '/dashboard' && req.method === 'GET') {
+            const state = _stateGetter ? _stateGetter() : {};
+            const activeId = state.activeSessionId || '';
+            if (activeId) {
+                res.writeHead(302, { 'Location': `/dashboard/${encodeURIComponent(activeId)}` });
+                return res.end();
+            }
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            return res.end('<h2>No active session</h2><p>Start a session in the Agent Workspace first.</p>');
+        }
 
         // GET /api/dashboard/:sessionId — return JSON data
         const apiMatch = url.match(/^\/api\/dashboard\/(.+)$/);
@@ -96,13 +130,13 @@ function start(getState, port) {
             req.on('data', chunk => { body += chunk; });
             req.on('end', () => {
                 try {
-                    const { minScore, targetCount, maxResults } = JSON.parse(body);
+                    const { minScore, targetCount, maxResults, envId } = JSON.parse(body);
                     const state = _stateGetter ? _stateGetter() : {};
                     const answers = state.selectedAnswers?.[sessionId] || {};
                     const sections = state.profileSections?.[sessionId] || {};
                     const result = getSearchPipeline().startPipeline(
                         sessionId,
-                        { minScore, targetCount, maxResults },
+                        { minScore, targetCount, maxResults, envId: envId || null },
                         answers,
                         sections
                     );
@@ -207,6 +241,47 @@ function start(getState, port) {
             return res.end(JSON.stringify(result));
         }
 
+        // POST /shutdown — allow new process to take over the port
+        if (url === '/shutdown' && req.method === 'POST') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, instanceId: _instanceId }));
+            // Close server after response is sent
+            setTimeout(() => {
+                if (_server) {
+                    console.log('[dashboardServer] Shutting down for port takeover');
+                    const s = _server;
+                    _server = null;
+                    s.close();
+                }
+            }, 100);
+            return;
+        }
+
+        // GET /ping — health check with instance identification
+        if (url === '/ping' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ ok: true, instanceId: _instanceId }));
+        }
+
+        // GET /debug — dump state diagnostics
+        if (url === '/debug' && req.method === 'GET') {
+            const state = _stateGetter ? _stateGetter() : null;
+            const info = {
+                hasStateGetter: Boolean(_stateGetter),
+                hasState: Boolean(state),
+                activeSessionId: state?.activeSessionId || '',
+                sessions: (state?.sessions || []).map(s => ({ id: s.id, name: s.name })),
+                selectedAnswersKeys: state?.selectedAnswers ? Object.keys(state.selectedAnswers) : [],
+                profileSectionsKeys: state?.profileSections ? Object.keys(state.profileSections) : [],
+                sampleAnswers: null
+            };
+            if (state?.activeSessionId && state?.selectedAnswers?.[state.activeSessionId]) {
+                info.sampleAnswers = state.selectedAnswers[state.activeSessionId];
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(info, null, 2));
+        }
+
         // GET /dashboard/:sessionId — return HTML page
         const pageMatch = url.match(/^\/dashboard\/(.+)$/);
         if (pageMatch && req.method === 'GET') {
@@ -220,15 +295,56 @@ function start(getState, port) {
     });
 
     _server.listen(_port, '127.0.0.1', () => {
-        console.log(`[dashboardServer] listening on http://127.0.0.1:${_port}`);
+        console.log(`[dashboardServer] listening on http://127.0.0.1:${_port} (instance: ${_instanceId})`);
     });
 
     _server.on('error', (err) => {
-        console.error('[dashboardServer] server error:', err.message);
-        _server = null;
+        if (err.code === 'EADDRINUSE') {
+            console.log(`[dashboardServer] Port ${_port} in use — attempting takeover of stale server...`);
+            _server = null;
+            _takeOverPort(_port, getState);
+        } else {
+            console.error('[dashboardServer] server error:', err.message);
+            _server = null;
+        }
     });
 
     return _port;
+}
+
+/**
+ * Attempt to take over the port from a stale dashboard server process.
+ * Sends POST /shutdown to the old server, waits, then retries start.
+ */
+function _takeOverPort(port, getState) {
+    const shutdownReq = http.request({
+        hostname: '127.0.0.1',
+        port,
+        path: '/shutdown',
+        method: 'POST',
+        timeout: 3000
+    }, (res) => {
+        let body = '';
+        res.on('data', c => { body += c; });
+        res.on('end', () => {
+            console.log(`[dashboardServer] Old server responded to shutdown: ${body}`);
+            // Wait for old server to close, then retry
+            setTimeout(() => {
+                _server = null;
+                start(getState, port);
+            }, 500);
+        });
+    });
+    shutdownReq.on('error', (e) => {
+        // Old server didn't respond — it's a zombie or different service
+        console.error(`[dashboardServer] Shutdown request failed: ${e.message}. Port ${port} is occupied by another process.`);
+        console.error('[dashboardServer] Please kill the process using port ' + port + ' and restart.');
+    });
+    shutdownReq.on('timeout', () => {
+        shutdownReq.destroy();
+        console.error(`[dashboardServer] Shutdown request timed out. Port ${port} is occupied.`);
+    });
+    shutdownReq.end();
 }
 
 function stop() {
@@ -335,7 +451,17 @@ function getDashboardData(sessionId) {
     const intent = state.intentFiles?.[sessionId] || {};
 
     const sectionKeys = Object.keys(sections).filter(k => sections[k]);
-    console.log(`[dashboard:data] session=${sessionId.slice(0, 8)} | profile sections: [${sectionKeys.join(', ')}] | skills preview: "${(sections.skills || '').slice(0, 80)}"`);
+    const answerKeys = Object.keys(answers);
+    const hasState = Boolean(state.selectedAnswers);
+    const knownSessions = hasState ? Object.keys(state.selectedAnswers) : [];
+    const sessionMatch = knownSessions.includes(sessionId);
+
+    // Diagnostic: log when session data is missing
+    if (answerKeys.length === 0 && sectionKeys.length === 0) {
+        console.log(`[dashboard:data] session=${sessionId.slice(0, 12)} | EMPTY — stateGetter=${Boolean(_stateGetter)} | hasSelectedAnswers=${hasState} | knownSessions=[${knownSessions.map(s => s.slice(0, 12)).join(',')}] | sessionMatch=${sessionMatch}`);
+    } else {
+        console.log(`[dashboard:data] session=${sessionId.slice(0, 12)} | answers: [${answerKeys.join(', ')}] | profile: [${sectionKeys.join(', ')}] | skills preview: "${(sections.skills || '').slice(0, 80)}"`);
+    }
 
     return {
         sessionId,
@@ -454,6 +580,16 @@ function buildDashboardHTML(sessionId) {
   .tab-content { display: none; }
   .tab-content.active { display: block; }
 
+  /* Search logs */
+  .log-entry { color: #9da0c3; }
+  .log-entry.search { color: #60a5fa; }
+  .log-entry.found { color: #8b9aff; }
+  .log-entry.match-yes { color: #4ade80; }
+  .log-entry.match-no { color: #f87171; }
+  .log-entry.error { color: #f87171; font-weight: 600; }
+  .log-entry.info { color: #fbbf24; }
+  .log-entry .time { color: #555; margin-right: 0.5rem; }
+
   /* Artifact modal */
   .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; }
   .modal-overlay.visible { display: flex; align-items: center; justify-content: center; }
@@ -501,8 +637,16 @@ function buildDashboardHTML(sessionId) {
       <label>Max Search Results</label>
       <input type="number" id="cfgMaxResults" value="30" min="5" max="200" step="5">
     </div>
-    <button class="btn btn-primary" id="btnStart" onclick="startSearch()">Start Search</button>
+    <div class="field" id="envIdField" style="display:none;">
+      <label>Fingerprint Env ID</label>
+      <select id="cfgEnvId"><option value="">Loading...</option></select>
+    </div>
+  </div>
+  <div style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+    <button class="btn btn-primary" id="btnStartApi" onclick="startSearch('api')">Search by API</button>
+    <button class="btn btn-success" id="btnStartFp" onclick="startSearch('fingerprint')">Search by Fingerprint</button>
     <button class="btn btn-danger" id="btnStop" onclick="stopSearch()" style="display:none;">Stop</button>
+    <span id="searchModeLabel" style="font-size:0.8rem;color:#9da0c3;"></span>
   </div>
   <div class="pipe-status" id="pipeStatus" style="display:none;">
     <span class="phase" id="pipePhase"></span>
@@ -510,6 +654,8 @@ function buildDashboardHTML(sessionId) {
     <span class="counts" id="pipeCounts"></span>
   </div>
   <div class="pipe-errors" id="pipeErrors"></div>
+  <div id="searchLogs" style="display:none;margin-top:0.75rem;max-height:300px;overflow-y:auto;background:#1a1b2e;border-radius:8px;padding:0.75rem;font-family:monospace;font-size:0.78rem;line-height:1.5;">
+  </div>
 </div>
 
 <h2>Application Pipeline</h2>
@@ -570,8 +716,10 @@ function buildDashboardHTML(sessionId) {
 </div>
 
 <script>
-const API_URL = ${JSON.stringify(apiUrl)};
-const PIPE_URL = ${JSON.stringify(pipelineBase)};
+let API_URL = ${JSON.stringify(apiUrl)};
+let PIPE_URL = ${JSON.stringify(pipelineBase)};
+const BASE_URL = ${JSON.stringify(baseUrl)};
+let _sessionChecked = false;
 const esc = (s) => {
     const d = document.createElement('div');
     d.textContent = s;
@@ -610,19 +758,42 @@ function switchTab(name) {
 }
 
 // ─── Pipeline control ───
-async function startSearch() {
+var _lastLogCount = 0;
+
+async function startSearch(mode) {
     var minScore = parseInt(document.getElementById('cfgMinScore').value) || 60;
     var targetCount = parseInt(document.getElementById('cfgTargetCount').value) || 10;
     var maxResults = parseInt(document.getElementById('cfgMaxResults').value) || 30;
+    var envId = null;
+
+    if (mode === 'fingerprint') {
+        var sel = document.getElementById('cfgEnvId');
+        envId = sel ? sel.value : null;
+        if (!envId) { alert('No fingerprint environment selected. Select one or use API mode.'); return; }
+    }
+
+    // Clear previous logs
+    _lastLogCount = 0;
+    var logsEl = document.getElementById('searchLogs');
+    logsEl.innerHTML = '';
+    logsEl.style.display = 'block';
+
+    var label = document.getElementById('searchModeLabel');
+    label.textContent = mode === 'fingerprint' ? 'Mode: Fingerprint Browser' : 'Mode: API (HTTP)';
+
     try {
+        var body = { minScore: minScore, targetCount: targetCount, maxResults: maxResults };
+        if (envId) body.envId = envId;
+
         var res = await fetch(PIPE_URL + '/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ minScore: minScore, targetCount: targetCount, maxResults: maxResults })
+            body: JSON.stringify(body)
         });
         var data = await res.json();
         if (data.error) { alert('Error: ' + data.error); return; }
-        document.getElementById('btnStart').style.display = 'none';
+        document.getElementById('btnStartApi').style.display = 'none';
+        document.getElementById('btnStartFp').style.display = 'none';
         document.getElementById('btnStop').style.display = 'inline-block';
     } catch (e) { alert('Failed to start: ' + e.message); }
 }
@@ -630,9 +801,39 @@ async function startSearch() {
 async function stopSearch() {
     try {
         await fetch(PIPE_URL + '/stop', { method: 'POST' });
-        document.getElementById('btnStart').style.display = 'inline-block';
+        document.getElementById('btnStartApi').style.display = 'inline-block';
+        document.getElementById('btnStartFp').style.display = 'inline-block';
         document.getElementById('btnStop').style.display = 'none';
+        document.getElementById('searchModeLabel').textContent = '';
     } catch (e) { alert('Failed to stop: ' + e.message); }
+}
+
+function logClass(msg) {
+    if (msg.startsWith('Searching')) return 'search';
+    if (msg.startsWith('+')) return 'found';
+    if (msg.includes('QUALIFIED') || msg.startsWith('\\u2713')) return 'match-yes';
+    if (msg.startsWith('\\u2717')) return 'match-no';
+    if (msg.startsWith('ERROR') || msg.includes('ERROR')) return 'error';
+    if (msg.startsWith('Starting') || msg.startsWith('Config') || msg.startsWith('Done')) return 'info';
+    return '';
+}
+
+function renderLogs(logs) {
+    if (!logs || logs.length === 0) return;
+    var logsEl = document.getElementById('searchLogs');
+    if (!logsEl) return;
+    // Only render new logs
+    if (logs.length <= _lastLogCount) return;
+    var newLogs = logs.slice(_lastLogCount);
+    _lastLogCount = logs.length;
+    for (var i = 0; i < newLogs.length; i++) {
+        var l = newLogs[i];
+        var cls = 'log-entry ' + logClass(l.msg);
+        var t = l.time ? l.time.slice(11, 19) : '';
+        logsEl.innerHTML += '<div class="' + cls + '"><span class="time">' + t + '</span>' + esc(l.msg) + '</div>';
+    }
+    logsEl.scrollTop = logsEl.scrollHeight;
+    logsEl.style.display = 'block';
 }
 
 async function refreshPipelineStatus() {
@@ -652,14 +853,19 @@ async function refreshPipelineStatus() {
             'Searched: ' + p.searched + ' | Parsed: ' + p.parsed + ' | Matched: ' + p.matched + ' | Qualified: ' + p.qualified + '/' + (data.config?.targetCount || '?');
 
         if (data.running) {
-            document.getElementById('btnStart').style.display = 'none';
+            document.getElementById('btnStartApi').style.display = 'none';
+            document.getElementById('btnStartFp').style.display = 'none';
             document.getElementById('btnStop').style.display = 'inline-block';
         } else {
-            document.getElementById('btnStart').style.display = 'inline-block';
+            document.getElementById('btnStartApi').style.display = 'inline-block';
+            document.getElementById('btnStartFp').style.display = 'inline-block';
             document.getElementById('btnStop').style.display = 'none';
         }
 
         errorsEl.innerHTML = (p.errors || []).map(function(e) { return '<div class="error">' + esc(e) + '</div>'; }).join('');
+
+        // Render search activity logs
+        renderLogs(p.logs);
     } catch {}
 }
 
@@ -823,6 +1029,33 @@ async function refresh() {
         const res = await fetch(API_URL);
         if (res.ok) {
             const data = await res.json();
+
+            // Auto-detect: if baked-in session has no data, switch to active session
+            if (!_sessionChecked && !data.direction?.jobTitle && !data.profile?.basic) {
+                _sessionChecked = true;
+                try {
+                    const activeRes = await fetch(BASE_URL + '/api/active-session');
+                    if (activeRes.ok) {
+                        const active = await activeRes.json();
+                        if (active.sessionId && active.sessionId !== data.sessionId) {
+                            console.log('[dashboard] Switching to active session:', active.sessionId);
+                            var encoded = encodeURIComponent(active.sessionId);
+                            API_URL = BASE_URL + '/api/dashboard/' + encoded;
+                            PIPE_URL = BASE_URL + '/api/pipeline/' + encoded;
+                            // Re-fetch with correct session
+                            var retry = await fetch(API_URL);
+                            if (retry.ok) {
+                                var retryData = await retry.json();
+                                render(retryData);
+                                document.getElementById('refresh').textContent = 'Auto-refresh: active (session switched)';
+                                refreshPipelineStatus();
+                                return;
+                            }
+                        }
+                    }
+                } catch (_) { /* ignore, use original data */ }
+            }
+
             render(data);
             document.getElementById('refresh').textContent = 'Auto-refresh: active';
         }
@@ -831,6 +1064,41 @@ async function refresh() {
     }
     refreshPipelineStatus();
 }
+
+// Load fingerprint environments for the env selector
+async function loadEnvs() {
+    try {
+        var res = await fetch(BASE_URL + '/api/envs');
+        if (!res.ok) return;
+        var envs = await res.json();
+        var field = document.getElementById('envIdField');
+        var sel = document.getElementById('cfgEnvId');
+        if (!field || !sel) return;
+        sel.innerHTML = '<option value="">-- select env --</option>';
+        for (var i = 0; i < envs.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = envs[i].id;
+            opt.textContent = envs[i].name || envs[i].id;
+            sel.appendChild(opt);
+        }
+        var manualOpt = document.createElement('option');
+        manualOpt.value = 'manual'; manualOpt.textContent = 'Enter manually...';
+        sel.appendChild(manualOpt);
+        field.style.display = 'flex';
+        sel.onchange = function() {
+            if (sel.value === 'manual') {
+                var id = prompt('Enter fingerprint environment ID:');
+                if (id) {
+                    var o = document.createElement('option');
+                    o.value = id; o.textContent = id;
+                    sel.insertBefore(o, sel.lastElementChild);
+                    sel.value = id;
+                } else { sel.value = ''; }
+            }
+        };
+    } catch {}
+}
+loadEnvs();
 
 refresh();
 setInterval(refresh, 5000);

@@ -2,14 +2,24 @@
 
 const { TOOL_DEF, handler } = require('./jobSearch');
 
-// Mock source adapters
+// Mock all source adapters
 jest.mock('../sources/indeed', () => ({
-    search: jest.fn()
+    search: jest.fn().mockResolvedValue({ listings: [], method: 'http' })
 }));
 jest.mock('../sources/google', () => ({
     search: jest.fn().mockResolvedValue({ listings: [], method: 'http' })
 }));
+jest.mock('../sources/linkedin', () => ({
+    search: jest.fn().mockResolvedValue({ listings: [], method: 'http' })
+}));
+jest.mock('../sources/jobbank', () => ({
+    search: jest.fn().mockResolvedValue({ listings: [], method: 'http' })
+}));
+
 const indeed = require('../sources/indeed');
+const linkedin = require('../sources/linkedin');
+const jobbank = require('../sources/jobbank');
+const google = require('../sources/google');
 
 describe('job_search tool', () => {
 
@@ -23,8 +33,13 @@ describe('job_search tool', () => {
             expect(TOOL_DEF.parameters.required).toEqual(['query']);
         });
 
-        test('has description', () => {
-            expect(TOOL_DEF.description).toBeTruthy();
+        test('has envId parameter for fingerprint browser', () => {
+            expect(TOOL_DEF.parameters.properties.envId).toBeDefined();
+        });
+
+        test('includes linkedin and jobbank sources', () => {
+            expect(TOOL_DEF.description).toContain('linkedin');
+            expect(TOOL_DEF.description).toContain('jobbank');
         });
     });
 
@@ -43,12 +58,10 @@ describe('job_search tool', () => {
                 method: 'http'
             });
 
-            const result = await handler({ query: 'engineer', location: 'Toronto', maxResults: 5 });
-            expect(indeed.search).toHaveBeenCalledWith({
-                query: 'engineer',
-                location: 'Toronto',
-                maxResults: 5
-            });
+            const result = await handler({ query: 'engineer', location: 'Toronto', maxResults: 5, source: 'indeed' });
+            expect(indeed.search).toHaveBeenCalledWith(
+                expect.objectContaining({ query: 'engineer', location: 'Toronto', maxResults: 5 })
+            );
             expect(result.query).toBe('engineer');
             expect(result.location).toBe('Toronto');
             expect(result.totalFound).toBe(1);
@@ -65,7 +78,7 @@ describe('job_search tool', () => {
                 method: 'http'
             });
 
-            const result = await handler({ query: 'dev' });
+            const result = await handler({ query: 'dev', source: 'indeed' });
             expect(result.totalFound).toBe(2);
             expect(result.listings[0].title).toBe('Job A');
             expect(result.listings[1].title).toBe('Job C');
@@ -80,7 +93,7 @@ describe('job_search tool', () => {
                 method: 'http'
             });
 
-            const result = await handler({ query: 'qa' });
+            const result = await handler({ query: 'qa', source: 'indeed' });
             expect(result.totalFound).toBe(1);
             expect(result.listings[0].title).toBe('Has URL');
         });
@@ -91,7 +104,7 @@ describe('job_search tool', () => {
             }));
             indeed.search.mockResolvedValueOnce({ listings: many, method: 'http' });
 
-            const result = await handler({ query: 'test', maxResults: 3 });
+            const result = await handler({ query: 'test', maxResults: 3, source: 'indeed' });
             expect(result.listings).toHaveLength(3);
         });
 
@@ -106,13 +119,64 @@ describe('job_search tool', () => {
         });
 
         test('defaults location to any', async () => {
+            const result = await handler({ query: 'test', source: 'indeed' });
+            expect(result.location).toBe('any');
+        });
+
+        // Location-based source selection tests
+        test('uses indeed first for Toronto (Canada) with source=all', async () => {
             indeed.search.mockResolvedValueOnce({
-                listings: [],
+                listings: [{ title: 'Dev', company: 'A', url: 'http://a.com' }],
                 method: 'http'
             });
 
-            const result = await handler({ query: 'test' });
-            expect(result.location).toBe('any');
+            const result = await handler({ query: 'developer', location: 'Toronto, Canada' });
+            expect(indeed.search).toHaveBeenCalled();
+            expect(result.source).toBe('indeed');
+        });
+
+        test('falls back to linkedin when indeed returns empty for Canada', async () => {
+            // indeed returns empty, linkedin returns results
+            linkedin.search.mockResolvedValueOnce({
+                listings: [{ title: 'Dev', company: 'B', url: 'http://b.com' }],
+                method: 'browser'
+            });
+
+            const result = await handler({ query: 'developer', location: 'Toronto, Canada' });
+            expect(linkedin.search).toHaveBeenCalled();
+            expect(result.source).toBe('linkedin');
+        });
+
+        test('passes envId to source adapter', async () => {
+            indeed.search.mockResolvedValueOnce({
+                listings: [{ title: 'Job', company: 'C', url: 'http://c.com' }],
+                method: 'fingerprint-browser'
+            });
+
+            await handler({ query: 'dev', source: 'indeed', envId: 'fp-123' });
+            expect(indeed.search).toHaveBeenCalledWith(
+                expect.objectContaining({ envId: 'fp-123' })
+            );
+        });
+
+        test('returns sourceOrder on failure', async () => {
+            const result = await handler({ query: 'nothing', location: 'Toronto, Canada' });
+            expect(result.sourceOrder).toBeDefined();
+            expect(result.sourceOrder).toContain('indeed');
+            expect(result.sourceOrder).toContain('linkedin');
+            expect(result.sourceOrder).toContain('jobbank');
+        });
+
+        test('shows fallback notation when primary fails', async () => {
+            // indeed fails, linkedin succeeds
+            indeed.search.mockResolvedValueOnce({ listings: [], method: 'http' });
+            linkedin.search.mockResolvedValueOnce({
+                listings: [{ title: 'Job', company: 'X', url: 'http://x.com' }],
+                method: 'http'
+            });
+
+            const result = await handler({ query: 'dev', source: 'indeed' });
+            expect(result.source).toBe('indeed→linkedin');
         });
     });
 });
