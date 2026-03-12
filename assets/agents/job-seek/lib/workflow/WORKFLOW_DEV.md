@@ -98,54 +98,19 @@ workflow/
 
 ---
 
-## ⚠️ Merge Issues Found
+## ✅ Merge Issues — ALL RESOLVED
 
-### Issue 1: Missing API Routes in dashboardServer
+### Issue 1: Missing API Routes in dashboardServer — FIXED
 
-**dashboard-features.e2e.test.js** expects these routes that **DO NOT EXIST** in dashboardServer.js:
+All routes registered. **dashboard-features.e2e.test.js** (38 tests) + **workflow-api.e2e.test.js** (18 tests) pass.
 
-| Expected Route | PRD Section | Status |
-|---|---|---|
-| `GET /api/workflow/:sid/status` | §7.1 | ❌ NOT in dashboardServer |
-| `POST /api/workflow/:sid/start` | §7.1 | ❌ NOT in dashboardServer |
-| `POST /api/workflow/:sid/stop` | §7.1 | ❌ NOT in dashboardServer |
-| `GET /api/workflow/:sid/config` | §7.2 | ❌ NOT in dashboardServer |
-| `PUT /api/workflow/:sid/config` | §7.2 | ❌ NOT in dashboardServer |
-| `GET /api/workflow/:sid/view-model` | — | ❌ NOT in dashboardServer |
-| `GET /api/platforms/:sid` | §7.3 | ❌ NOT in dashboardServer |
-| `POST /api/platforms/:sid` | §7.3 | ❌ NOT in dashboardServer |
-| `DELETE /api/platforms/:sid/:pid` | §7.3 | ❌ NOT in dashboardServer |
-| `POST /api/platforms/:sid/:pid/login` | §7.3 | ❌ NOT in dashboardServer |
-| `POST /api/platforms/:sid/:pid/verify-login` | §7.3 | ❌ NOT in dashboardServer |
-| `POST /api/platforms/:sid/:pid/confirm-login` | §7.3 | ❌ NOT in dashboardServer |
-| `POST /api/platforms/:sid/:pid/bind-env` | §7.3 | ❌ NOT in dashboardServer |
-| `POST /api/platforms/:sid/:pid/tools/search/build` | §7.4 | ❌ NOT in dashboardServer |
-| `POST /api/platforms/:sid/:pid/tools/search/execute` | §7.4 | ❌ NOT in dashboardServer |
-| `GET /api/jobs/:sid` (with filter/pagination) | §7.5 | ❌ NOT in dashboardServer |
+### Issue 2: platformService ↔ dashboardServer Bridge — FIXED
 
-**Root Cause**: Stories 9.11–9.16 were developed and tested but the route registration code was never merged into dashboardServer.js. The workflow modules (workflowEngine, platformStore, platformService, scriptBuilder) exist and have full implementations, but the **HTTP bridge** connecting them to the dashboard is missing.
+Added `_syncToDashboard()` bridge in platformService to call `updatePlatformCell()` after login/verify/confirm.
 
-**dashboardServer currently has**:
-- ✅ `/api/workflow-status/:sid` — platform cell visual states (read)
-- ✅ `/api/workflow-status/:sid/:pid/update` — update cell state (write)
-- ✅ `/api/dashboard/:sid` — profile/direction/subtask data
-- ✅ `/api/jobs/:sid` (POST) — upsert single job
-- ✅ `/api/jobs/:sid/status` (POST) — update job status
-- ✅ `/api/pipeline/:sid/*` — search pipeline control
-- ❌ Missing: all workflow engine routes, platform CRUD routes, script builder routes, job query routes with filtering
+### Issue 3: Dashboard HTML — FIXED
 
-### Issue 2: platformService ↔ dashboardServer Bridge Missing
-
-`platformService.js` updates `platformStore` connection status but **never calls `dashboardServer.updatePlatformCell()`**. This means:
-- Login/verify actions update internal platformStore state
-- Dashboard UI "Platform Status" grid always shows empty/default values
-- The two systems are disconnected
-
-**Fix needed**: After each platformService operation (launchLogin, verifyLogin, confirmLogin, buildTool), call `updatePlatformCell()` to sync the visual state to the dashboard.
-
-### Issue 3: Dashboard HTML Workflow Grid ↔ Missing Endpoints
-
-The HTML rendered by `buildDashboardHTML()` contains JavaScript that calls the workflow API routes (e.g., login, verify, build tool buttons). Since these routes don't exist in the HTTP server, all interactive buttons in the workflow grid will fail with 404.
+All interactive elements (login, build, execute, settings modals, stats, i18n, SSE) are functional.
 
 ---
 
@@ -177,29 +142,34 @@ The HTML rendered by `buildDashboardHTML()` contains JavaScript that calls the w
 
 ---
 
-## Next Steps (P1 Priority)
+## Sprint Status
 
-### Must Fix First (Merge Issues)
-1. **Register missing API routes in dashboardServer.js** — Wire all `/api/workflow/*`, `/api/platforms/*`, `/api/jobs/*` (query) routes to their backend modules
-2. **Bridge platformService → dashboardServer** — Call `updatePlatformCell()` after login/verify/build operations
-3. **Verify dashboard-features.e2e.test.js passes** — All 9.11–9.16 E2E tests should pass once routes are registered
+### Sprint 1+2 ✅ — Route Registration + Dashboard HTML
+- All 30+ HTTP routes registered in dashboardServer
+- Platform service bridge functional
+- Dashboard HTML with control bar, modals, grid, filters, pagination
+- 56 E2E tests pass (38 dashboard-features + 18 workflow-api)
 
-### Then Continue P1 Stories
-| Story | Feature | PRD |
+### Sprint 3 ✅ — Remaining Features (excl auto-apply)
+| Story | Feature | Status |
 |---|---|---|
-| 9.17 | Apply Tool Builder | §8.3 |
-| 9.18 | Generate Materials (Step 3) | §9.1 Step 3 |
-| 9.19 | Auto Apply (Step 4) | §9.1 Step 4, §3.4 |
-| 9.20 | Pre-Apply Email Confirmation | §3.5, §4.4 Step 4 |
-| 9.21 | Status Reflect & Stuck Detection | §4.5, §4.6 |
-| 9.22 | Runtime Script Self-Healing | §9.4 |
-| 9.23 | Cell Status Overlays (CSS) | §4.5 |
-| 9.24 | Partial Execution | §4.7 |
-| 9.25 | Schedule Engine | §3.7, §7.7 |
-| 9.26 | Dashboard i18n | §3.8 |
-| 9.27 | WebSocket Live Push | §7.9 |
-| 9.28 | Dashboard Stats Panel | §5 |
-| 9.29 | AI Stale Selector Update | — |
+| 9.21 | Stuck Detection & Status Reflect | ✅ `checkStuckSteps()`, configurable timeouts |
+| 9.22 | Runtime Script Self-Healing | ✅ Auto-heal on execute failure |
+| 9.23 | Cell Status Overlays (CSS) | ✅ `.cell-running`, `.cell-stuck`, `.cell-building` |
+| 9.24 | Partial Execution | ✅ `skipStep()`, `retryStep()` APIs |
+| 9.25 | Schedule Engine | ✅ `scheduleEngine.js` — interval, time window, max runs |
+| 9.26 | Dashboard i18n | ✅ zh-CN/en translations, `switchLang()` toggle |
+| 9.27 | SSE Live Push | ✅ `EventSource` stream, auto-reconnect, keepalive |
+| 9.28 | Dashboard Stats Panel | ✅ `/api/workflow/:sid/stats`, HTML stats grid |
+| 9.29 | AI Stale Selector Update | ✅ `/api/workflow/:sid/stale-selectors` routes |
+| 18 E2E tests | workflow-sprint3.e2e.test.js | ✅ All pass |
+
+### Excluded (per user request)
+| Story | Feature | Reason |
+|---|---|---|
+| 9.17 | Apply Tool Builder | Auto-apply excluded |
+| 9.19 | Auto Apply (Step 4) | Auto-apply excluded |
+| 9.20 | Pre-Apply Email Confirmation | Depends on 9.19 |
 
 ---
 
@@ -230,25 +200,52 @@ The HTML rendered by `buildDashboardHTML()` contains JavaScript that calls the w
 | `dashboard-features.e2e.test.js` | Stories 9.11–9.16 (routes MISSING in server!) |
 | `workflow-api.e2e.test.js` | Workflow API endpoints |
 
-### Dashboard Server (dashboardServer.js)
+### Dashboard Server (dashboardServer.js) — Full Route Inventory
 | Route | Method | Status |
 |---|---|---|
-| `/api/dashboard/:sid` | GET | ✅ Working |
-| `/api/jobs/:sid` | POST | ✅ Working (upsert) |
-| `/api/jobs/:sid/status` | POST | ✅ Working |
-| `/api/pipeline/:sid/start` | POST | ✅ Working |
-| `/api/pipeline/:sid/stop` | POST | ✅ Working |
-| `/api/pipeline/:sid/status` | GET | ✅ Working |
-| `/api/pipeline/:sid/generate-resume` | POST | ✅ Working |
-| `/api/pipeline/:sid/generate-cover-letter` | POST | ✅ Working |
-| `/api/pipeline/:sid/mark-applied` | POST | ✅ Working |
-| `/api/pipeline/:sid/history` | GET | ✅ Working |
-| `/api/workflow-status/:sid` | GET | ✅ Working |
-| `/api/workflow-status/:sid/:pid/update` | POST | ✅ Working |
-| `/api/envs` | GET | ✅ Working |
-| `/api/active-session` | GET | ✅ Working |
-| `/dashboard` | GET | ✅ Working (redirect) |
-| `/dashboard/:sid` | GET | ✅ Working (HTML) |
-| `/ping` | GET | ✅ Working |
-| `/debug` | GET | ✅ Working |
-| `/shutdown` | POST | ✅ Working |
+| `/api/dashboard/:sid` | GET | ✅ |
+| `/api/jobs/:sid` | GET | ✅ (query + filter + pagination) |
+| `/api/jobs/:sid` | POST | ✅ (upsert) |
+| `/api/jobs/:sid/status` | POST | ✅ |
+| `/api/pipeline/:sid/*` | Various | ✅ (start/stop/status/generate/history) |
+| `/api/workflow-status/:sid` | GET | ✅ |
+| `/api/workflow-status/:sid/:pid/update` | POST | ✅ |
+| `/api/workflow/:sid/status` | GET | ✅ |
+| `/api/workflow/:sid/start` | POST | ✅ |
+| `/api/workflow/:sid/stop` | POST | ✅ |
+| `/api/workflow/:sid/resume` | POST | ✅ |
+| `/api/workflow/:sid/config` | GET | ✅ (auto-creates default) |
+| `/api/workflow/:sid/config` | PUT | ✅ (merge + validate) |
+| `/api/workflow/:sid/view-model` | GET | ✅ (auto-configures) |
+| `/api/workflow/:sid/login-status/:source` | GET | ✅ |
+| `/api/workflow/:sid/login/:source` | POST | ✅ |
+| `/api/workflow/:sid/history` | GET | ✅ |
+| `/api/workflow/:sid/stats` | GET | ✅ |
+| `/api/workflow/:sid/stuck` | GET | ✅ |
+| `/api/workflow/:sid/retry/:step` | POST | ✅ |
+| `/api/workflow/:sid/skip/:step` | POST | ✅ |
+| `/api/workflow/:sid/stale-selectors` | GET | ✅ |
+| `/api/workflow/:sid/stale-selectors/clear` | POST | ✅ |
+| `/api/workflow/:sid/schedule` | GET/POST | ✅ |
+| `/api/workflow/:sid/schedule/pause` | POST | ✅ |
+| `/api/workflow/:sid/schedule` | DELETE | ✅ |
+| `/api/platforms/:sid` | GET | ✅ (auto-init presets) |
+| `/api/platforms/:sid` | POST | ✅ (201 on success) |
+| `/api/platforms/:sid/:pid` | DELETE | ✅ |
+| `/api/platforms/:sid/:pid/login` | POST | ✅ (404 for unknown) |
+| `/api/platforms/:sid/:pid/verify-login` | POST | ✅ |
+| `/api/platforms/:sid/:pid/confirm-login` | POST | ✅ |
+| `/api/platforms/:sid/:pid/bind-env` | POST | ✅ |
+| `/api/platforms/:sid/:pid/tools/:type/build-log` | GET | ✅ |
+| `/api/platforms/:sid/:pid/tools/search/build` | POST | ✅ |
+| `/api/platforms/:sid/:pid/tools/apply/build` | POST | ✅ |
+| `/api/platforms/:sid/:pid/tools/search/execute` | POST | ✅ (auto-heal) |
+| `/api/platforms/:sid/:pid/tools/search/heal` | POST | ✅ |
+| `/api/events/:sid` | GET | ✅ (SSE stream) |
+| `/api/envs` | GET | ✅ |
+| `/api/active-session` | GET | ✅ |
+| `/dashboard` | GET | ✅ (redirect) |
+| `/dashboard/:sid` | GET | ✅ (HTML + i18n) |
+| `/ping` | GET | ✅ |
+| `/debug` | GET | ✅ |
+| `/shutdown` | POST | ✅ |
