@@ -105,6 +105,23 @@ test.describe('Agent Workspace Onboarding E2E', () => {
         await expect(page.locator('.session-context-toolbar')).toContainText(/running/i, { timeout: 15_000 });
         console.log('[e2e]   ✓ Execution state: Running');
 
+        // ── Step 3b: Bind environment ──
+        console.log('[e2e] Step 3b: Binding environment...');
+        const bindModeSelect = page.locator('[aria-label="session-bind-mode"]');
+        await expect(bindModeSelect).toBeVisible({ timeout: 5_000 });
+        await bindModeSelect.selectOption('env');
+
+        const envSelect = page.locator('[aria-label="session-bind-env"]');
+        await expect(envSelect).toBeVisible({ timeout: 5_000 });
+        await envSelect.selectOption({ label: '环境1' });
+        console.log('[e2e]   ✓ Selected environment: 环境1');
+
+        const bindBtn = page.locator('button', { hasText: /bind to/i });
+        await expect(bindBtn).toBeEnabled({ timeout: 5_000 });
+        await bindBtn.click();
+        console.log('[e2e]   ✓ Environment bound to session');
+        await page.waitForTimeout(1000);
+
         // ── Step 4: Open preset modal ──
         console.log('[e2e] Step 4: Opening preset modal...');
         const presetModal = page.locator('.ai-preset-modal');
