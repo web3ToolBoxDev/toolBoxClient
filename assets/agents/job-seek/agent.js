@@ -1064,45 +1064,45 @@ function resolveProvider() {
  */
 function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default', options = {}) {
     return new Promise((resolve, reject) => {
-        let fullCmd;
-        const modelFlag = (model && model !== 'default') ? ` --model ${model}` : '';
         const workspaceDir = path.join(__dirname, 'workspace');
         const execDir = options.cwd || workspaceDir;
 
-        // Build full prompt with context inlined (never expose file paths to the AI)
+        // Build full prompt with context inlined
         const fullPrompt = memoryContext
             ? `[CONTEXT]\n${memoryContext}\n[/CONTEXT]\n\n${prompt}`
             : prompt;
 
-        // Write to temp file to avoid shell escaping issues with special chars/newlines
-        const promptFilePath = path.join(workspaceDir, `_prompt_${Date.now()}.txt`);
-        fs.writeFileSync(promptFilePath, fullPrompt, 'utf-8');
-        const pf = promptFilePath.replace(/\\/g, '/');
-
+        // Build args WITHOUT the prompt — prompt is piped via stdin
+        // to avoid shell escaping issues (newlines break cmd.exe on Windows)
+        let bin, args;
         if (provider === 'codex-cli') {
-            fullCmd = `codex exec${modelFlag} "$(cat '${pf}')"`;
+            bin = 'codex';
+            args = ['exec'];
+            if (model && model !== 'default') args.push('--model', model);
         } else {
-            fullCmd = `claude -p "$(cat '${pf}')"${modelFlag}`;
+            bin = 'claude';
+            args = ['-p'];
+            if (model && model !== 'default') args.push('--model', model);
         }
-        console.log(`[agent:cli] CMD (${provider}): ${fullCmd.slice(0, 200)}...`);
+
+        console.log(`[agent:cli] ${bin} ${args.join(' ')} (${provider}, prompt via stdin)`);
         let stdout = '';
         let stderr = '';
         const cleanEnv = { ...process.env };
         delete cleanEnv.CLAUDECODE; // Allow nested Claude Code invocation
-        const child = spawn(fullCmd, [], {
-            stdio: ['ignore', 'pipe', 'pipe'],
+        // shell: true to resolve .cmd/.ps1 wrappers; prompt piped via stdin
+        const child = spawn(bin, args, {
+            stdio: ['pipe', 'pipe', 'pipe'],
             timeout: 120000,
             shell: true,
             cwd: execDir,
             env: cleanEnv
         });
+        child.stdin.write(fullPrompt);
+        child.stdin.end();
         child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
         child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-        const cleanupContext = () => {
-            if (promptFilePath) try { fs.unlinkSync(promptFilePath); } catch (_) {}
-        };
         child.on('close', (code) => {
-            cleanupContext();
             if (code === 0) {
                 resolve(stdout.trim());
             } else {
@@ -1111,7 +1111,6 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default',
             }
         });
         child.on('error', (err) => {
-            cleanupContext();
             const cliName = provider === 'codex-cli' ? 'codex' : 'claude';
             reject(new Error(`${cliName} spawn failed: ${err.message}`));
         });

@@ -21,8 +21,9 @@ function registerAll() {
         },
         category: 'browser',
         handler: async (params) => {
-            const chromePath = process.env.TOOL_SERVICE_CHROME_PATH || '';
-            const savePath = process.env.TOOL_SERVICE_SAVE_PATH || '';
+            // Params can override env vars (e.g. when called from platformService with full env data)
+            const chromePath = params.chromePath || process.env.TOOL_SERVICE_CHROME_PATH || '';
+            const savePath = params.savePath || process.env.TOOL_SERVICE_SAVE_PATH || '';
             const { browserId, mode } = await browserPool.launch({
                 chromePath,
                 savePath,
@@ -51,6 +52,31 @@ function registerAll() {
     });
 
     toolRegistry.register({
+        name: 'page_new',
+        description: 'Open a new tab in an existing browser. Optionally navigate to a URL.',
+        parameters: {
+            type: 'object',
+            properties: {
+                browserId: { type: 'string', description: 'Browser instance ID' },
+                url: { type: 'string', description: 'URL to navigate to (optional)' },
+                waitUntil: { type: 'string', description: 'domcontentloaded | networkidle0 | load' }
+            },
+            required: ['browserId']
+        },
+        category: 'browser',
+        handler: async ({ browserId, url, waitUntil }) => {
+            const { page, pageIndex } = await browserPool.newPage(browserId);
+            if (url) {
+                await page.goto(url, {
+                    waitUntil: waitUntil || 'domcontentloaded',
+                    timeout: 30000
+                });
+            }
+            return { pageIndex, url: page.url() };
+        }
+    });
+
+    toolRegistry.register({
         name: 'page_goto',
         description: 'Navigate to a URL in the browser.',
         parameters: {
@@ -58,13 +84,14 @@ function registerAll() {
             properties: {
                 browserId: { type: 'string' },
                 url: { type: 'string', description: 'URL to navigate to' },
+                pageIndex: { type: 'number', description: 'Tab index (optional, defaults to last tab)' },
                 waitUntil: { type: 'string', description: 'domcontentloaded | networkidle0 | load' }
             },
             required: ['browserId', 'url']
         },
         category: 'browser',
-        handler: async ({ browserId, url, waitUntil }) => {
-            const page = await browserPool.getPage(browserId);
+        handler: async ({ browserId, url, pageIndex, waitUntil }) => {
+            const page = await browserPool.getPage(browserId, pageIndex);
             await page.goto(url, {
                 waitUntil: waitUntil || 'domcontentloaded',
                 timeout: 30000
@@ -81,13 +108,14 @@ function registerAll() {
             properties: {
                 browserId: { type: 'string' },
                 selector: { type: 'string', description: 'CSS selector' },
-                text: { type: 'string', description: 'Click element containing this text (alternative to selector)' }
+                text: { type: 'string', description: 'Click element containing this text (alternative to selector)' },
+                pageIndex: { type: 'number', description: 'Tab index (optional, defaults to last tab)' }
             },
             required: ['browserId']
         },
         category: 'browser',
-        handler: async ({ browserId, selector, text }) => {
-            const page = await browserPool.getPage(browserId);
+        handler: async ({ browserId, selector, text, pageIndex }) => {
+            const page = await browserPool.getPage(browserId, pageIndex);
             if (selector) {
                 await page.click(selector);
                 return { clicked: selector };
@@ -113,13 +141,14 @@ function registerAll() {
                 selector: { type: 'string', description: 'CSS selector for the input' },
                 text: { type: 'string', description: 'Text to type' },
                 clear: { type: 'boolean', description: 'Clear the field first (default false)' },
-                delay: { type: 'number', description: 'Delay between keystrokes in ms (default 0)' }
+                delay: { type: 'number', description: 'Delay between keystrokes in ms (default 0)' },
+                pageIndex: { type: 'number', description: 'Tab index (optional, defaults to last tab)' }
             },
             required: ['browserId', 'selector', 'text']
         },
         category: 'browser',
-        handler: async ({ browserId, selector, text, clear, delay }) => {
-            const page = await browserPool.getPage(browserId);
+        handler: async ({ browserId, selector, text, clear, delay, pageIndex }) => {
+            const page = await browserPool.getPage(browserId, pageIndex);
             if (clear) {
                 await page.click(selector, { clickCount: 3 });
                 await page.keyboard.press('Backspace');
@@ -137,13 +166,14 @@ function registerAll() {
             properties: {
                 browserId: { type: 'string' },
                 fullPage: { type: 'boolean', description: 'Capture full page (default false)' },
-                selector: { type: 'string', description: 'Screenshot a specific element (optional)' }
+                selector: { type: 'string', description: 'Screenshot a specific element (optional)' },
+                pageIndex: { type: 'number', description: 'Tab index (optional, defaults to last tab)' }
             },
             required: ['browserId']
         },
         category: 'browser',
-        handler: async ({ browserId, fullPage, selector }) => {
-            const page = await browserPool.getPage(browserId);
+        handler: async ({ browserId, fullPage, selector, pageIndex }) => {
+            const page = await browserPool.getPage(browserId, pageIndex);
             let buffer;
             if (selector) {
                 const el = await page.$(selector);
@@ -165,13 +195,14 @@ function registerAll() {
                 browserId: { type: 'string' },
                 selector: { type: 'string', description: 'CSS selector to extract text from' },
                 attribute: { type: 'string', description: 'Extract attribute value instead of text (e.g. "href")' },
-                all: { type: 'boolean', description: 'Extract from all matching elements (default false, returns first)' }
+                all: { type: 'boolean', description: 'Extract from all matching elements (default false, returns first)' },
+                pageIndex: { type: 'number', description: 'Tab index (optional, defaults to last tab)' }
             },
             required: ['browserId', 'selector']
         },
         category: 'browser',
-        handler: async ({ browserId, selector, attribute, all }) => {
-            const page = await browserPool.getPage(browserId);
+        handler: async ({ browserId, selector, attribute, all, pageIndex }) => {
+            const page = await browserPool.getPage(browserId, pageIndex);
             if (all) {
                 const results = await page.$$eval(selector, (els, attr) => {
                     return els.map(el => attr ? el.getAttribute(attr) : el.textContent?.trim());
@@ -199,8 +230,8 @@ function registerAll() {
             required: ['browserId']
         },
         category: 'browser',
-        handler: async ({ browserId, direction, pixels, selector }) => {
-            const page = await browserPool.getPage(browserId);
+        handler: async ({ browserId, direction, pixels, selector, pageIndex }) => {
+            const page = await browserPool.getPage(browserId, pageIndex);
             if (selector) {
                 await page.$eval(selector, el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
                 return { scrolledTo: selector };
@@ -225,7 +256,109 @@ function registerAll() {
         }
     });
 
-    console.log(`[browserTools] Registered ${8} built-in browser tools`);
+    // -----------------------------------------------------------------
+    // page_evaluate — run arbitrary JavaScript in the browser context
+    // -----------------------------------------------------------------
+    toolRegistry.register({
+        name: 'page_evaluate',
+        description: 'Evaluate JavaScript in the page context. Returns the serialised result.',
+        parameters: {
+            type: 'object',
+            properties: {
+                browserId: { type: 'string' },
+                expression: { type: 'string', description: 'JavaScript expression or IIFE to evaluate' },
+                pageIndex: { type: 'number', description: 'Tab index (optional, defaults to last tab)' }
+            },
+            required: ['browserId', 'expression']
+        },
+        category: 'browser',
+        handler: async ({ browserId, expression, pageIndex }) => {
+            const page = await browserPool.getPage(browserId, pageIndex);
+            // Wrap in an AsyncFunction to support await inside expression
+            const result = await page.evaluate(expression);
+            return { result };
+        }
+    });
+
+    // -----------------------------------------------------------------
+    // page_keyboard — press a key or key combo
+    // -----------------------------------------------------------------
+    toolRegistry.register({
+        name: 'page_keyboard',
+        description: 'Press a keyboard key on the page (e.g. Enter, Tab, Escape).',
+        parameters: {
+            type: 'object',
+            properties: {
+                browserId: { type: 'string' },
+                key: { type: 'string', description: 'Key name (e.g. "Enter", "Tab", "Escape", "ArrowDown")' },
+                pageIndex: { type: 'number', description: 'Tab index (optional, defaults to last tab)' }
+            },
+            required: ['browserId', 'key']
+        },
+        category: 'browser',
+        handler: async ({ browserId, key, pageIndex }) => {
+            const page = await browserPool.getPage(browserId, pageIndex);
+            await page.keyboard.press(key);
+            return { pressed: key };
+        }
+    });
+
+    // -----------------------------------------------------------------
+    // page_wait_for_selector — wait for a CSS selector to appear
+    // -----------------------------------------------------------------
+    toolRegistry.register({
+        name: 'page_wait_for_selector',
+        description: 'Wait for a CSS selector to appear on the page.',
+        parameters: {
+            type: 'object',
+            properties: {
+                browserId: { type: 'string' },
+                selector: { type: 'string', description: 'CSS selector to wait for' },
+                timeout: { type: 'number', description: 'Timeout in ms (default 8000)' },
+                visible: { type: 'boolean', description: 'Wait for element to be visible (default false)' },
+                pageIndex: { type: 'number', description: 'Tab index (optional, defaults to last tab)' }
+            },
+            required: ['browserId', 'selector']
+        },
+        category: 'browser',
+        handler: async ({ browserId, selector, timeout, visible, pageIndex }) => {
+            const page = await browserPool.getPage(browserId, pageIndex);
+            await page.waitForSelector(selector, {
+                timeout: timeout || 8000,
+                visible: !!visible
+            });
+            return { found: selector };
+        }
+    });
+
+    // -----------------------------------------------------------------
+    // page_wait_for_navigation — wait for a navigation event
+    // -----------------------------------------------------------------
+    toolRegistry.register({
+        name: 'page_wait_for_navigation',
+        description: 'Wait for the page to navigate (e.g. after clicking a link).',
+        parameters: {
+            type: 'object',
+            properties: {
+                browserId: { type: 'string' },
+                waitUntil: { type: 'string', description: 'domcontentloaded | load (default domcontentloaded)' },
+                timeout: { type: 'number', description: 'Timeout in ms (default 10000)' },
+                pageIndex: { type: 'number', description: 'Tab index (optional, defaults to last tab)' }
+            },
+            required: ['browserId']
+        },
+        category: 'browser',
+        handler: async ({ browserId, waitUntil, timeout, pageIndex }) => {
+            const page = await browserPool.getPage(browserId, pageIndex);
+            await page.waitForNavigation({
+                waitUntil: waitUntil || 'domcontentloaded',
+                timeout: timeout || 10000
+            });
+            return { navigated: true, url: page.url() };
+        }
+    });
+
+    console.log(`[browserTools] Registered ${13} built-in browser tools`);
 }
 
 module.exports = { registerAll };

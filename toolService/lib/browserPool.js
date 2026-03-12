@@ -114,7 +114,11 @@ async function launchWithChrome({ chromePath, headless = false }) {
         headless: headless ? 'new' : false,
         executablePath: chromePath,
         ignoreDefaultArgs: ['--enable-automation'],
-        args: ['--no-sandbox', '--disable-infobars'],
+        args: [
+            '--no-sandbox',
+            '--disable-infobars',
+            '--disable-blink-features=AutomationControlled'
+        ],
         defaultViewport: null
     });
 
@@ -190,17 +194,38 @@ function getBrowser(browserId) {
 }
 
 /**
- * Get or create a page in a browser.
+ * Get a page in a browser by optional index.
  * @param {string} browserId
+ * @param {number} [pageIndex] - 0-based tab index. If omitted, returns the last (most recent) page.
  * @returns {Promise<object>} Puppeteer page
  */
-async function getPage(browserId) {
+async function getPage(browserId, pageIndex) {
     const browser = getBrowser(browserId);
     if (!browser) throw new Error(`Browser ${browserId} not found`);
     const pages = await browser.pages();
-    // Return the last (most recently active) page, or create one if none exist
+    if (typeof pageIndex === 'number') {
+        if (pageIndex < 0 || pageIndex >= pages.length) {
+            throw new Error(`Page index ${pageIndex} out of range (${pages.length} pages open)`);
+        }
+        return pages[pageIndex];
+    }
+    // Default: last page, or create one if none
     if (pages.length > 0) return pages[pages.length - 1];
     return browser.newPage();
+}
+
+/**
+ * Create a new page (tab) in an existing browser.
+ * @param {string} browserId
+ * @returns {Promise<{ page: object, pageIndex: number }>}
+ */
+async function newPage(browserId) {
+    const browser = getBrowser(browserId);
+    if (!browser) throw new Error(`Browser ${browserId} not found`);
+    const page = await browser.newPage();
+    const pages = await browser.pages();
+    const pageIndex = pages.indexOf(page);
+    return { page, pageIndex };
 }
 
 /**
@@ -285,6 +310,7 @@ module.exports = {
     launchHeadless,
     getBrowser,
     getPage,
+    newPage,
     close,
     closeAll,
     listBrowsers,

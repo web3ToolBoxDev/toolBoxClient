@@ -115,6 +115,8 @@
     "test:server": "jest server/services/webSocketService.test.js server/services/taskService.test.js --runInBand",
     "test:all": "npm run test:client && npm run test:server",
     "test:e2e": "playwright test -c test/playwright.config.js",
+    "test:e2e:claude": "cross-env E2E_PROVIDER=claude-code playwright test -c test/playwright.config.js test/onboarding-e2e.spec.js --headed",
+    "test:e2e:codex": "cross-env E2E_PROVIDER=codex-cli playwright test -c test/playwright.config.js test/onboarding-e2e.spec.js --headed",
     "test:e2e:ui": "playwright test -c test/playwright.config.js --ui",
     "eject": "react-scripts eject",
     "pack": "electron-builder --dir"

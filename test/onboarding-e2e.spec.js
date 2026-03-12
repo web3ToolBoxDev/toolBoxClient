@@ -18,21 +18,44 @@ const path = require('path');
  *   - React dev server running on http://localhost:3000 (npm start)
  *   - Express backend running on http://localhost:30001 (npm run dev)
  *
+ * Environment variables:
+ *   E2E_PROVIDER      - 'claude-code' (default) | 'codex-cli' | 'api-key'
+ *   E2E_MODEL         - model name (e.g. 'gpt-4o-mini'), empty = use default
+ *   E2E_SUB_PROVIDER  - 'openai' | 'anthropic' | 'google' (only for api-key)
+ *   E2E_API_KEY       - API key string (only for api-key)
+ *   E2E_JOB_TITLE     - override job title (default: 'QA Automation Engineer')
+ *   E2E_LOCATION      - override location (default: 'Toronto, Canada')
+ *   E2E_WORK_MODE     - override work mode (default: 'Remote')
+ *   E2E_SALARY        - override salary (default: '120')
+ *
  * Run:
  *   npx playwright test -c test/playwright.config.js test/onboarding-e2e.spec.js --headed
+ *
+ * Examples:
+ *   # Default (Claude Code)
+ *   npx playwright test -c test/playwright.config.js test/onboarding-e2e.spec.js --headed
+ *
+ *   # Codex CLI
+ *   E2E_PROVIDER=codex-cli npx playwright test -c test/playwright.config.js test/onboarding-e2e.spec.js --headed
+ *
+ *   # API Key with OpenAI
+ *   E2E_PROVIDER=api-key E2E_SUB_PROVIDER=openai E2E_API_KEY=sk-... E2E_MODEL=gpt-4o-mini npx playwright test -c test/playwright.config.js test/onboarding-e2e.spec.js --headed
  */
 
 const TASK_NAME = 'jobSeekAgent';
 const RESUME_PATH = path.resolve('C:\\Users\\z5866\\Documents\\resume\\Ying_Zhang_fullstack_OnePage_Final.docx');
 
-// Provider/model config
-const PROVIDER = 'claude-code'; // 'codex-cli' | 'claude-code' | 'api-key'
+// Provider/model config — override via env: E2E_PROVIDER=codex-cli npx playwright test ...
+const PROVIDER = process.env.E2E_PROVIDER || 'claude-code'; // 'codex-cli' | 'claude-code' | 'api-key'
+const MODEL = process.env.E2E_MODEL || ''; // e.g. 'gpt-4o-mini', '' = use default
+const SUB_PROVIDER = process.env.E2E_SUB_PROVIDER || ''; // 'openai' | 'anthropic' | 'google' (only for api-key)
+const API_KEY = process.env.E2E_API_KEY || ''; // only for api-key provider
 
 // Onboarding answers
-const JOB_TITLE = 'QA Automation Engineer';
-const LOCATION = 'Toronto, Canada';
-const WORK_MODE = 'Remote';
-const SALARY = '120';
+const JOB_TITLE = process.env.E2E_JOB_TITLE || 'QA Automation Engineer';
+const LOCATION = process.env.E2E_LOCATION || 'Toronto, Canada';
+const WORK_MODE = process.env.E2E_WORK_MODE || 'Remote';
+const SALARY = process.env.E2E_SALARY || '120';
 
 async function isBackendReady() {
     try {
@@ -96,6 +119,33 @@ test.describe('Agent Workspace Onboarding E2E', () => {
         console.log(`[e2e]   ✓ Provider: ${PROVIDER}`);
 
         await page.waitForTimeout(500);
+
+        // For api-key provider: select sub-provider and enter API key
+        if (PROVIDER === 'api-key') {
+            if (SUB_PROVIDER) {
+                const subProviderSelect = page.locator('[aria-label="session-sub-provider"]');
+                await expect(subProviderSelect).toBeVisible({ timeout: 5_000 });
+                await subProviderSelect.selectOption(SUB_PROVIDER);
+                console.log(`[e2e]   ✓ Sub-provider: ${SUB_PROVIDER}`);
+                await page.waitForTimeout(300);
+            }
+            if (API_KEY) {
+                const apiKeyInput = page.locator('[aria-label="session-api-key"]');
+                await expect(apiKeyInput).toBeVisible({ timeout: 5_000 });
+                await apiKeyInput.fill(API_KEY);
+                console.log('[e2e]   ✓ API key entered');
+                await page.waitForTimeout(300);
+            }
+        }
+
+        // Select model if specified
+        if (MODEL) {
+            const modelSelect = page.locator('[aria-label="session-model"]');
+            await expect(modelSelect).toBeVisible({ timeout: 5_000 });
+            await modelSelect.selectOption(MODEL);
+            console.log(`[e2e]   ✓ Model: ${MODEL}`);
+            await page.waitForTimeout(300);
+        }
 
         // Click Apply Model
         await page.locator('button', { hasText: /apply model/i }).click();

@@ -220,6 +220,30 @@ router.get('/getFingerPrints',async(req,res)=>{
   const fingerPrints = await fingerPrintService.getFingerPrints();
   res.send(fingerPrints);
 })
+
+router.get('/getEnvById/:id',async(req,res)=>{
+  const result = await fingerPrintService.getEnvById(req.params.id);
+  res.send(result);
+})
+
+// Start proxy for an env and return the proxy URL + geo data
+router.post('/startProxyForEnv/:id',async(req,res)=>{
+  const { checkAndStartProxy } = require('./services/proxyService');
+  const envRes = await fingerPrintService.getEnvById(req.params.id);
+  if (!envRes.success || !envRes.data) {
+    return res.send({ success: false, message: 'Env not found' });
+  }
+  const env = envRes.data;
+  if (!env.proxy || !env.proxy.ipHost || !env.proxy.ipPort) {
+    return res.send({ success: false, message: 'No proxy configured for this env' });
+  }
+  const proxyRes = await checkAndStartProxy(
+    `agent_${req.params.id}`,
+    env.proxy.ipType, env.proxy.ipHost, env.proxy.ipPort,
+    env.proxy.ipUsername, env.proxy.ipPassword
+  );
+  res.send(proxyRes);
+})
 //清空指纹数据
 router.get('/clearFingerPrints',async(req,res)=>{
   const message = await fingerPrintService.clearFingerPrints();
