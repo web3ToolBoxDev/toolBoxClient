@@ -55,6 +55,14 @@ function getScheduleEngine() {
     if (!_scheduleEngine) _scheduleEngine = require('./workflow/scheduleEngine');
     return _scheduleEngine;
 }
+let _alertService = null;
+function getAlertService() {
+    if (!_alertService) {
+        _alertService = require('./workflow/alertService');
+        _alertService.setSSEBroadcaster(_broadcastSSE);
+    }
+    return _alertService;
+}
 let _port = DASHBOARD_PORT;
 let _server = null;
 let _stateGetter = null; // function that returns current agent state
@@ -591,6 +599,69 @@ function start(getState, port) {
                 res.end(JSON.stringify({ success: true }));
             });
             return;
+        }
+
+        // ─── Alert & Notification API routes ───
+
+        // GET /api/workflow/:sid/alerts/config — get alert configuration
+        const alertCfgGetMatch = url.match(/^\/api\/workflow\/([^/]+)\/alerts\/config$/);
+        if (alertCfgGetMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(alertCfgGetMatch[1]);
+            const config = getAlertService().getAlertConfig(sid);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(config));
+        }
+
+        // PUT /api/workflow/:sid/alerts/config — update alert configuration
+        const alertCfgPutMatch = url.match(/^\/api\/workflow\/([^/]+)\/alerts\/config$/);
+        if (alertCfgPutMatch && req.method === 'PUT') {
+            const sid = decodeURIComponent(alertCfgPutMatch[1]);
+            _readBody(req, (body) => {
+                const updated = getAlertService().updateAlertConfig(sid, body);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, config: updated }));
+            });
+            return;
+        }
+
+        // GET /api/workflow/:sid/alerts/history — get alert history
+        const alertHistMatch = url.match(/^\/api\/workflow\/([^/]+)\/alerts\/history$/);
+        if (alertHistMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(alertHistMatch[1]);
+            const history = getAlertService().getAlertHistory(sid);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(history));
+        }
+
+        // POST /api/workflow/:sid/alerts/test — send test alert
+        const alertTestMatch = url.match(/^\/api\/workflow\/([^/]+)\/alerts\/test$/);
+        if (alertTestMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(alertTestMatch[1]);
+            const result = getAlertService().dispatch(sid, {
+                type: 'info',
+                title: 'Test Alert',
+                message: 'This is a test notification from the alert system.'
+            });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ success: true, ...result }));
+        }
+
+        // POST /api/workflow/:sid/alerts/check — trigger stuck check + alert dispatch
+        const alertCheckMatch = url.match(/^\/api\/workflow\/([^/]+)\/alerts\/check$/);
+        if (alertCheckMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(alertCheckMatch[1]);
+            const result = getAlertService().checkAndAlert(sid, getWorkflowEngine());
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(result));
+        }
+
+        // DELETE /api/workflow/:sid/alerts/history — clear alert history
+        const alertHistClearMatch = url.match(/^\/api\/workflow\/([^/]+)\/alerts\/history$/);
+        if (alertHistClearMatch && req.method === 'DELETE') {
+            const sid = decodeURIComponent(alertHistClearMatch[1]);
+            getAlertService().clearAlertHistory(sid);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ success: true }));
         }
 
         // ─── Schedule Engine API routes ───
@@ -1530,6 +1601,7 @@ function buildDashboardHTML(sessionId) {
     <input type="checkbox" id="asyncToggle"> Async steps
   </label>
   <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openGlobalSettings()" data-i18n="settings">Settings</button>
+  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openAlertSettings()" data-i18n="alerts">Alerts</button>
   <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openAddWebsite()" data-i18n="addWebsite">+ Add Website</button>
   <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" id="langToggle" onclick="switchLang(_lang === 'en' ? 'zh-CN' : 'en'); this.textContent = _lang === 'en' ? '中文' : 'EN';">中文</button>
 </div>
@@ -1678,6 +1750,72 @@ function buildDashboardHTML(sessionId) {
   </div>
 </div>
 
+<!-- Alert Settings modal -->
+<div class="modal-overlay" id="alertSettingsModal" onclick="closeAlertSettings(event)">
+  <div class="modal" style="max-width:600px;">
+    <button class="close-btn" onclick="closeAlertSettings()">&times;</button>
+    <h3 data-i18n="alertSettings">Alert & Notification Settings</h3>
+    <div class="modal-form">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <label data-i18n="alertsEnabled">Enable Alerts</label>
+        <input type="checkbox" id="alertEnabled" checked>
+      </div>
+      <hr style="border-color:#2d2f4a;margin:0.5rem 0;">
+      <h4 style="color:#8b9aff;margin:0;" data-i18n="stuckDetection">Stuck Detection</h4>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <label data-i18n="stuckEnabled">Enable Stuck Detection</label>
+        <input type="checkbox" id="alertStuckEnabled" checked>
+      </div>
+      <div class="grid-2" style="gap:0.5rem;">
+        <div><label style="font-size:0.8rem;color:#9da0c3;">Profile Timeout (s)</label><input type="number" id="alertThProfile" value="30" min="10" max="300" style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.4rem;"></div>
+        <div><label style="font-size:0.8rem;color:#9da0c3;">Search Timeout (s)</label><input type="number" id="alertThSearch" value="600" min="60" max="3600" style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.4rem;"></div>
+        <div><label style="font-size:0.8rem;color:#9da0c3;">Generate Timeout (s)</label><input type="number" id="alertThGenerate" value="900" min="60" max="3600" style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.4rem;"></div>
+        <div><label style="font-size:0.8rem;color:#9da0c3;">Apply Timeout (s)</label><input type="number" id="alertThApply" value="1200" min="60" max="3600" style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.4rem;"></div>
+      </div>
+      <div style="display:flex;gap:1rem;">
+        <div style="flex:1;"><label style="font-size:0.8rem;color:#9da0c3;" data-i18n="failureTrigger">Consecutive Failures</label><input type="number" id="alertFailureTrigger" value="3" min="1" max="10" style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.4rem;"></div>
+        <div style="flex:1;"><label style="font-size:0.8rem;color:#9da0c3;" data-i18n="maxRetries">Max Retries</label><input type="number" id="alertMaxRetries" value="2" min="0" max="5" style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.4rem;"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <label data-i18n="autoRetry">Auto-Retry on Stuck</label>
+        <input type="checkbox" id="alertAutoRetry" checked>
+      </div>
+      <hr style="border-color:#2d2f4a;margin:0.5rem 0;">
+      <h4 style="color:#8b9aff;margin:0;" data-i18n="notificationChannels">Notification Channels</h4>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <label data-i18n="dashboardPopup">Dashboard Popup</label>
+        <input type="checkbox" id="alertChDashboard" checked disabled>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <label data-i18n="desktopNotification">Desktop Notification</label>
+        <input type="checkbox" id="alertChDesktop" checked>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <label data-i18n="webhookNotification">Webhook</label>
+        <input type="checkbox" id="alertChWebhook">
+      </div>
+      <div id="webhookFields" style="display:none;">
+        <label style="font-size:0.8rem;color:#9da0c3;">Webhook URL</label>
+        <input type="text" id="alertWebhookUrl" placeholder="https://..." style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.4rem;">
+        <label style="font-size:0.8rem;color:#9da0c3;">Secret (optional)</label>
+        <input type="text" id="alertWebhookSecret" placeholder="optional secret" style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.4rem;">
+      </div>
+      <hr style="border-color:#2d2f4a;margin:0.5rem 0;">
+      <div>
+        <label style="font-size:0.8rem;color:#9da0c3;" data-i18n="throttleInterval">Throttle Interval (seconds)</label>
+        <input type="number" id="alertThrottle" value="300" min="30" max="3600" style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.4rem;">
+      </div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+        <button class="btn btn-primary" onclick="saveAlertSettings()" data-i18n="save">Save Settings</button>
+        <button class="btn btn-warning" onclick="testAlert()" data-i18n="testAlert">Test Alert</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast notification container -->
+<div id="toastContainer" style="position:fixed;top:70px;right:20px;z-index:200;display:flex;flex-direction:column;gap:0.5rem;pointer-events:none;"></div>
+
 <!-- Alert modal -->
 <div class="modal-overlay" id="alertModal" onclick="closeAlert(event)">
   <div class="modal" style="max-width:400px;">
@@ -1708,6 +1846,13 @@ var _i18n = {
         noPlatforms: 'No platforms configured yet.',
         filter: 'Filter', refresh: 'Refresh', save: 'Save Settings',
         addTargetWebsite: 'Add Target Website', globalSettings: 'Global Settings',
+        alerts: 'Alerts', alertSettings: 'Alert & Notification Settings',
+        alertsEnabled: 'Enable Alerts', stuckDetection: 'Stuck Detection',
+        stuckEnabled: 'Enable Stuck Detection', failureTrigger: 'Consecutive Failures',
+        maxRetries: 'Max Retries', autoRetry: 'Auto-Retry on Stuck',
+        notificationChannels: 'Notification Channels', dashboardPopup: 'Dashboard Popup',
+        desktopNotification: 'Desktop Notification', webhookNotification: 'Webhook',
+        throttleInterval: 'Throttle Interval (seconds)', testAlert: 'Test Alert',
         step: 'Step', status: 'Status', title: 'Title', company: 'Company',
         location: 'Location', score: 'Score', applied: 'Applied'
     },
@@ -1723,6 +1868,13 @@ var _i18n = {
         noPlatforms: '暂未配置平台。',
         filter: '筛选', refresh: '刷新', save: '保存设置',
         addTargetWebsite: '添加目标网站', globalSettings: '全局设置',
+        alerts: '告警', alertSettings: '告警与通知设置',
+        alertsEnabled: '启用告警', stuckDetection: '卡住检测',
+        stuckEnabled: '启用卡住检测', failureTrigger: '连续失败次数',
+        maxRetries: '最大重试次数', autoRetry: '卡住时自动重试',
+        notificationChannels: '通知渠道', dashboardPopup: '仪表盘弹窗',
+        desktopNotification: '桌面通知', webhookNotification: 'Webhook',
+        throttleInterval: '节流间隔（秒）', testAlert: '测试告警',
         step: '步骤', status: '状态', title: '职位', company: '公司',
         location: '地点', score: '匹配度', applied: '已申请'
     }
@@ -2150,6 +2302,94 @@ function closeAlert(e) {
         document.getElementById('alertModal').classList.remove('visible');
 }
 
+// ─── Alert Settings Modal ───
+var ALERT_API = BASE_URL + '/api/workflow/' + _wfSessionId + '/alerts';
+
+function openAlertSettings() {
+    document.getElementById('alertSettingsModal').classList.add('visible');
+    fetch(ALERT_API + '/config').then(function(r) { return r.json(); }).then(function(cfg) {
+        document.getElementById('alertEnabled').checked = cfg.enabled !== false;
+        var sd = cfg.stuckDetection || {};
+        document.getElementById('alertStuckEnabled').checked = sd.enabled !== false;
+        var th = sd.thresholds || {};
+        document.getElementById('alertThProfile').value = th.customizeProfile || 30;
+        document.getElementById('alertThSearch').value = th.search || 600;
+        document.getElementById('alertThGenerate').value = th.generate || 900;
+        document.getElementById('alertThApply').value = th.apply || 1200;
+        document.getElementById('alertFailureTrigger').value = sd.consecutiveFailureTrigger || 3;
+        document.getElementById('alertMaxRetries').value = sd.maxRetries || 2;
+        document.getElementById('alertAutoRetry').checked = sd.autoRetry !== false;
+        var ch = cfg.channels || {};
+        document.getElementById('alertChDesktop').checked = (ch.desktop || {}).enabled !== false;
+        document.getElementById('alertChWebhook').checked = !!(ch.webhook || {}).enabled;
+        document.getElementById('alertWebhookUrl').value = (ch.webhook || {}).url || '';
+        document.getElementById('alertWebhookSecret').value = (ch.webhook || {}).secret || '';
+        document.getElementById('webhookFields').style.display = (ch.webhook || {}).enabled ? 'block' : 'none';
+        document.getElementById('alertThrottle').value = (cfg.throttle || {}).intervalSeconds || 300;
+    }).catch(function() {});
+}
+function closeAlertSettings(e) {
+    if (!e || e.target === document.getElementById('alertSettingsModal') || e.target.classList.contains('close-btn'))
+        document.getElementById('alertSettingsModal').classList.remove('visible');
+}
+document.getElementById('alertChWebhook').addEventListener('change', function() {
+    document.getElementById('webhookFields').style.display = this.checked ? 'block' : 'none';
+});
+async function saveAlertSettings() {
+    var body = {
+        enabled: document.getElementById('alertEnabled').checked,
+        stuckDetection: {
+            enabled: document.getElementById('alertStuckEnabled').checked,
+            thresholds: {
+                customizeProfile: parseInt(document.getElementById('alertThProfile').value) || 30,
+                search: parseInt(document.getElementById('alertThSearch').value) || 600,
+                generate: parseInt(document.getElementById('alertThGenerate').value) || 900,
+                apply: parseInt(document.getElementById('alertThApply').value) || 1200
+            },
+            consecutiveFailureTrigger: parseInt(document.getElementById('alertFailureTrigger').value) || 3,
+            maxRetries: parseInt(document.getElementById('alertMaxRetries').value) || 2,
+            autoRetry: document.getElementById('alertAutoRetry').checked
+        },
+        channels: {
+            dashboard: { enabled: true },
+            desktop: { enabled: document.getElementById('alertChDesktop').checked },
+            webhook: {
+                enabled: document.getElementById('alertChWebhook').checked,
+                url: document.getElementById('alertWebhookUrl').value,
+                secret: document.getElementById('alertWebhookSecret').value
+            }
+        },
+        throttle: { intervalSeconds: parseInt(document.getElementById('alertThrottle').value) || 300 }
+    };
+    try {
+        var res = await fetch(ALERT_API + '/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (res.ok) { closeAlertSettings(); showToast('Alert settings saved', 'success'); }
+        else { showToast('Save failed', 'error'); }
+    } catch (e) { showToast(e.message, 'error'); }
+}
+async function testAlert() {
+    try {
+        await fetch(ALERT_API + '/test', { method: 'POST' });
+    } catch (e) { showToast('Test failed: ' + e.message, 'error'); }
+}
+
+// ─── Toast Notifications ───
+function showToast(message, type) {
+    var container = document.getElementById('toastContainer');
+    var toast = document.createElement('div');
+    toast.style.cssText = 'pointer-events:auto;padding:0.75rem 1.25rem;border-radius:8px;font-size:0.85rem;font-weight:600;color:#fff;opacity:0;transform:translateX(100%);transition:all 0.3s ease;max-width:350px;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+    if (type === 'error' || type === 'stuck' || type === 'failure') toast.style.background = '#ef4444';
+    else if (type === 'success' || type === 'info') toast.style.background = '#22c55e';
+    else toast.style.background = '#6a7eff';
+    toast.textContent = message;
+    container.appendChild(toast);
+    requestAnimationFrame(function() { toast.style.opacity = '1'; toast.style.transform = 'translateX(0)'; });
+    setTimeout(function() {
+        toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)';
+        setTimeout(function() { toast.remove(); }, 300);
+    }, 5000);
+}
+
 // ─── Platform Login Functions ───
 async function platformLogin(platformId) {
     try {
@@ -2296,6 +2536,8 @@ function goJobPage(p) {
 refresh();
 pollWfStatus();
 setInterval(function() { refresh(); refreshWorkflowStatus(); pollWfStatus(); refreshStats(); switchLang(_lang); }, 5000);
+// Periodic stuck check with alerts (every 30s)
+setInterval(function() { fetch(ALERT_API + '/check', { method: 'POST' }).catch(function(){}); }, 30000);
 // Initial load
 refreshWorkflowStatus();
 populateEnvSelectors();
@@ -2310,6 +2552,24 @@ function connectSSE() {
     });
     _evtSource.addEventListener('workflowUpdate', function(e) {
         try { pollWfStatus(); } catch (_) {}
+    });
+    _evtSource.addEventListener('alert', function(e) {
+        try {
+            var data = JSON.parse(e.data);
+            showToast(data.title + ': ' + data.message, data.type || 'info');
+        } catch (_) {}
+    });
+    _evtSource.addEventListener('desktopNotify', function(e) {
+        try {
+            var data = JSON.parse(e.data);
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification(data.title, { body: data.body, tag: data.tag });
+            } else if ('Notification' in window && Notification.permission !== 'denied') {
+                Notification.requestPermission().then(function(p) {
+                    if (p === 'granted') new Notification(data.title, { body: data.body, tag: data.tag });
+                });
+            }
+        } catch (_) {}
     });
     _evtSource.onerror = function() {
         // Reconnect after 5s on error
