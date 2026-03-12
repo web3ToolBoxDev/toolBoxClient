@@ -1492,7 +1492,7 @@ function buildDashboardHTML(sessionId) {
   .cell-building { outline: 3px dashed #8b5cf6; animation: wf-pulse-purple 2s ease-in-out infinite; }
 
   /* Control bar */
-  .controlBar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 0.75rem 0; }
+  .controlBar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 0.75rem 1.5rem; position: sticky; top: 0; z-index: 50; background: #13142b; border-bottom: 1px solid #2d2f4a; margin: 0 -1.5rem; }
 
   /* Modals */
   .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; }
