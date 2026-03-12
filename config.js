@@ -25,10 +25,14 @@ class Config {
 
             if (process.platform === "win32") {
                 this.platform = "win32";
-                this.defaultExecPath = path.join(this.assetsPath, '/node_for_win/node-v22.22.0-win/node.exe');
+                this.defaultExecPath = this.isBuild
+                    ? path.join(this.assetsPath, '/node_for_win/node-v22.22.0-win/node.exe')
+                    : process.execPath;
             } else if (process.platform === "darwin") {
                 this.platform = "darwin";
-                this.defaultExecPath = path.join(this.assetsPath, '/node_for_mac/node-v21.6.2-mac/bin/node');
+                this.defaultExecPath = this.isBuild
+                    ? path.join(this.assetsPath, '/node_for_mac/node-v21.6.2-mac/bin/node')
+                    : process.execPath;
             } else {
                 console.log("当前平台不是 Windows 也不是 macOS");
             }

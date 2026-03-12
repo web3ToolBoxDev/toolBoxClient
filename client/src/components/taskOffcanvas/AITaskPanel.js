@@ -28,10 +28,12 @@ function AITaskPanel({
     const [showPresetModal, setShowPresetModal] = useState(false);
     const [expandedSubtask, setExpandedSubtask] = useState(null);
 
-    // Auto-open preset modal when triggered by backend (e.g., session first start)
+    // When backend signals auto-open, just consume the flag (don't auto-open modal).
+    // The preset bar already highlights unanswered questions to nudge the user.
+    const [presetHighlight, setPresetHighlight] = useState(false);
     useEffect(() => {
         if (autoOpenPreset) {
-            setShowPresetModal(true);
+            setPresetHighlight(true);
             if (onAutoOpenPresetConsumed) onAutoOpenPresetConsumed();
         }
     }, [autoOpenPreset, onAutoOpenPresetConsumed]);
@@ -581,9 +583,9 @@ function AITaskPanel({
                         <Button
                             variant="outline-light"
                             size="sm"
-                            className="ai-preset-trigger"
+                            className={`ai-preset-trigger${presetHighlight ? ' ai-preset-trigger--highlight' : ''}`}
                             disabled={interactionDisabled || !promptOptionCount}
-                            onClick={() => setShowPresetModal(true)}
+                            onClick={() => { setPresetHighlight(false); setShowPresetModal(true); }}
                         >
                             {`${t('taskLog.ai.chooseOption', 'Choose an option')} (${promptOptionCount})`}
                         </Button>

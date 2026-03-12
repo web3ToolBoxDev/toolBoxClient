@@ -800,6 +800,7 @@ async function handleSubtaskAction(payload = {}) {
                     );
                 }
                 const dashUrl = dashboardServer.getDashboardURL(sessionId);
+                console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
                 appendArtifact(sessionId, {
                     id: `dashboard-${sessionId}`,
                     type: 'dashboard',
@@ -2039,6 +2040,7 @@ async function checkAndCompleteOnboarding(sessionId) {
                     state.artifacts[sessionId] = state.artifacts[sessionId].filter(a => a.type !== 'dashboard');
                 }
                 const dashUrl = dashboardServer.getDashboardURL(sessionId);
+                console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
                 appendArtifact(sessionId, {
                     id: `dashboard-${sessionId}`,
                     type: 'dashboard',
@@ -2249,6 +2251,7 @@ async function extractProfileFromConversation(sessionId) {
                     );
                 }
                 const dashUrl = dashboardServer.getDashboardURL(sessionId);
+                console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
                 appendArtifact(sessionId, {
                     id: `dashboard-${sessionId}`,
                     type: 'dashboard',
