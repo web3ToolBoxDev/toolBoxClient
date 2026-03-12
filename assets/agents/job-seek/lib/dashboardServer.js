@@ -1548,55 +1548,55 @@ function buildDashboardHTML(sessionId) {
 
 <!-- Control Bar -->
 <div class="controlBar" id="controlBar">
-  <button class="btn btn-success" id="wfBtnStart" onclick="wfStart()">Start Workflow</button>
-  <button class="btn btn-danger" id="wfBtnStop" onclick="wfStop()" style="display:none;">Stop</button>
+  <button class="btn btn-success" id="wfBtnStart" onclick="wfStart()" data-i18n="startWorkflow">Start Workflow</button>
+  <button class="btn btn-danger" id="wfBtnStop" onclick="wfStop()" style="display:none;" data-i18n="stop">Stop</button>
   <span id="wfStatusLabel" style="font-size:0.85rem;color:#9da0c3;">Idle</span>
   <label style="margin-left:auto;font-size:0.82rem;color:#9da0c3;cursor:pointer;">
     <input type="checkbox" id="asyncToggle"> Async steps
   </label>
-  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openGlobalSettings()">Settings</button>
-  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openAddWebsite()">+ Add Website</button>
+  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openGlobalSettings()" data-i18n="settings">Settings</button>
+  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openAddWebsite()" data-i18n="addWebsite">+ Add Website</button>
   <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" id="langToggle" onclick="switchLang(_lang === 'en' ? 'zh-CN' : 'en'); this.textContent = _lang === 'en' ? '中文' : 'EN';">中文</button>
 </div>
 
-<h2>Direction</h2>
+<h2 data-i18n="direction">Direction</h2>
 <div class="card">
   <div class="grid-2" id="direction"></div>
 </div>
 
-<h2>Profile</h2>
+<h2 data-i18n="profile">Profile</h2>
 <div class="card">
   <div class="grid-2" id="profile"></div>
 </div>
 
-<h2>Workflow Progress</h2>
+<h2 data-i18n="workflowProgress">Workflow Progress</h2>
 <div class="card">
   <table>
-    <thead><tr><th></th><th>Step</th><th>Status</th></tr></thead>
+    <thead><tr><th></th><th data-i18n="step">Step</th><th data-i18n="status">Status</th></tr></thead>
     <tbody id="subtasks"></tbody>
   </table>
 </div>
 
-<h2>Workflow Grid</h2>
+<h2 data-i18n="workflowGrid">Workflow Grid</h2>
 <div class="card">
   <div class="wf-status-grid" id="wfGrid">
-    <div style="color:#9da0c3;text-align:center;grid-column:1/-1;">No platforms configured yet.</div>
+    <div style="color:#9da0c3;text-align:center;grid-column:1/-1;" data-i18n="noPlatforms">No platforms configured yet.</div>
   </div>
 </div>
 
-<h2>Stats Overview</h2>
+<h2 data-i18n="statsOverview">Stats Overview</h2>
 <div class="card" id="statsPanel">
   <div class="grid-2" id="statsGrid">
-    <div class="item"><label>Jobs Found</label><div class="val" id="statJobsTotal">0</div></div>
-    <div class="item"><label>Jobs Matched</label><div class="val" id="statJobsMatched">0</div></div>
-    <div class="item"><label>Jobs Applied</label><div class="val" id="statJobsApplied">0</div></div>
-    <div class="item"><label>Platforms Ready</label><div class="val" id="statPlatformsReady">0</div></div>
-    <div class="item"><label>Workflow Status</label><div class="val" id="statWfStatus">idle</div></div>
-    <div class="item"><label>Run History</label><div class="val" id="statHistoryCount">0</div></div>
+    <div class="item"><label data-i18n="jobsFound">Jobs Found</label><div class="val" id="statJobsTotal">0</div></div>
+    <div class="item"><label data-i18n="jobsMatched">Jobs Matched</label><div class="val" id="statJobsMatched">0</div></div>
+    <div class="item"><label data-i18n="jobsApplied">Jobs Applied</label><div class="val" id="statJobsApplied">0</div></div>
+    <div class="item"><label data-i18n="platformsReady">Platforms Ready</label><div class="val" id="statPlatformsReady">0</div></div>
+    <div class="item"><label data-i18n="workflowStatus">Workflow Status</label><div class="val" id="statWfStatus">idle</div></div>
+    <div class="item"><label data-i18n="runHistory">Run History</label><div class="val" id="statHistoryCount">0</div></div>
   </div>
 </div>
 
-<h2>Automated Job Search</h2>
+<h2 data-i18n="automatedSearch">Automated Job Search</h2>
 <div class="card">
   <div class="search-config">
     <div class="field">
@@ -1632,7 +1632,7 @@ function buildDashboardHTML(sessionId) {
   </div>
 </div>
 
-<h2>Application Pipeline</h2>
+<h2 data-i18n="applicationPipeline">Application Pipeline</h2>
 <div class="card">
   <div class="pipeline" id="pipeline"></div>
 </div>
@@ -1653,8 +1653,8 @@ function buildDashboardHTML(sessionId) {
       <option value="archived">Archived</option>
     </select>
     <input id="jobFilterMinScore" type="number" placeholder="Min score" min="0" max="100" style="width:80px;" onchange="filterJobs()">
-    <button class="btn btn-sm btn-primary" onclick="filterJobs()">Filter</button>
-    <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="refreshJobRecords()">Refresh</button>
+    <button class="btn btn-sm btn-primary" onclick="filterJobs()" data-i18n="filter">Filter</button>
+    <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="refreshJobRecords()" data-i18n="refresh">Refresh</button>
   </div>
   <table class="job-table" id="jobTable">
     <thead>
@@ -1707,7 +1707,7 @@ function buildDashboardHTML(sessionId) {
 <div class="modal-overlay" id="globalSettingsModal" onclick="closeGlobalSettings(event)">
   <div class="modal" style="max-width:500px;">
     <button class="close-btn" onclick="closeGlobalSettings()">&times;</button>
-    <h3>Global Settings</h3>
+    <h3 data-i18n="globalSettings">Global Settings</h3>
     <div class="modal-form">
       <label>Min Match Score (%)</label>
       <input type="number" id="gsCfgMinScore" min="0" max="100" step="5" value="60">
@@ -1715,7 +1715,7 @@ function buildDashboardHTML(sessionId) {
       <input type="number" id="gsCfgTargetCount" min="1" max="100" value="10">
       <label>Max Search Results</label>
       <input type="number" id="gsCfgMaxResults" min="5" max="200" step="5" value="30">
-      <button class="btn btn-primary" id="saveGlobalSettings" onclick="saveGlobalSettings()">Save Settings</button>
+      <button class="btn btn-primary" id="saveGlobalSettings" onclick="saveGlobalSettings()" data-i18n="save">Save Settings</button>
     </div>
   </div>
 </div>
@@ -1724,7 +1724,7 @@ function buildDashboardHTML(sessionId) {
 <div class="modal-overlay" id="addWebsiteModal" onclick="closeAddWebsite(event)">
   <div class="modal" style="max-width:500px;">
     <button class="close-btn" onclick="closeAddWebsite()">&times;</button>
-    <h3>Add Target Website</h3>
+    <h3 data-i18n="addTargetWebsite">Add Target Website</h3>
     <div class="modal-form">
       <label>Name</label>
       <input type="text" id="awName" placeholder="e.g. Indeed">
@@ -1760,7 +1760,7 @@ var _i18n = {
     en: {
         direction: 'Direction', profile: 'Profile', workflowProgress: 'Workflow Progress',
         workflowGrid: 'Workflow Grid', automatedSearch: 'Automated Job Search',
-        statsOverview: 'Stats Overview', jobRecords: 'Job Records',
+        statsOverview: 'Stats Overview', applicationPipeline: 'Application Pipeline', jobRecords: 'Job Records',
         startWorkflow: 'Start Workflow', stop: 'Stop', settings: 'Settings',
         addWebsite: '+ Add Website', login: 'Login', confirm: 'Confirm',
         jobsFound: 'Jobs Found', jobsMatched: 'Jobs Matched', jobsApplied: 'Jobs Applied',
@@ -1775,7 +1775,7 @@ var _i18n = {
     'zh-CN': {
         direction: '求职方向', profile: '个人资料', workflowProgress: '工作流进度',
         workflowGrid: '工作流网格', automatedSearch: '自动化求职搜索',
-        statsOverview: '统计概览', jobRecords: '职位记录',
+        statsOverview: '统计概览', applicationPipeline: '申请流水线', jobRecords: '职位记录',
         startWorkflow: '启动工作流', stop: '停止', settings: '设置',
         addWebsite: '+ 添加网站', login: '登录', confirm: '确认',
         jobsFound: '已发现职位', jobsMatched: '已匹配职位', jobsApplied: '已申请职位',
@@ -2205,8 +2205,8 @@ function renderWfPlatform(p) {
     html += '<div class="wf-platform__header">' + esc(p.icon) + ' ' + esc(p.name) + '</div>';
     html += '<div class="wf-platform__env"><select class="wf-env-select" id="env_' + esc(p.id) + '" onchange="bindEnv(\\''+esc(p.id)+'\\')"></select></div>';
     html += '<div class="wf-platform__actions">';
-    html += '<button class="btn btn-sm" onclick="platformLogin(\\''+esc(p.id)+'\\')">Login</button>';
-    html += '<button class="btn btn-sm" onclick="confirmLogin(\\''+esc(p.id)+'\\')">Confirm</button>';
+    html += '<button class="btn btn-sm" onclick="platformLogin(\\''+esc(p.id)+'\\')">'+t('login')+'</button>';
+    html += '<button class="btn btn-sm" onclick="confirmLogin(\\''+esc(p.id)+'\\')">'+t('confirm')+'</button>';
     html += '</div>';
     html += '<div class="wf-platform__cells">';
     html += renderWfCell('login', p.cells.login);
@@ -2223,7 +2223,7 @@ async function refreshWorkflowStatus() {
         var data = await res.json();
         var grid = document.getElementById('wfGrid');
         if (!data.platforms || data.platforms.length === 0) {
-            grid.innerHTML = '<div style="color:#9da0c3;text-align:center;grid-column:1/-1;">No platforms configured yet.</div>';
+            grid.innerHTML = '<div style="color:#9da0c3;text-align:center;grid-column:1/-1;">' + t('noPlatforms') + '</div>';
             return;
         }
         grid.innerHTML = data.platforms.map(renderWfPlatform).join('');
@@ -2500,7 +2500,7 @@ function goJobPage(p) {
 
 refresh();
 pollWfStatus();
-setInterval(function() { refresh(); refreshWorkflowStatus(); pollWfStatus(); refreshStats(); }, 5000);
+setInterval(function() { refresh(); refreshWorkflowStatus(); pollWfStatus(); refreshStats(); switchLang(_lang); }, 5000);
 // Initial load
 refreshWorkflowStatus();
 populateEnvSelectors();
