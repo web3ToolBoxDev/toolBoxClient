@@ -26,7 +26,7 @@ const dashboardServer = require('./lib/dashboardServer');
 // Retries on failure since dbservice may not be ready yet.
 let _packRegistered = false;
 const _packReady = (async () => {
-    for (let attempt = 1; attempt <= 10; attempt++) {
+    for (let attempt = 1; attempt <= 15; attempt++) {
         try {
             const result = await knowledgeClient.registerPack(memoryPack.domain, memoryPack.types);
             if (result?.success) {
@@ -36,12 +36,22 @@ const _packReady = (async () => {
             }
             throw new Error(result?.error || 'registration returned success=false');
         } catch (err) {
-            console.warn(`[agent] domain pack registration attempt ${attempt}/10 failed: ${err.message}`);
-            if (attempt < 10) await new Promise(r => setTimeout(r, 2000));
+            console.warn(`[agent] domain pack registration attempt ${attempt}/15 failed: ${err.message}`);
+            if (attempt < 15) await new Promise(r => setTimeout(r, 3000));
         }
     }
-    console.error('[agent] domain pack registration failed after 10 attempts');
+    console.error('[agent] domain pack registration failed after 15 attempts');
 })();
+
+/** Ensure domain pack is registered (lazy re-registration if startup failed). */
+async function ensurePack() {
+    if (_packRegistered) return true;
+    try {
+        const result = await knowledgeClient.registerPack(memoryPack.domain, memoryPack.types);
+        if (result?.success) { _packRegistered = true; return true; }
+    } catch { /* ignore */ }
+    return false;
+}
 
 // Persistent data directory for this agent
 const _dataDir = path.join(__dirname, 'data');
@@ -281,6 +291,7 @@ function createSession(name = '') {
     state.onboardingComplete[session.id] = false;
     state.profileSections[session.id] = {};
     state.profileCollectionMode[session.id] = false;
+
     appendConversation(session.id, 'assistant', isZh()
         ? '欢迎使用求职助手！请先点击右上角「运行时设置」选择 AI 供应商并点击「应用模型」启动会话，然后回答预设问题来设定求职方向。'
         : 'Welcome to Job Seek Assistant! To get started, click "Runtime Settings" in the top right to select your AI provider, then click "Apply Model" to start the session. After that, answer the preset questions to set your job search direction.');
@@ -288,6 +299,95 @@ function createSession(name = '') {
     emitSessionList();
     sendSnapshot();
     scheduleSave();
+}
+
+/**
+ * Story 4.1: Seed profile from knowledgeStore after onboarding completes.
+ * Each session has its own direction (new job target), but profile is reusable.
+ * Only uses profile data updated within the last 30 days.
+ * @returns {boolean} true if profile was seeded
+ */
+async function seedProfileFromKnowledge(sessionId) {
+    console.log(`[agent:seed] attempting profile seed for session ${sessionId.slice(0, 8)}...`);
+    try {
+        await _packReady;
+        await ensurePack(); // lazy re-register if startup failed
+
+        let seededCount = 0;
+        const profileDocs = await knowledgeClient.findFresh('profile', 'agent:job-seek', 30);
+        console.log(`[agent:seed] findFresh returned ${profileDocs.length} docs`);
+        for (const doc of profileDocs) {
+            const subType = doc.subType || doc.sub_type;
+            const content = doc.content;
+            if (subType && content) {
+                state.profileSections[sessionId][subType] = content;
+                seededCount++;
+            }
+        }
+
+        if (seededCount === 0 || !isProfileComplete(state.profileSections[sessionId])) {
+            console.log('[agent:seed] no usable profile found — starting profile collection');
+            return false;
+        }
+
+        // Profile is complete — skip profile subtask, advance to dashboard
+        state.profileCollectionMode[sessionId] = false;
+        updateSubTasks(sessionId, (list) => {
+            const pr = list.find(t => t.key === 'profile');
+            if (pr && (pr.status === 'pending' || pr.status === 'running')) {
+                pr.status = 'done';
+                pr.updatedAt = now();
+            }
+            const sr = list.find(t => t.key === 'search');
+            if (sr && sr.status === 'pending') {
+                sr.status = 'running';
+                sr.updatedAt = now();
+            }
+            return list;
+        });
+
+        const daysAgo = profileDocs.length > 0
+            ? Math.round((Date.now() - new Date(profileDocs[0].updatedAt || profileDocs[0].updated_at || 0).getTime()) / 86400000)
+            : '?';
+        console.log(`[agent:seed] seeded ${seededCount} profile sections (${daysAgo}d ago)`);
+        appendRuntimeLog(sessionId, `profile_seeded -> ${seededCount} sections (${daysAgo}d ago)`, { source: 'knowledge' });
+        return true;
+    } catch (err) {
+        console.error('[agent:seed] profile seeding failed:', err.message);
+        return false;
+    }
+}
+
+/**
+ * Story 4.2: Sync profile + direction summary to mem0 on profile finish.
+ */
+async function syncProfileToMem0(sessionId) {
+    try {
+        const sections = state.profileSections[sessionId] || {};
+        const answers = state.selectedAnswers[sessionId] || {};
+
+        const parts = [];
+        if (answers.q_job_title) parts.push(`Target role: ${answers.q_job_title}`);
+        if (answers.q_location) parts.push(`Location: ${answers.q_location}`);
+        if (answers.q_work_mode) parts.push(`Work mode: ${answers.q_work_mode}`);
+        if (answers.q_salary) parts.push(`Target salary: ${answers.q_salary}K`);
+        if (sections.basic) parts.push(`Basic info: ${sections.basic}`);
+        if (sections.skills) parts.push(`Skills: ${sections.skills}`);
+        if (sections.experience) parts.push(`Experience: ${sections.experience}`);
+        if (sections.education) parts.push(`Education: ${sections.education}`);
+        if (sections.highlights) parts.push(`Highlights: ${sections.highlights}`);
+
+        if (parts.length === 0) return;
+
+        const summary = parts.join('\n');
+        const ns = getMemoryNamespace();
+        await memoryClient.store(ns, summary);
+        console.log(`[agent:mem0] profile milestone synced (${summary.length} chars)`);
+        appendRuntimeLog(sessionId, `mem0_sync -> profile milestone (${parts.length} sections)`, { source: 'knowledge' });
+    } catch (err) {
+        console.warn('[agent:mem0] milestone sync failed:', err.message);
+        // Non-fatal — mem0 is supplementary
+    }
 }
 
 function deleteSession(sessionId) {
@@ -436,6 +536,46 @@ async function resetAllMemory() {
     }
     sendSnapshot();
     scheduleSave();
+}
+
+/**
+ * Full reset for E2E testing: clear all memory + delete every session.
+ * Returns a promise that resolves when done.
+ */
+async function resetForTest() {
+    console.log('[agent] resetForTest — full data wipe');
+    await resetAllMemory();
+
+    // Re-register domain pack (may have been lost if dbservice restarted or was unavailable at startup)
+    try {
+        const result = await knowledgeClient.registerPack(memoryPack.domain, memoryPack.types);
+        _packRegistered = !!(result?.success);
+        console.log('[agent] resetForTest: domain pack re-registered:', _packRegistered);
+    } catch (err) {
+        console.warn('[agent] resetForTest: domain pack re-registration failed:', err.message);
+    }
+
+    // Delete all sessions (resetAllMemory only clears memory, not sessions)
+    const sessionIds = state.sessions.map((s) => s.id);
+    for (const sid of sessionIds) {
+        deleteSession(sid);
+    }
+
+    // After deleteSession loop, state.sessions may have a fresh empty session
+    // created by deleteSession when list becomes empty — delete its artifacts too
+    for (const sid of Object.keys(state.conversations)) {
+        state.conversations[sid] = [];
+    }
+    for (const sid of Object.keys(state.subtaskLogs)) {
+        state.subtaskLogs[sid] = [];
+    }
+    for (const sid of Object.keys(state.runtimeLogs)) {
+        state.runtimeLogs[sid] = [];
+    }
+
+    sendSnapshot();
+    scheduleSave();
+    console.log('[agent] resetForTest complete — sessions:', state.sessions.length);
 }
 
 function switchSession(sessionId) {
@@ -671,6 +811,8 @@ async function handleSubtaskAction(payload = {}) {
                 console.error('[agent] dashboard artifact failed:', err);
                 appendRuntimeLog(sessionId, `dashboard_error -> ${err.message}`, { source: 'error' });
             }
+            // Story 4.2: sync profile milestone to mem0
+            syncProfileToMem0(sessionId);
         }
 
         sendSnapshot();
@@ -920,11 +1062,12 @@ function resolveProvider() {
  * Context is inlined into the prompt (not as a file path) so the AI never sees file references.
  * Full prompt is written to a temp file to avoid shell escaping issues.
  */
-function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default') {
+function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default', options = {}) {
     return new Promise((resolve, reject) => {
         let fullCmd;
         const modelFlag = (model && model !== 'default') ? ` --model ${model}` : '';
         const workspaceDir = path.join(__dirname, 'workspace');
+        const execDir = options.cwd || workspaceDir;
 
         // Build full prompt with context inlined (never expose file paths to the AI)
         const fullPrompt = memoryContext
@@ -950,7 +1093,7 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default')
             stdio: ['ignore', 'pipe', 'pipe'],
             timeout: 120000,
             shell: true,
-            cwd: workspaceDir,
+            cwd: execDir,
             env: cleanEnv
         });
         child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
@@ -1084,6 +1227,22 @@ function getConversationForAI(sessionId) {
         .map((m) => ({ role: m.role, text: m.content || '' }));
 }
 
+/**
+ * Build a condensed conversation history string for CLI providers.
+ * Includes the last N user/assistant turns so the CLI has context
+ * for short replies like "y", "ok", "change that", etc.
+ * Returns empty string if there's only 1 or fewer messages.
+ */
+function buildConversationHistory(sessionId, maxTurns = 6) {
+    const msgs = getConversationForAI(sessionId);
+    if (msgs.length <= 1) return '';
+    // Take last maxTurns messages (excluding the current user message which is passed as the prompt)
+    const recent = msgs.slice(-maxTurns - 1, -1);
+    if (recent.length === 0) return '';
+    const lines = recent.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`);
+    return `[CONVERSATION HISTORY]\n${lines.join('\n\n')}\n[/CONVERSATION HISTORY]`;
+}
+
 async function handleUserInput(payload = {}) {
     const sessionId = payload.sessionId || state.activeSessionId;
     if (!sessionId || !state.conversations[sessionId]) {
@@ -1104,6 +1263,8 @@ async function handleUserInput(payload = {}) {
         appendConversation(sessionId, 'assistant', isZh() ? '\u5F53\u524D\u4F1A\u8BDD\u5DF2\u6682\u505C\uFF0C\u8BF7\u5148\u6062\u590D\u540E\u7EE7\u7EED\u3002' : 'Current session is paused. Please resume before continuing.');
         return;
     }
+
+    await ensurePack(); // lazy re-register domain types if needed
 
     const text = String(payload.text || '').trim();
     const runtimeContext = payload.runtimeContext || state.runtimeContexts[sessionId] || {};
@@ -1165,9 +1326,15 @@ async function handleUserInput(payload = {}) {
             : buildChatPrompt(isZh());
 
         if (activeProvider === 'codex-cli' || activeProvider === 'claude-code') {
-            const cliContext = inProfileCollection
-                ? (memoryContext ? `${systemPrompt}\n\n${memoryContext}` : systemPrompt)
-                : memoryContext;
+            const convHistory = buildConversationHistory(sessionId);
+            const contextParts = [systemPrompt];
+            if (memoryContext) contextParts.push(memoryContext);
+            if (convHistory) contextParts.push(convHistory);
+            // Add marker reminder at end of context (close to user message) so AI doesn't forget
+            contextParts.push(isZh()
+                ? 'REMINDER: 你只能输出纯文本回复。如果用户要求修改档案，你必须在回复末尾包含对应的标记（如 [PROFILE_SET:basic=...] 或 [PROFILE_ADD:skills=...]）。不要尝试编辑文件或使用工具。'
+                : 'REMINDER: You can ONLY output plain text. If the user asks to modify their profile, you MUST include the corresponding marker at the end (e.g. [PROFILE_SET:basic=...] or [PROFILE_ADD:skills=...]). Do NOT try to edit files or use tools.');
+            const cliContext = contextParts.join('\n\n');
             reply = await invokeCliAsync(activeProvider, text, cliContext, model);
         } else if (activeProvider === 'api-key') {
             const subProvider = state.currentSubProvider || 'openai';
@@ -1249,7 +1416,7 @@ async function handleUserInput(payload = {}) {
     }
 }
 
-function handleUserOption(payload = {}) {
+async function handleUserOption(payload = {}) {
     const sessionId = payload.sessionId || state.activeSessionId;
     if (!sessionId || !state.conversations[sessionId]) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
@@ -1310,11 +1477,11 @@ function handleUserOption(payload = {}) {
     state.prompts[sessionId] = _buildPresetPrompt(selectedMap);
 
     // Check onboarding completion after option selection
-    checkAndCompleteOnboarding(sessionId);
+    await checkAndCompleteOnboarding(sessionId);
     sendSnapshot();
 }
 
-function handleUserAnswer(payload = {}) {
+async function handleUserAnswer(payload = {}) {
     const sessionId = payload.sessionId || state.activeSessionId;
     if (!sessionId || !state.conversations[sessionId]) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
@@ -1352,7 +1519,7 @@ function handleUserAnswer(payload = {}) {
     appendRuntimeLog(sessionId, `user_answer -> ${questionId}:${answer}`, { source: 'user' });
 
     // Check onboarding completion after answer
-    checkAndCompleteOnboarding(sessionId);
+    await checkAndCompleteOnboarding(sessionId);
     sendSnapshot();
 }
 
@@ -1705,6 +1872,9 @@ async function extractResumeFromAttachments(sessionId, attachments) {
                     // Ensure domain pack is registered before any upsert
                     await _packReady;
 
+                    // Update in-memory profile so dashboard reflects new resume
+                    state.profileSections[sessionId] = sections;
+
                     // Clear old profile docs before storing new ones
                     await knowledgeClient.remove({ type: 'profile', scope: 'agent:job-seek' });
 
@@ -1822,7 +1992,7 @@ async function storeDirection(sessionId) {
  * On first completion: marks done, stores direction, starts profile collection if needed.
  * On subsequent changes: updates direction + history.
  */
-function checkAndCompleteOnboarding(sessionId) {
+async function checkAndCompleteOnboarding(sessionId) {
     const templates = _getTemplates();
     const selectedMap = state.selectedAnswers[sessionId] || {};
     const complete = isOnboardingComplete(selectedMap, templates);
@@ -1853,11 +2023,40 @@ function checkAndCompleteOnboarding(sessionId) {
 
     // Check if resume was uploaded
     const hasResume = Boolean(selectedMap.q_upload_profile);
+
+    // Story 4.1: Try seeding profile from knowledgeStore
     if (!hasResume) {
-        state.profileCollectionMode[sessionId] = true;
-        appendConversation(sessionId, 'assistant', isZh()
-            ? '你还没有上传简历，可以随时上传，或者通过对话告诉我你的技能和经历来构建档案。'
-            : 'You haven\'t uploaded a resume yet. You can upload one any time, or tell me about your skills and experience through chat to build your profile.');
+        const seeded = await seedProfileFromKnowledge(sessionId);
+        if (seeded) {
+            // Profile loaded — skip profile collection, generate dashboard
+            const profileKeys = Object.keys(state.profileSections[sessionId] || {}).filter(k => state.profileSections[sessionId][k]);
+            appendConversation(sessionId, 'assistant', isZh()
+                ? `我已找到你之前的档案（${profileKeys.join('、')}）。可以直接用这份档案为新目标生成简历，或者你可以上传新简历 / 通过对话修改档案。`
+                : `I found your profile from a previous session (${profileKeys.join(', ')}). I can use this to generate a resume for your new target, or you can upload a new resume / modify your profile through chat.`);
+            // Auto-generate dashboard
+            try {
+                buildIntentFile(sessionId);
+                if (state.artifacts[sessionId]) {
+                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(a => a.type !== 'dashboard');
+                }
+                const dashUrl = dashboardServer.getDashboardURL(sessionId);
+                appendArtifact(sessionId, {
+                    id: `dashboard-${sessionId}`,
+                    type: 'dashboard',
+                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
+                    url: dashUrl,
+                    openUrl: true
+                });
+            } catch (err) {
+                console.error('[agent] dashboard after seed failed:', err);
+            }
+            syncProfileToMem0(sessionId);
+        } else {
+            state.profileCollectionMode[sessionId] = true;
+            appendConversation(sessionId, 'assistant', isZh()
+                ? '你还没有上传简历，可以随时上传，或者通过对话告诉我你的技能和经历来构建档案。'
+                : 'You haven\'t uploaded a resume yet. You can upload one any time, or tell me about your skills and experience through chat to build your profile.');
+        }
     }
     appendRuntimeLog(sessionId, `onboarding_complete -> hasResume=${hasResume}`, { source: 'onboarding' });
     scheduleSave();
@@ -2066,6 +2265,7 @@ async function extractProfileFromConversation(sessionId) {
                 ? `个人档案已构建完成！已存储 ${stored} 个分区（${sectionKeys.join('、')}）。你现在可以开始搜索工作了。`
                 : `Profile built successfully! ${stored} sections stored (${sectionKeys.join(', ')}). You can now start searching for jobs.`);
             appendRuntimeLog(sessionId, `profile_from_conversation -> ${stored}/${sectionKeys.length} sections`, { source: 'knowledge' });
+            // Story 4.2: mem0 sync handled by subtask finish handler (caller)
             sendSnapshot();
             scheduleSave();
         }
@@ -2361,6 +2561,15 @@ function initWebSocket() {
                 updateLanguage(data?.payload?.language);
                 resetAllMemory().catch(err => {
                     console.error('[agent] resetAllMemory error:', err);
+                });
+                break;
+            case 'agent_reset_for_test':
+                updateLanguage(data?.payload?.language);
+                resetForTest().then(() => {
+                    emit('agent_reset_for_test_done', { success: true });
+                }).catch(err => {
+                    console.error('[agent] resetForTest error:', err);
+                    emit('agent_reset_for_test_done', { success: false, error: err.message });
                 });
                 break;
             case 'agent_session_switch':

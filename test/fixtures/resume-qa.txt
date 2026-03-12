@@ -1,0 +1,28 @@
+RESUME - Jane Doe
+
+CONTACT
+- Name: Jane Doe
+- Location: Toronto, ON, Canada
+- Phone: +1 555-000-1234
+- Email: jane.doe@example.com
+- GitHub: https://github.com/janedoe
+
+SKILLS
+- Automation: Playwright, Puppeteer, Framework Development, E2E/Regression/Smoke Testing, REST API Testing
+- DevOps: Jenkins CI/CD, Docker, Linux, Nginx
+- Programming: JavaScript/Node.js, Python (Flask, Pandas), Java (Kettle ETL), C++ (Chromium), Rust, Solidity
+- Platforms: Electron, React, WebSocket Distributed Systems, Plugin-based Task Orchestration
+- Databases: MySQL, Redis
+
+EXPERIENCE
+- QA Automation / SDET-focused Software Engineer, 10 years of experience
+- Open Source Desktop App (Lead Dev) — 260+ Stars, 100+ Forks
+- Production platform with React, Rust backend, MySQL, Redis, Docker deployment
+
+EDUCATION
+- Fanshawe College — Web Development & Internet Applications (Expected May 2026)
+- Example University — B.Eng., Electronic Information Engineering (2013)
+
+HIGHLIGHTS
+- Open source contributor with 260+ GitHub stars
+- Full-stack capability from frontend to blockchain

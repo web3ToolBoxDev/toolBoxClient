@@ -107,7 +107,7 @@
   },
   "scripts": {
     "dev": "cross-env IS_BUILD=false electron .",
-    "dist": "electron-builder",
+        "dist": "electron-builder",
     "start": "react-app-rewired start",
     "build": "react-app-rewired build --port 30001",
     "test": "react-app-rewired test",

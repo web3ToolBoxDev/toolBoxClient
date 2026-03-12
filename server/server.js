@@ -1,3 +1,8 @@
+// Dev log: tee all console output to tmp/ log file when IS_BUILD=false
+if (process.env.IS_BUILD === 'false') {
+  try { require('../scripts/dev-log'); } catch (e) { /* ignore */ }
+}
+
 const express = require('express');
 const cors = require('cors');
 const router = require('./router');

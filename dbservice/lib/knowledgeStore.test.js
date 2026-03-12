@@ -556,4 +556,77 @@ describe('knowledgeStore', () => {
             expect(doc.status).toBe('active');
         });
     });
+
+    describe('soft-delete revival regression', () => {
+        it('upsert after soft-delete revives document to active status', () => {
+            ks.upsert({ refId: 'revival_01', type: 'profile', subType: 'basic', scope: 'agent:job-seek', content: 'original content' });
+            ks.remove('revival_01');
+            const deleted = ks.findByRef('revival_01');
+            expect(deleted.status).toBe('deleted');
+
+            ks.upsert({ refId: 'revival_01', type: 'profile', subType: 'basic', scope: 'agent:job-seek', content: 'new content after revival' });
+            const revived = ks.findByRef('revival_01');
+            expect(revived.status).toBe('active');
+            expect(revived.content).toBe('new content after revival');
+            ks.hardRemove('revival_01');
+        });
+
+        it('findFresh excludes soft-deleted documents', () => {
+            ks.upsert({ refId: 'revival_fresh_01', type: 'profile', subType: 'skills', scope: 'agent:job-seek', content: 'deleted skills' });
+            ks.remove('revival_fresh_01');
+            const docs = ks.findFresh('profile', 'agent:job-seek', 30);
+            expect(docs.find(d => d.refId === 'revival_fresh_01')).toBeUndefined();
+            ks.hardRemove('revival_fresh_01');
+        });
+
+        it('findFresh returns revived document after re-upsert', () => {
+            ks.upsert({ refId: 'revival_fresh_02', type: 'profile', subType: 'skills', scope: 'agent:job-seek', content: 'skills v1' });
+            ks.remove('revival_fresh_02');
+            ks.upsert({ refId: 'revival_fresh_02', type: 'profile', subType: 'skills', scope: 'agent:job-seek', content: 'skills v2 revived' });
+            const docs = ks.findFresh('profile', 'agent:job-seek', 30);
+            const doc = docs.find(d => d.refId === 'revival_fresh_02');
+            expect(doc).toBeDefined();
+            expect(doc.status).toBe('active');
+            ks.hardRemove('revival_fresh_02');
+        });
+
+        it('findByType excludes soft-deleted documents', () => {
+            ks.upsert({ refId: 'revival_type_01', type: 'profile', subType: 'education', scope: 'agent:job-seek', content: 'deleted education' });
+            ks.remove('revival_type_01');
+            const docs = ks.findByType('profile');
+            expect(docs.find(d => d.refId === 'revival_type_01')).toBeUndefined();
+            ks.hardRemove('revival_type_01');
+        });
+
+        it('search excludes soft-deleted documents', () => {
+            ks.upsert({ refId: 'revival_search_01', type: 'knowledge', scope: 'global', content: 'uniquekeyword_softdel_test' });
+            ks.remove('revival_search_01');
+            const results = ks.search('uniquekeyword_softdel_test');
+            expect(results.length).toBe(0);
+            ks.hardRemove('revival_search_01');
+        });
+    });
+
+    describe('removeByType with scope', () => {
+        it('only removes docs matching both type and scope', () => {
+            ks.upsert({ refId: 'rbt_scope_a', type: 'task_state', scope: 'agent:job-seek', content: 'job-seek state A' });
+            ks.upsert({ refId: 'rbt_scope_b', type: 'task_state', scope: 'agent:job-seek', content: 'job-seek state B' });
+            ks.upsert({ refId: 'rbt_scope_c', type: 'task_state', scope: 'agent:other', content: 'other state C' });
+
+            const count = ks.removeByType('task_state', 'agent:job-seek');
+            expect(count).toBe(2);
+
+            const a = ks.findByRef('rbt_scope_a');
+            expect(a.status).toBe('deleted');
+            const b = ks.findByRef('rbt_scope_b');
+            expect(b.status).toBe('deleted');
+
+            const c = ks.findByRef('rbt_scope_c');
+            expect(c.status).toBe('active');
+
+            ks.hardRemove('rbt_scope_a');
+            ks.hardRemove('rbt_scope_b');
+            ks.hardRemove('rbt_scope_c');
+        });
+    });
 });

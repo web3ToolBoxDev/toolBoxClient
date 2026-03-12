@@ -647,7 +647,7 @@ function AgentWorkspace() {
                     </div>
                     <div className="agent-session-list">
                         {sessions.map((session) => (
-                            <div className={`agent-session-item ${activeSessionId === session.id ? 'active' : ''}`} key={session.id}>
+                            <div className={`agent-session-item ${activeSessionId === session.id ? 'active' : ''}`} key={session.id} data-session-id={session.id}>
                                 <button
                                     type="button"
                                     className="agent-session-select"

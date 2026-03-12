@@ -273,6 +273,7 @@ function AITaskPanel({
     };
 
     const handleSend = () => {
+        if (isAiProcessing) return; // Block sending while AI is thinking
         const message = String(pendingMessage || '').trim();
         if (!message && !pendingAttachments.length && !pendingRejectedAttachments.length) return;
         if (message && typeof onSendMessage === 'function') {
@@ -592,7 +593,7 @@ function AITaskPanel({
                             value={pendingMessage}
                             onChange={(e) => setPendingMessage(e.target.value)}
                             placeholder={t('taskLog.ai.inputPlaceholder')}
-                            disabled={interactionDisabled}
+                            disabled={interactionDisabled || isAiProcessing}
                             onPaste={async (e) => {
                                 const clipboard = e.clipboardData;
                                 if (!clipboard) return;
@@ -636,7 +637,7 @@ function AITaskPanel({
                         </Button>
                         <Button
                             onClick={handleSend}
-                            disabled={interactionDisabled || (!pendingMessage.trim() && !pendingAttachments.length && !pendingRejectedAttachments.length)}
+                            disabled={interactionDisabled || isAiProcessing || (!pendingMessage.trim() && !pendingAttachments.length && !pendingRejectedAttachments.length)}
                         >
                             {t('taskLog.ai.send')}
                         </Button>
