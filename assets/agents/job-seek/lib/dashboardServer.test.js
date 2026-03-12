@@ -336,6 +336,216 @@ describe('dashboardServer', () => {
         });
     });
 
+    // ─── Platform Workflow Status ───
+    describe('platform workflow status', () => {
+        const { computeCellVisual, updatePlatformCell, getWorkflowStatus } = dashboardServer;
+
+        describe('computeCellVisual', () => {
+            it('returns idle for login when no status set', () => {
+                const result = computeCellVisual('login', { login: {} });
+                expect(result.visual).toBe('idle');
+                expect(result.tip).toContain('Not logged in');
+            });
+
+            it('returns ready for verified login within TTL', () => {
+                const result = computeCellVisual('login', { login: { status: 'verified', verifiedAt: Date.now() } });
+                expect(result.visual).toBe('ready');
+                expect(result.action).toBeNull();
+            });
+
+            it('returns warning for expired login', () => {
+                const expired = Date.now() - (3 * 60 * 60 * 1000); // 3h ago
+                const result = computeCellVisual('login', { login: { status: 'verified', verifiedAt: expired } });
+                expect(result.visual).toBe('warning');
+                expect(result.action).toBe('relogin');
+            });
+
+            it('returns error for failed login', () => {
+                const result = computeCellVisual('login', { login: { status: 'error', message: 'timeout' } });
+                expect(result.visual).toBe('error');
+                expect(result.tip).toContain('timeout');
+            });
+
+            it('returns running for verifying login', () => {
+                const result = computeCellVisual('login', { login: { status: 'verifying' } });
+                expect(result.visual).toBe('running');
+            });
+
+            it('returns idle for search when not built', () => {
+                const result = computeCellVisual('search', { search: { status: 'idle' }, login: {} });
+                expect(result.visual).toBe('idle');
+            });
+
+            it('returns building for search in progress', () => {
+                const result = computeCellVisual('search', { search: { status: 'building' }, login: {} });
+                expect(result.visual).toBe('building');
+            });
+
+            it('returns ready for search tool ready', () => {
+                const result = computeCellVisual('search', { search: { status: 'ready', version: 2 }, login: { status: 'verified', verifiedAt: Date.now() } });
+                expect(result.visual).toBe('ready');
+                expect(result.tip).toContain('v2');
+            });
+
+            it('returns warning for search ready but login expired', () => {
+                const expired = Date.now() - (3 * 60 * 60 * 1000);
+                const result = computeCellVisual('search', { search: { status: 'ready', version: 1 }, login: { status: 'verified', verifiedAt: expired } });
+                expect(result.visual).toBe('warning');
+                expect(result.action).toBe('relogin');
+            });
+
+            it('returns error for failed search tool', () => {
+                const result = computeCellVisual('search', { search: { status: 'error', message: 'AI rejected' }, login: {} });
+                expect(result.visual).toBe('error');
+                expect(result.action).toBe('rebuild');
+            });
+
+            it('returns locked for apply when search not ready', () => {
+                const result = computeCellVisual('apply', { apply: { status: 'idle' }, search: { status: 'idle' }, login: {} });
+                expect(result.visual).toBe('locked');
+                expect(result.tip).toContain('search tool first');
+            });
+
+            it('returns ready for apply when search is ready', () => {
+                const result = computeCellVisual('apply', {
+                    apply: { status: 'ready', version: 1 },
+                    search: { status: 'ready' },
+                    login: { status: 'verified', verifiedAt: Date.now() }
+                });
+                expect(result.visual).toBe('ready');
+            });
+        });
+
+        describe('updatePlatformCell + getWorkflowStatus', () => {
+            it('creates platform on first update', () => {
+                const sid = `wf-test-${Date.now()}`;
+                updatePlatformCell(sid, 'plat_1', { cell: 'login', status: 'verified', name: 'LinkedIn', icon: '🔗', url: 'https://linkedin.com' });
+                const platforms = getWorkflowStatus(sid);
+                expect(platforms).toHaveLength(1);
+                expect(platforms[0].name).toBe('LinkedIn');
+                expect(platforms[0].cells.login.visual).toBe('ready');
+            });
+
+            it('updates existing platform cell', () => {
+                const sid = `wf-update-${Date.now()}`;
+                updatePlatformCell(sid, 'plat_2', { cell: 'login', status: 'idle', name: 'Indeed' });
+                updatePlatformCell(sid, 'plat_2', { cell: 'search', status: 'building' });
+                const platforms = getWorkflowStatus(sid);
+                expect(platforms).toHaveLength(1);
+                expect(platforms[0].cells.login.visual).toBe('idle');
+                expect(platforms[0].cells.search.visual).toBe('building');
+            });
+
+            it('tracks multiple platforms per session', () => {
+                const sid = `wf-multi-${Date.now()}`;
+                updatePlatformCell(sid, 'plat_a', { cell: 'login', status: 'verified', name: 'LinkedIn' });
+                updatePlatformCell(sid, 'plat_b', { cell: 'login', status: 'error', name: 'Indeed', message: 'blocked' });
+                const platforms = getWorkflowStatus(sid);
+                expect(platforms).toHaveLength(2);
+            });
+
+            it('returns empty array for unknown session', () => {
+                expect(getWorkflowStatus('nonexistent-wf')).toEqual([]);
+            });
+        });
+    });
+
+    // ─── Workflow Status HTTP API ───
+    describe('workflow status HTTP API', () => {
+        function fetchWfJSON(path) {
+            return new Promise((resolve, reject) => {
+                http.get(`http://127.0.0.1:${TEST_PORT}${path}`, (res) => {
+                    let data = '';
+                    res.on('data', c => { data += c; });
+                    res.on('end', () => {
+                        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+                        catch (e) { reject(new Error(`Parse failed: ${data}`)); }
+                    });
+                }).on('error', reject);
+            });
+        }
+
+        function postWfJSON(path, body) {
+            return new Promise((resolve, reject) => {
+                const postData = JSON.stringify(body);
+                const req = http.request({
+                    hostname: '127.0.0.1',
+                    port: TEST_PORT,
+                    path,
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
+                }, (res) => {
+                    let data = '';
+                    res.on('data', c => { data += c; });
+                    res.on('end', () => {
+                        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+                        catch (e) { reject(new Error(`Parse failed: ${data}`)); }
+                    });
+                });
+                req.on('error', reject);
+                req.write(postData);
+                req.end();
+            });
+        }
+
+        it('GET /api/workflow-status/:sessionId returns empty platforms', async () => {
+            const sid = `wf-http-empty-${Date.now()}`;
+            const res = await fetchWfJSON(`/api/workflow-status/${sid}`);
+            expect(res.status).toBe(200);
+            expect(res.body.platforms).toEqual([]);
+        });
+
+        it('POST update then GET returns updated status', async () => {
+            const sid = `wf-http-update-${Date.now()}`;
+            const postRes = await postWfJSON(`/api/workflow-status/${sid}/plat_http1/update`, {
+                cell: 'login', status: 'verified', name: 'TestPlatform', icon: '🧪'
+            });
+            expect(postRes.status).toBe(200);
+            expect(postRes.body.success).toBe(true);
+
+            const getRes = await fetchWfJSON(`/api/workflow-status/${sid}`);
+            expect(getRes.body.platforms).toHaveLength(1);
+            expect(getRes.body.platforms[0].name).toBe('TestPlatform');
+            expect(getRes.body.platforms[0].cells.login.visual).toBe('ready');
+        });
+
+        it('POST update with search ready shows green cell', async () => {
+            const sid = `wf-http-search-${Date.now()}`;
+            await postWfJSON(`/api/workflow-status/${sid}/plat_s1/update`, {
+                cell: 'login', status: 'verified', name: 'Indeed'
+            });
+            await postWfJSON(`/api/workflow-status/${sid}/plat_s1/update`, {
+                cell: 'search', status: 'ready', version: 1
+            });
+            const getRes = await fetchWfJSON(`/api/workflow-status/${sid}`);
+            const p = getRes.body.platforms[0];
+            expect(p.cells.search.visual).toBe('ready');
+            expect(p.cells.search.tip).toContain('v1');
+        });
+
+        it('POST invalid JSON returns 400', async () => {
+            return new Promise((resolve, reject) => {
+                const req = http.request({
+                    hostname: '127.0.0.1',
+                    port: TEST_PORT,
+                    path: `/api/workflow-status/bad/plat/update`,
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Content-Length': 7 }
+                }, (res) => {
+                    let data = '';
+                    res.on('data', c => { data += c; });
+                    res.on('end', () => {
+                        expect(res.statusCode).toBe(400);
+                        resolve();
+                    });
+                });
+                req.on('error', reject);
+                req.write('not{}!!');
+                req.end();
+            });
+        });
+    });
+
     // ─── Job Workflow HTTP API ───
     describe('job workflow HTTP API', () => {
         const { upsertJobCard, getJobCards } = dashboardServer;

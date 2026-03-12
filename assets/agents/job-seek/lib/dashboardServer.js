@@ -241,6 +241,39 @@ function start(getState, port) {
             return res.end(JSON.stringify(result));
         }
 
+        // ─── Workflow Status API routes ───
+
+        // GET /api/workflow-status/:sessionId — get all platform cell statuses
+        const wfStatusMatch = url.match(/^\/api\/workflow-status\/([^/]+)$/);
+        if (wfStatusMatch && req.method === 'GET') {
+            const sessionId = decodeURIComponent(wfStatusMatch[1]);
+            const platforms = getWorkflowStatus(sessionId);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ platforms }));
+        }
+
+        // POST /api/workflow-status/:sessionId/:platformId/update — update a cell
+        const wfUpdateMatch = url.match(/^\/api\/workflow-status\/([^/]+)\/([^/]+)\/update$/);
+        if (wfUpdateMatch && req.method === 'POST') {
+            const sessionId = decodeURIComponent(wfUpdateMatch[1]);
+            const platformId = decodeURIComponent(wfUpdateMatch[2]);
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                try {
+                    const update = JSON.parse(body);
+                    updatePlatformCell(sessionId, platformId, update);
+                    const platforms = getWorkflowStatus(sessionId);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, platforms }));
+                } catch (e) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
         // POST /shutdown — allow new process to take over the port
         if (url === '/shutdown' && req.method === 'POST') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -357,6 +390,126 @@ function stop() {
             resolve();
         }
     });
+}
+
+// ─── Platform workflow status ───
+// Keyed by sessionId → Map<platformId, PlatformStatus>
+const _platformStatus = new Map();
+const LOGIN_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+/**
+ * Get or create platform status map for a session.
+ * @param {string} sessionId
+ * @returns {Map}
+ */
+function _getPlatformStatuses(sessionId) {
+    if (!_platformStatus.has(sessionId)) {
+        _platformStatus.set(sessionId, new Map());
+    }
+    return _platformStatus.get(sessionId);
+}
+
+/**
+ * Compute visual state for a single cell.
+ * @param {'login'|'search'|'apply'} cellType
+ * @param {object} platform - platform status object
+ * @returns {{ visual: string, tip: string, action: string|null }}
+ */
+function computeCellVisual(cellType, platform) {
+    if (cellType === 'login') {
+        const l = platform.login || {};
+        if (l.status === 'verifying') return { visual: 'running', tip: 'Verifying login...', action: null };
+        if (l.status === 'error') return { visual: 'error', tip: `Login failed: ${l.message || 'Unknown error'}`, action: 'relogin' };
+        if (l.status === 'verified') {
+            const age = Date.now() - (l.verifiedAt || 0);
+            if (age < LOGIN_TTL_MS) return { visual: 'ready', tip: 'Logged in ✓', action: null };
+            return { visual: 'warning', tip: 'Session may have expired. Re-verify recommended.', action: 'relogin' };
+        }
+        return { visual: 'idle', tip: 'Not logged in yet', action: 'login' };
+    }
+
+    if (cellType === 'search' || cellType === 'apply') {
+        const tool = platform[cellType] || {};
+        // Apply is locked if search not ready
+        if (cellType === 'apply') {
+            const searchStatus = (platform.search || {}).status;
+            if (searchStatus !== 'ready') return { visual: 'locked', tip: '🔒 Build search tool first', action: null };
+        }
+        if (tool.status === 'building') return { visual: 'building', tip: `Building ${cellType} tool...`, action: null };
+        if (tool.status === 'error') return { visual: 'error', tip: `Build failed: ${tool.message || 'Unknown'}`, action: 'rebuild' };
+        if (tool.status === 'ready') {
+            // Check if login expired → warning
+            const l = platform.login || {};
+            if (l.status === 'verified' && (Date.now() - (l.verifiedAt || 0)) >= LOGIN_TTL_MS) {
+                return { visual: 'warning', tip: `${cellType} tool ready (v${tool.version || 1}) but session may have expired. Re-login first.`, action: 'relogin' };
+            }
+            return { visual: 'ready', tip: `${cellType} tool ready (v${tool.version || 1})`, action: null };
+        }
+        return { visual: 'idle', tip: `${cellType} tool not built`, action: 'build' };
+    }
+
+    return { visual: 'idle', tip: '', action: null };
+}
+
+/**
+ * Get computed workflow status for all platforms in a session.
+ * @param {string} sessionId
+ * @returns {Array}
+ */
+function getWorkflowStatus(sessionId) {
+    const statuses = _getPlatformStatuses(sessionId);
+    const platforms = [];
+    for (const [id, p] of statuses) {
+        platforms.push({
+            id,
+            name: p.name || id,
+            icon: p.icon || '🔗',
+            url: p.url || '',
+            cells: {
+                login: computeCellVisual('login', p),
+                search: computeCellVisual('search', p),
+                apply: computeCellVisual('apply', p)
+            }
+        });
+    }
+    return platforms;
+}
+
+/**
+ * Update a specific cell status for a platform.
+ * @param {string} sessionId
+ * @param {string} platformId
+ * @param {object} update - { cell, status, message, envId, version, name, icon, url }
+ */
+function updatePlatformCell(sessionId, platformId, update) {
+    const statuses = _getPlatformStatuses(sessionId);
+    if (!statuses.has(platformId)) {
+        statuses.set(platformId, {
+            name: update.name || platformId,
+            icon: update.icon || '🔗',
+            url: update.url || '',
+            login: { status: 'idle' },
+            search: { status: 'idle' },
+            apply: { status: 'idle' }
+        });
+    }
+    const p = statuses.get(platformId);
+    if (update.name) p.name = update.name;
+    if (update.icon) p.icon = update.icon;
+    if (update.url) p.url = update.url;
+
+    const cell = update.cell; // 'login' | 'search' | 'apply'
+    if (cell && p[cell]) {
+        p[cell].status = update.status || p[cell].status;
+        if (update.message !== undefined) p[cell].message = update.message;
+        if (cell === 'login' && update.status === 'verified') {
+            p[cell].verifiedAt = Date.now();
+            if (update.envId) p[cell].envId = update.envId;
+        }
+        if ((cell === 'search' || cell === 'apply') && update.version !== undefined) {
+            p[cell].version = update.version;
+        }
+    }
 }
 
 // ─── Job workflow state ───
@@ -590,6 +743,30 @@ function buildDashboardHTML(sessionId) {
   .log-entry.info { color: #fbbf24; }
   .log-entry .time { color: #555; margin-right: 0.5rem; }
 
+  /* Workflow Status Grid */
+  .wf-status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+  .wf-platform { background: #242640; border: 1px solid #2d2f4a; border-radius: 10px; padding: 1rem; }
+  .wf-platform__header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; font-weight: 600; font-size: 0.95rem; }
+  .wf-platform__cells { display: flex; flex-direction: column; gap: 0.5rem; }
+  .wf-cell { background: #2d2f4a; border-radius: 8px; padding: 0.65rem 0.75rem; position: relative; transition: all 0.3s; }
+  .wf-cell__label { font-size: 0.72rem; color: #9da0c3; margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.5px; }
+  .wf-cell__status { font-size: 0.85rem; font-weight: 500; }
+  .wf-cell__tip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #1a1b2e; border: 1px solid #3d3f5a; border-radius: 6px; padding: 0.4rem 0.65rem; font-size: 0.72rem; color: #dfe3ff; white-space: nowrap; z-index: 10; pointer-events: none; }
+  .wf-cell:hover .wf-cell__tip { display: block; }
+  .wf-cell__action { margin-top: 0.35rem; font-size: 0.72rem; cursor: pointer; background: none; border: 1px solid currentColor; border-radius: 4px; padding: 0.15rem 0.45rem; color: inherit; transition: opacity 0.2s; }
+  .wf-cell__action:hover { opacity: 0.8; }
+  .wf-cell--idle     { outline: 2px solid #4b5563; }
+  .wf-cell--ready    { outline: 2px solid #4ade80; }
+  .wf-cell--running  { outline: 3px solid #10b981; animation: wf-pulse-green 2s ease-in-out infinite; }
+  .wf-cell--building { outline: 3px dashed #8b5cf6; animation: wf-pulse-purple 2s ease-in-out infinite; }
+  .wf-cell--warning  { outline: 3px solid #f59e0b; animation: wf-pulse-amber 2s ease-in-out infinite; }
+  .wf-cell--error    { outline: 3px solid #ef4444; animation: wf-pulse-red 2s ease-in-out infinite; }
+  .wf-cell--locked   { outline: 2px solid #374151; opacity: 0.35; }
+  @keyframes wf-pulse-green  { 0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,0.4)} 50%{box-shadow:0 0 8px 4px rgba(16,185,129,0.15)} }
+  @keyframes wf-pulse-red    { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.4)}  50%{box-shadow:0 0 8px 4px rgba(239,68,68,0.15)} }
+  @keyframes wf-pulse-purple { 0%,100%{box-shadow:0 0 0 0 rgba(139,92,246,0.4)} 50%{box-shadow:0 0 8px 4px rgba(139,92,246,0.15)} }
+  @keyframes wf-pulse-amber  { 0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.4)} 50%{box-shadow:0 0 8px 4px rgba(245,158,11,0.15)} }
+
   /* Artifact modal */
   .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; }
   .modal-overlay.visible { display: flex; align-items: center; justify-content: center; }
@@ -620,6 +797,13 @@ function buildDashboardHTML(sessionId) {
     <thead><tr><th></th><th>Step</th><th>Status</th></tr></thead>
     <tbody id="subtasks"></tbody>
   </table>
+</div>
+
+<h2>Platform Status</h2>
+<div class="card">
+  <div class="wf-status-grid" id="wfStatusGrid">
+    <div style="color:#9da0c3;text-align:center;grid-column:1/-1;">No platforms configured yet.</div>
+  </div>
 </div>
 
 <h2>Automated Job Search</h2>
@@ -1100,8 +1284,77 @@ async function loadEnvs() {
 }
 loadEnvs();
 
+// ─── Workflow Status Grid ───
+var _wfSessionId = ${JSON.stringify(encodedSid)};
+var WF_URL = BASE_URL + '/api/workflow-status/' + _wfSessionId;
+
+var ACTION_LABELS = { login: 'Login', relogin: 'Re-login', build: 'Build', rebuild: 'Rebuild' };
+var CELL_ICONS = { idle: '○', ready: '✓', running: '⟳', building: '⟳', warning: '⚠', error: '✗', locked: '🔒' };
+
+function renderWfCell(cellType, info) {
+    var label = cellType.charAt(0).toUpperCase() + cellType.slice(1);
+    var vis = info.visual || 'idle';
+    var icon = CELL_ICONS[vis] || '○';
+    var html = '<div class="wf-cell wf-cell--' + vis + '">';
+    html += '<div class="wf-cell__label">' + label + '</div>';
+    html += '<div class="wf-cell__status">' + icon + ' ' + esc(info.tip.split('.')[0] || vis) + '</div>';
+    html += '<div class="wf-cell__tip">' + esc(info.tip) + '</div>';
+    if (info.action) {
+        html += '<button class="wf-cell__action" data-cell="' + cellType + '" data-action="' + info.action + '">' + (ACTION_LABELS[info.action] || info.action) + '</button>';
+    }
+    html += '</div>';
+    return html;
+}
+
+function renderWfPlatform(p) {
+    var html = '<div class="wf-platform" data-pid="' + esc(p.id) + '">';
+    html += '<div class="wf-platform__header">' + esc(p.icon) + ' ' + esc(p.name) + '</div>';
+    html += '<div class="wf-platform__cells">';
+    html += renderWfCell('login', p.cells.login);
+    html += renderWfCell('search', p.cells.search);
+    html += renderWfCell('apply', p.cells.apply);
+    html += '</div></div>';
+    return html;
+}
+
+async function refreshWorkflowStatus() {
+    try {
+        var res = await fetch(WF_URL);
+        if (!res.ok) return;
+        var data = await res.json();
+        var grid = document.getElementById('wfStatusGrid');
+        if (!data.platforms || data.platforms.length === 0) {
+            grid.innerHTML = '<div style="color:#9da0c3;text-align:center;grid-column:1/-1;">No platforms configured yet.</div>';
+            return;
+        }
+        grid.innerHTML = data.platforms.map(renderWfPlatform).join('');
+        // Bind action buttons
+        grid.querySelectorAll('.wf-cell__action').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var pid = btn.closest('.wf-platform').getAttribute('data-pid');
+                var cellType = btn.getAttribute('data-cell');
+                var action = btn.getAttribute('data-action');
+                wfCellAction(pid, cellType, action);
+            });
+        });
+    } catch (e) { console.error('[wf-status]', e); }
+}
+
+async function wfCellAction(platformId, cellType, action) {
+    try {
+        await fetch(WF_URL + '/' + encodeURIComponent(platformId) + '/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cell: cellType, action: action })
+        });
+        refreshWorkflowStatus();
+    } catch (e) { alert('Action failed: ' + e.message); }
+}
+
 refresh();
-setInterval(refresh, 5000);
+setInterval(function() { refresh(); refreshWorkflowStatus(); }, 5000);
+// Initial load
+refreshWorkflowStatus();
 </script>
 </body>
 </html>`;
@@ -1114,5 +1367,7 @@ function getDashboardURL(sessionId) {
 module.exports = {
     start, stop, getDashboardURL, DASHBOARD_PORT,
     // Job workflow
-    upsertJobCard, updateJobStatus, getJobCards, getJobStats
+    upsertJobCard, updateJobStatus, getJobCards, getJobStats,
+    // Platform workflow status
+    updatePlatformCell, getWorkflowStatus, computeCellVisual
 };
