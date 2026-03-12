@@ -13,6 +13,43 @@ function getSearchPipeline() {
     if (!_searchPipeline) _searchPipeline = require('./searchPipeline');
     return _searchPipeline;
 }
+
+// Lazy-require workflow modules
+let _workflowEngine = null;
+function getWorkflowEngine() {
+    if (!_workflowEngine) _workflowEngine = require('./workflow/workflowEngine');
+    return _workflowEngine;
+}
+let _workflowStore = null;
+function getWorkflowStore() {
+    if (!_workflowStore) _workflowStore = require('./workflow/workflowStore');
+    return _workflowStore;
+}
+let _workflowConfig = null;
+function getWorkflowConfig() {
+    if (!_workflowConfig) _workflowConfig = require('./workflow/workflowConfig');
+    return _workflowConfig;
+}
+let _workflowViewModel = null;
+function getWorkflowViewModel() {
+    if (!_workflowViewModel) _workflowViewModel = require('./workflow/workflowViewModel');
+    return _workflowViewModel;
+}
+let _platformStore = null;
+function getPlatformStore() {
+    if (!_platformStore) _platformStore = require('./workflow/platformStore');
+    return _platformStore;
+}
+let _platformService = null;
+function getPlatformService() {
+    if (!_platformService) _platformService = require('./workflow/platformService');
+    return _platformService;
+}
+let _scriptBuilder = null;
+function getScriptBuilder() {
+    if (!_scriptBuilder) _scriptBuilder = require('./workflow/scriptBuilder');
+    return _scriptBuilder;
+}
 let _port = DASHBOARD_PORT;
 let _server = null;
 let _stateGetter = null; // function that returns current agent state
@@ -30,7 +67,7 @@ function start(getState, port) {
 
     _server = http.createServer((req, res) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
         if (req.method === 'OPTIONS') {
@@ -274,6 +311,481 @@ function start(getState, port) {
             return;
         }
 
+        // ─── Workflow Engine API routes ───
+
+        // GET /api/workflow/:sid/status — get workflow status
+        const wfEngStatusMatch = url.match(/^\/api\/workflow\/([^/]+)\/status$/);
+        if (wfEngStatusMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(wfEngStatusMatch[1]);
+            const status = getWorkflowEngine().getStatus(sid);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(status));
+        }
+
+        // POST /api/workflow/:sid/start — start workflow
+        const wfStartMatch = url.match(/^\/api\/workflow\/([^/]+)\/start$/);
+        if (wfStartMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(wfStartMatch[1]);
+            _readBody(req, async (body) => {
+                try {
+                    const { config, context } = body;
+                    const wfConfig = config || getWorkflowStore().getConfig(sid);
+                    if (!wfConfig) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ success: false, error: 'No workflow config. Save config first.' }));
+                    }
+                    const state = _stateGetter ? _stateGetter() : {};
+                    const answers = state.selectedAnswers?.[sid] || {};
+                    const sections = state.profileSections?.[sid] || {};
+                    const ctx = context || { direction: answers, profile: sections };
+                    const result = await getWorkflowEngine().start(sid, wfConfig, ctx);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // POST /api/workflow/:sid/stop — stop workflow
+        const wfStopMatch = url.match(/^\/api\/workflow\/([^/]+)\/stop$/);
+        if (wfStopMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(wfStopMatch[1]);
+            const result = getWorkflowEngine().stop(sid);
+            const code = result.success ? 200 : 400;
+            res.writeHead(code, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(result));
+        }
+
+        // POST /api/workflow/:sid/resume — resume workflow
+        const wfResumeMatch = url.match(/^\/api\/workflow\/([^/]+)\/resume$/);
+        if (wfResumeMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(wfResumeMatch[1]);
+            _readBody(req, async (body) => {
+                try {
+                    const wfConfig = getWorkflowStore().getConfig(sid);
+                    const state = _stateGetter ? _stateGetter() : {};
+                    const answers = state.selectedAnswers?.[sid] || {};
+                    const sections = state.profileSections?.[sid] || {};
+                    const ctx = body.context || { direction: answers, profile: sections };
+                    const result = await getWorkflowEngine().resume(sid, wfConfig, ctx);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // GET /api/workflow/:sid/config — get workflow config (auto-creates default)
+        const wfConfigGetMatch = url.match(/^\/api\/workflow\/([^/]+)\/config$/);
+        if (wfConfigGetMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(wfConfigGetMatch[1]);
+            const wfStore = getWorkflowStore();
+            let config = wfStore.getConfig(sid);
+            if (!config) {
+                const state = _stateGetter ? _stateGetter() : {};
+                const location = state.selectedAnswers?.[sid]?.q_location || '';
+                config = getWorkflowConfig().buildDefaultConfig(location);
+                wfStore.saveConfig(sid, config);
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(config));
+        }
+
+        // PUT /api/workflow/:sid/config — merge + save workflow config
+        const wfConfigPutMatch = url.match(/^\/api\/workflow\/([^/]+)\/config$/);
+        if (wfConfigPutMatch && req.method === 'PUT') {
+            const sid = decodeURIComponent(wfConfigPutMatch[1]);
+            _readBody(req, (body) => {
+                try {
+                    const wfStore = getWorkflowStore();
+                    const wfCfg = getWorkflowConfig();
+                    // Get existing or create default
+                    let existing = wfStore.getConfig(sid);
+                    if (!existing) {
+                        const state = _stateGetter ? _stateGetter() : {};
+                        const location = state.selectedAnswers?.[sid]?.q_location || '';
+                        existing = wfCfg.buildDefaultConfig(location);
+                    }
+                    // Merge patch into existing
+                    const merged = wfCfg.mergeConfig(existing, body);
+                    // Validate
+                    const { valid, errors } = wfCfg.validateConfig(merged);
+                    if (!valid) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ success: false, errors }));
+                    }
+                    wfStore.saveConfig(sid, merged);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(merged));
+                } catch (e) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            }, (parseErr) => {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: 'Invalid JSON: ' + parseErr.message }));
+            });
+            return;
+        }
+
+        // GET /api/workflow/:sid/view-model — get workflow view model (auto-configures)
+        const wfViewModelMatch = url.match(/^\/api\/workflow\/([^/]+)\/view-model$/);
+        if (wfViewModelMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(wfViewModelMatch[1]);
+            // Auto-create config if not exists (so view-model always returns configured=true)
+            const wfStore = getWorkflowStore();
+            if (!wfStore.getConfig(sid)) {
+                const state = _stateGetter ? _stateGetter() : {};
+                const location = state.selectedAnswers?.[sid]?.q_location || '';
+                const config = getWorkflowConfig().buildDefaultConfig(location);
+                wfStore.saveConfig(sid, config);
+            }
+            const vm = getWorkflowViewModel().buildViewModel(sid);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(vm));
+        }
+
+        // GET /api/workflow/:sid/login-status/:source — check login status for a source
+        const wfLoginStatusMatch = url.match(/^\/api\/workflow\/([^/]+)\/login-status\/([^/]+)$/);
+        if (wfLoginStatusMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(wfLoginStatusMatch[1]);
+            const source = decodeURIComponent(wfLoginStatusMatch[2]);
+            (async () => {
+                try {
+                    const status = await getWorkflowEngine().checkLoginStatus(source);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ source, status }));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ source, status: 'unknown', error: e.message }));
+                }
+            })();
+            return;
+        }
+
+        // POST /api/workflow/:sid/login/:source — set login status for a source
+        const wfLoginSetMatch = url.match(/^\/api\/workflow\/([^/]+)\/login\/([^/]+)$/);
+        if (wfLoginSetMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(wfLoginSetMatch[1]);
+            const source = decodeURIComponent(wfLoginSetMatch[2]);
+            _readBody(req, (body) => {
+                getWorkflowEngine().setLoginStatus(source, body.status || 'unknown');
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ source, status: body.status || 'unknown' }));
+            });
+            return;
+        }
+
+        // GET /api/workflow/:sid/history — get workflow run history
+        const wfHistoryMatch = url.match(/^\/api\/workflow\/([^/]+)\/history$/);
+        if (wfHistoryMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(wfHistoryMatch[1]);
+            const wfStore = getWorkflowStore();
+            const history = wfStore.getHistory ? wfStore.getHistory(sid) : [];
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(history));
+        }
+
+        // ─── Platform CRUD API routes ───
+
+        // GET /api/platforms/:sid — get all platforms (auto-init with presets)
+        const platListMatch = url.match(/^\/api\/platforms\/([^/]+)$/);
+        if (platListMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(platListMatch[1]);
+            const pStore = getPlatformStore();
+            let platforms = pStore.getPlatforms(sid);
+            if (platforms.length === 0) {
+                const state = _stateGetter ? _stateGetter() : {};
+                const location = state.selectedAnswers?.[sid]?.q_location || '';
+                platforms = pStore.initWithPresets(sid, location);
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(platforms));
+        }
+
+        // POST /api/platforms/:sid — add platform (201 on success)
+        const platAddMatch = url.match(/^\/api\/platforms\/([^/]+)$/);
+        if (platAddMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(platAddMatch[1]);
+            _readBody(req, (body) => {
+                try {
+                    const result = getPlatformStore().addPlatform(sid, body);
+                    if (result.success && result.platform) {
+                        updatePlatformCell(sid, result.platform.id, {
+                            name: result.platform.name,
+                            icon: result.platform.icon,
+                            url: result.platform.url
+                        });
+                    }
+                    const code = result.success ? 201 : 400;
+                    res.writeHead(code, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // DELETE /api/platforms/:sid/:pid — remove platform
+        const platDeleteMatch = url.match(/^\/api\/platforms\/([^/]+)\/([^/]+)$/);
+        if (platDeleteMatch && req.method === 'DELETE') {
+            const sid = decodeURIComponent(platDeleteMatch[1]);
+            const pid = decodeURIComponent(platDeleteMatch[2]);
+            const result = getPlatformStore().removePlatform(sid, pid);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(result));
+        }
+
+        // ─── Platform Login API routes ───
+
+        // POST /api/platforms/:sid/:pid/login — launch login
+        const platLoginMatch = url.match(/^\/api\/platforms\/([^/]+)\/([^/]+)\/login$/);
+        if (platLoginMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(platLoginMatch[1]);
+            const pid = decodeURIComponent(platLoginMatch[2]);
+            // Check platform exists first
+            const platForLogin = getPlatformStore().getPlatform(sid, pid);
+            if (!platForLogin) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ success: false, error: 'Platform not found' }));
+            }
+            _readBody(req, async (body) => {
+                try {
+                    const result = await getPlatformService().launchLogin(sid, pid, body);
+                    if (result.success) {
+                        updatePlatformCell(sid, pid, { cell: 'login', status: 'verifying', message: 'Login launched' });
+                    }
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // POST /api/platforms/:sid/:pid/verify-login — verify login status
+        const platVerifyMatch = url.match(/^\/api\/platforms\/([^/]+)\/([^/]+)\/verify-login$/);
+        if (platVerifyMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(platVerifyMatch[1]);
+            const pid = decodeURIComponent(platVerifyMatch[2]);
+            (async () => {
+                try {
+                    const result = await getPlatformService().verifyLogin(sid, pid);
+                    if (result.status === 'logged_in') {
+                        updatePlatformCell(sid, pid, { cell: 'login', status: 'verified', message: result.message });
+                    } else if (result.status === 'not_logged_in') {
+                        updatePlatformCell(sid, pid, { cell: 'login', status: 'error', message: result.message });
+                    }
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            })();
+            return;
+        }
+
+        // POST /api/platforms/:sid/:pid/confirm-login — manual confirm login
+        const platConfirmMatch = url.match(/^\/api\/platforms\/([^/]+)\/([^/]+)\/confirm-login$/);
+        if (platConfirmMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(platConfirmMatch[1]);
+            const pid = decodeURIComponent(platConfirmMatch[2]);
+            const result = getPlatformService().confirmLogin(sid, pid);
+            if (result.success) {
+                updatePlatformCell(sid, pid, { cell: 'login', status: 'verified', message: 'Login confirmed manually' });
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(result));
+        }
+
+        // POST /api/platforms/:sid/:pid/bind-env — bind fingerprint env
+        const platBindEnvMatch = url.match(/^\/api\/platforms\/([^/]+)\/([^/]+)\/bind-env$/);
+        if (platBindEnvMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(platBindEnvMatch[1]);
+            const pid = decodeURIComponent(platBindEnvMatch[2]);
+            _readBody(req, (body) => {
+                const result = getPlatformService().bindEnv(sid, pid, body.envId);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(result));
+            });
+            return;
+        }
+
+        // ─── Script Builder API routes ───
+
+        // GET /api/platforms/:sid/:pid/tools/:toolType/build-log — get tool build status/log
+        const toolBuildLogMatch = url.match(/^\/api\/platforms\/([^/]+)\/([^/]+)\/tools\/(search|apply)\/build-log$/);
+        if (toolBuildLogMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(toolBuildLogMatch[1]);
+            const pid = decodeURIComponent(toolBuildLogMatch[2]);
+            const toolType = toolBuildLogMatch[3];
+            const plat = getPlatformStore().getPlatform(sid, pid);
+            if (!plat) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ error: 'Platform not found' }));
+            }
+            const tool = plat.tools[toolType];
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({
+                status: tool.status,
+                version: tool.version,
+                buildLog: tool.buildLog || []
+            }));
+        }
+
+        // POST /api/platforms/:sid/:pid/tools/search/build — build search tool
+        const toolBuildSearchMatch = url.match(/^\/api\/platforms\/([^/]+)\/([^/]+)\/tools\/search\/build$/);
+        if (toolBuildSearchMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(toolBuildSearchMatch[1]);
+            const pid = decodeURIComponent(toolBuildSearchMatch[2]);
+            _readBody(req, async (body) => {
+                try {
+                    // Check AI provider
+                    if (!body.aiInvoke && typeof body.aiInvoke !== 'function') {
+                        const state = _stateGetter ? _stateGetter() : {};
+                        if (!state.currentProvider) {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            return res.end(JSON.stringify({ success: false, error: 'No AI provider configured. Set an AI provider first.' }));
+                        }
+                    }
+                    updatePlatformCell(sid, pid, { cell: 'search', status: 'building', message: 'Building search tool...' });
+                    const result = await getScriptBuilder().buildTool(sid, pid, 'search', body);
+                    if (result.success) {
+                        const plat = getPlatformStore().getPlatform(sid, pid);
+                        updatePlatformCell(sid, pid, {
+                            cell: 'search', status: 'ready',
+                            version: plat?.tools?.search?.version || 1,
+                            message: 'Search tool ready'
+                        });
+                    } else {
+                        updatePlatformCell(sid, pid, { cell: 'search', status: 'error', message: result.error });
+                    }
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    updatePlatformCell(sid, pid, { cell: 'search', status: 'error', message: e.message });
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // POST /api/platforms/:sid/:pid/tools/apply/build — build apply tool
+        const toolBuildApplyMatch = url.match(/^\/api\/platforms\/([^/]+)\/([^/]+)\/tools\/apply\/build$/);
+        if (toolBuildApplyMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(toolBuildApplyMatch[1]);
+            const pid = decodeURIComponent(toolBuildApplyMatch[2]);
+            _readBody(req, async (body) => {
+                try {
+                    updatePlatformCell(sid, pid, { cell: 'apply', status: 'building', message: 'Building apply tool...' });
+                    const result = await getScriptBuilder().buildTool(sid, pid, 'apply', body);
+                    if (result.success) {
+                        const plat = getPlatformStore().getPlatform(sid, pid);
+                        updatePlatformCell(sid, pid, {
+                            cell: 'apply', status: 'ready',
+                            version: plat?.tools?.apply?.version || 1,
+                            message: 'Apply tool ready'
+                        });
+                    } else {
+                        updatePlatformCell(sid, pid, { cell: 'apply', status: 'error', message: result.error });
+                    }
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    updatePlatformCell(sid, pid, { cell: 'apply', status: 'error', message: e.message });
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // POST /api/platforms/:sid/:pid/tools/search/execute — execute search tool
+        const toolExecSearchMatch = url.match(/^\/api\/platforms\/([^/]+)\/([^/]+)\/tools\/search\/execute$/);
+        if (toolExecSearchMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(toolExecSearchMatch[1]);
+            const pid = decodeURIComponent(toolExecSearchMatch[2]);
+            _readBody(req, async (body) => {
+                try {
+                    const result = await getScriptBuilder().executeSearchScript(sid, pid, body, body.options || {});
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // POST /api/platforms/:sid/:pid/tools/search/heal — heal broken search script
+        const toolHealSearchMatch = url.match(/^\/api\/platforms\/([^/]+)\/([^/]+)\/tools\/search\/heal$/);
+        if (toolHealSearchMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(toolHealSearchMatch[1]);
+            const pid = decodeURIComponent(toolHealSearchMatch[2]);
+            _readBody(req, async (body) => {
+                try {
+                    const result = await getScriptBuilder().healScript(sid, pid, 'search', body, body);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // ─── Job Query API routes (GET with filter/pagination) ───
+
+        // GET /api/jobs/:sid — query jobs with optional filter/pagination
+        const jobsGetMatch = url.match(/^\/api\/jobs\/([^/]+)$/);
+        if (jobsGetMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(jobsGetMatch[1]);
+            const query = new URL(req.url, `http://127.0.0.1:${_port}`).searchParams;
+            let jobs = getJobCards(sid);
+
+            // Filter by status
+            const statusFilter = query.get('status');
+            if (statusFilter) {
+                jobs = jobs.filter(j => j.status === statusFilter);
+            }
+
+            // Filter by min score
+            const minScore = query.get('minScore');
+            if (minScore) {
+                const min = parseInt(minScore, 10);
+                jobs = jobs.filter(j => (j.matchScore || 0) >= min);
+            }
+
+            const total = jobs.length;
+
+            // Pagination (pageSize default 20)
+            const page = parseInt(query.get('page') || '1', 10);
+            const pageSize = parseInt(query.get('pageSize') || query.get('limit') || '20', 10);
+            const totalPages = Math.ceil(total / pageSize) || 1;
+            const start = (page - 1) * pageSize;
+            jobs = jobs.slice(start, start + pageSize);
+
+            // Stats
+            const stats = getJobStats(sid);
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ jobs, total, page, pageSize, totalPages, stats }));
+        }
+
         // POST /shutdown — allow new process to take over the port
         if (url === '/shutdown' && req.method === 'POST') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -329,6 +841,7 @@ function start(getState, port) {
 
     _server.listen(_port, '127.0.0.1', () => {
         console.log(`[dashboardServer] listening on http://127.0.0.1:${_port} (instance: ${_instanceId})`);
+        console.log(`[dashboardServer] ★ Dashboard base: http://127.0.0.1:${_port}/dashboard/`);
     });
 
     _server.on('error', (err) => {
@@ -388,6 +901,23 @@ function stop() {
             s.close(() => resolve());
         } else {
             resolve();
+        }
+    });
+}
+
+/**
+ * Read JSON body from request.
+ * @param {http.IncomingMessage} req
+ * @param {Function} cb - callback(parsedBody)
+ */
+function _readBody(req, cb, onError) {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+        try { cb(JSON.parse(body || '{}')); }
+        catch (e) {
+            if (onError) onError(e);
+            else cb({});
         }
     });
 }
@@ -543,6 +1073,7 @@ function upsertJobCard(sessionId, job) {
         company: job.company || existing.company || '',
         location: job.location || existing.location || '',
         salary: job.salary || existing.salary || '',
+        platform: job.platform || existing.platform || '',
         matchScore: job.matchScore ?? existing.matchScore ?? null,
         status: job.status || existing.status || 'discovered',
         artifacts: { ...(existing.artifacts || {}), ...(job.artifacts || {}) },
@@ -609,12 +1140,10 @@ function getDashboardData(sessionId) {
     const knownSessions = hasState ? Object.keys(state.selectedAnswers) : [];
     const sessionMatch = knownSessions.includes(sessionId);
 
-    // Diagnostic: log when session data is missing
-    if (answerKeys.length === 0 && sectionKeys.length === 0) {
-        console.log(`[dashboard:data] session=${sessionId.slice(0, 12)} | EMPTY — stateGetter=${Boolean(_stateGetter)} | hasSelectedAnswers=${hasState} | knownSessions=[${knownSessions.map(s => s.slice(0, 12)).join(',')}] | sessionMatch=${sessionMatch}`);
-    } else {
-        console.log(`[dashboard:data] session=${sessionId.slice(0, 12)} | answers: [${answerKeys.join(', ')}] | profile: [${sectionKeys.join(', ')}] | skills preview: "${(sections.skills || '').slice(0, 80)}"`);
-    }
+    // Diagnostic logging disabled — too noisy with 5s auto-refresh
+    // if (answerKeys.length === 0 && sectionKeys.length === 0) {
+    //     console.log(`[dashboard:data] session=${sessionId.slice(0, 12)} | EMPTY`);
+    // }
 
     return {
         sessionId,
@@ -767,19 +1296,52 @@ function buildDashboardHTML(sessionId) {
   @keyframes wf-pulse-purple { 0%,100%{box-shadow:0 0 0 0 rgba(139,92,246,0.4)} 50%{box-shadow:0 0 8px 4px rgba(139,92,246,0.15)} }
   @keyframes wf-pulse-amber  { 0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.4)} 50%{box-shadow:0 0 8px 4px rgba(245,158,11,0.15)} }
 
-  /* Artifact modal */
+  /* Cell status overlays */
+  .cell-running { outline: 3px solid #10b981; animation: wf-pulse-green 2s ease-in-out infinite; }
+  .cell-stuck { outline: 3px solid #ef4444; animation: wf-pulse-red 2s ease-in-out infinite; background: rgba(239,68,68,0.08); }
+  .cell-building { outline: 3px dashed #8b5cf6; animation: wf-pulse-purple 2s ease-in-out infinite; }
+
+  /* Control bar */
+  .controlBar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 0.75rem 0; }
+
+  /* Modals */
   .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; }
   .modal-overlay.visible { display: flex; align-items: center; justify-content: center; }
   .modal { background: #242640; border: 1px solid #2d2f4a; border-radius: 12px; padding: 2rem; max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto; }
   .modal h3 { color: #8b9aff; margin-top: 0; }
   .modal .content { background: #1a1b2e; border-radius: 8px; padding: 1rem; white-space: pre-wrap; font-size: 0.9rem; line-height: 1.6; }
   .modal .close-btn { float: right; background: none; border: none; color: #9da0c3; font-size: 1.5rem; cursor: pointer; }
+  .modal-form { display: flex; flex-direction: column; gap: 0.75rem; }
+  .modal-form label { color: #9da0c3; font-size: 0.85rem; }
+  .modal-form input, .modal-form select { background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 6px; color: #dfe3ff; padding: 0.5rem 0.75rem; font-size: 0.95rem; }
+
+  /* Filter bar */
+  .jobFilterBar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; }
+  .jobFilterBar select, .jobFilterBar input { background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 6px; color: #dfe3ff; padding: 0.35rem 0.6rem; font-size: 0.85rem; }
+
+  /* Pagination */
+  .jobPagination { display: flex; gap: 0.5rem; align-items: center; justify-content: center; margin-top: 0.75rem; }
+  .jobPagination button { background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 4px; color: #dfe3ff; padding: 0.3rem 0.6rem; cursor: pointer; }
+  .jobPagination button.active { background: #6a7eff; border-color: #6a7eff; }
+  .jobPagination button:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>
 </head>
 <body>
 <h1>Job Search Dashboard</h1>
 <p class="meta" id="meta"></p>
 <div class="refresh-indicator" id="refresh">Auto-refresh: active</div>
+
+<!-- Control Bar -->
+<div class="controlBar" id="controlBar">
+  <button class="btn btn-success" id="wfBtnStart" onclick="wfStart()">Start Workflow</button>
+  <button class="btn btn-danger" id="wfBtnStop" onclick="wfStop()" style="display:none;">Stop</button>
+  <span id="wfStatusLabel" style="font-size:0.85rem;color:#9da0c3;">Idle</span>
+  <label style="margin-left:auto;font-size:0.82rem;color:#9da0c3;cursor:pointer;">
+    <input type="checkbox" id="asyncToggle"> Async steps
+  </label>
+  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openGlobalSettings()">Settings</button>
+  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openAddWebsite()">+ Add Website</button>
+</div>
 
 <h2>Direction</h2>
 <div class="card">
@@ -799,9 +1361,9 @@ function buildDashboardHTML(sessionId) {
   </table>
 </div>
 
-<h2>Platform Status</h2>
+<h2>Workflow Grid</h2>
 <div class="card">
-  <div class="wf-status-grid" id="wfStatusGrid">
+  <div class="wf-status-grid" id="wfGrid">
     <div style="color:#9da0c3;text-align:center;grid-column:1/-1;">No platforms configured yet.</div>
   </div>
 </div>
@@ -853,6 +1415,19 @@ function buildDashboardHTML(sessionId) {
 </div>
 
 <div class="tab-content active" id="tab-listings">
+  <div class="jobFilterBar" id="jobFilterBar">
+    <select id="jobFilterStatus" onchange="filterJobs()">
+      <option value="">All statuses</option>
+      <option value="discovered">Discovered</option>
+      <option value="matched">Matched</option>
+      <option value="tailored">Tailored</option>
+      <option value="submitted">Submitted</option>
+      <option value="archived">Archived</option>
+    </select>
+    <input id="jobFilterMinScore" type="number" placeholder="Min score" min="0" max="100" style="width:80px;" onchange="filterJobs()">
+    <button class="btn btn-sm btn-primary" onclick="filterJobs()">Filter</button>
+    <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="refreshJobRecords()">Refresh</button>
+  </div>
   <table class="job-table" id="jobTable">
     <thead>
       <tr>
@@ -869,6 +1444,7 @@ function buildDashboardHTML(sessionId) {
   <div id="noJobs" class="card" style="text-align:center;color:#9da0c3;">
     No job listings yet. Configure search parameters above and click Start Search.
   </div>
+  <div class="jobPagination" id="jobPagination"></div>
 </div>
 
 <div class="tab-content" id="tab-history">
@@ -896,6 +1472,52 @@ function buildDashboardHTML(sessionId) {
     <button class="close-btn" onclick="closeModal()">&times;</button>
     <h3 id="modalTitle"></h3>
     <div class="content" id="modalContent"></div>
+  </div>
+</div>
+
+<!-- Global Settings modal -->
+<div class="modal-overlay" id="globalSettingsModal" onclick="closeGlobalSettings(event)">
+  <div class="modal" style="max-width:500px;">
+    <button class="close-btn" onclick="closeGlobalSettings()">&times;</button>
+    <h3>Global Settings</h3>
+    <div class="modal-form">
+      <label>Min Match Score (%)</label>
+      <input type="number" id="gsCfgMinScore" min="0" max="100" step="5" value="60">
+      <label>Target Matches</label>
+      <input type="number" id="gsCfgTargetCount" min="1" max="100" value="10">
+      <label>Max Search Results</label>
+      <input type="number" id="gsCfgMaxResults" min="5" max="200" step="5" value="30">
+      <button class="btn btn-primary" id="saveGlobalSettings" onclick="saveGlobalSettings()">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Website modal -->
+<div class="modal-overlay" id="addWebsiteModal" onclick="closeAddWebsite(event)">
+  <div class="modal" style="max-width:500px;">
+    <button class="close-btn" onclick="closeAddWebsite()">&times;</button>
+    <h3>Add Target Website</h3>
+    <div class="modal-form">
+      <label>Name</label>
+      <input type="text" id="awName" placeholder="e.g. Indeed">
+      <label>URL</label>
+      <input type="text" id="awUrl" placeholder="https://...">
+      <label>Login URL (optional)</label>
+      <input type="text" id="awLoginUrl" placeholder="https://...">
+      <label>Connection Type</label>
+      <select id="awConnType"><option value="browser">Browser</option><option value="api">API</option></select>
+      <button class="btn btn-primary" id="submitAddWebsite" onclick="submitAddWebsite()">Add Website</button>
+    </div>
+  </div>
+</div>
+
+<!-- Alert modal -->
+<div class="modal-overlay" id="alertModal" onclick="closeAlert(event)">
+  <div class="modal" style="max-width:400px;">
+    <button class="close-btn" onclick="closeAlert()">&times;</button>
+    <h3 id="alertTitle">Alert</h3>
+    <p id="alertMessage"></p>
+    <button class="btn btn-primary" onclick="closeAlert()">OK</button>
   </div>
 </div>
 
@@ -1309,6 +1931,11 @@ function renderWfCell(cellType, info) {
 function renderWfPlatform(p) {
     var html = '<div class="wf-platform" data-pid="' + esc(p.id) + '">';
     html += '<div class="wf-platform__header">' + esc(p.icon) + ' ' + esc(p.name) + '</div>';
+    html += '<div class="wf-platform__env"><select class="wf-env-select" id="env_' + esc(p.id) + '" onchange="bindEnv(\\''+esc(p.id)+'\\')"></select></div>';
+    html += '<div class="wf-platform__actions">';
+    html += '<button class="btn btn-sm" onclick="platformLogin(\\''+esc(p.id)+'\\')">Login</button>';
+    html += '<button class="btn btn-sm" onclick="confirmLogin(\\''+esc(p.id)+'\\')">Confirm</button>';
+    html += '</div>';
     html += '<div class="wf-platform__cells">';
     html += renderWfCell('login', p.cells.login);
     html += renderWfCell('search', p.cells.search);
@@ -1322,7 +1949,7 @@ async function refreshWorkflowStatus() {
         var res = await fetch(WF_URL);
         if (!res.ok) return;
         var data = await res.json();
-        var grid = document.getElementById('wfStatusGrid');
+        var grid = document.getElementById('wfGrid');
         if (!data.platforms || data.platforms.length === 0) {
             grid.innerHTML = '<div style="color:#9da0c3;text-align:center;grid-column:1/-1;">No platforms configured yet.</div>';
             return;
@@ -1351,10 +1978,242 @@ async function wfCellAction(platformId, cellType, action) {
     } catch (e) { alert('Action failed: ' + e.message); }
 }
 
+// ─── Workflow Control Bar ───
+var WF_API = BASE_URL + '/api/workflow/' + _wfSessionId;
+
+async function wfStart() {
+    try {
+        var res = await fetch(WF_API + '/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        var data = await res.json();
+        if (data.success) {
+            document.getElementById('wfBtnStart').style.display = 'none';
+            document.getElementById('wfBtnStop').style.display = 'inline-block';
+        } else { alert(data.error || 'Start failed'); }
+    } catch (e) { alert(e.message); }
+}
+
+async function wfStop() {
+    try {
+        await fetch(WF_API + '/stop', { method: 'POST' });
+        document.getElementById('wfBtnStart').style.display = 'inline-block';
+        document.getElementById('wfBtnStop').style.display = 'none';
+    } catch (e) { alert(e.message); }
+}
+
+async function pollWfStatus() {
+    try {
+        var res = await fetch(WF_API + '/status');
+        var data = await res.json();
+        updateWfUI(data);
+    } catch {}
+}
+
+function updateWfUI(data) {
+    var label = document.getElementById('wfStatusLabel');
+    if (label) label.textContent = (data.status || 'idle').toUpperCase();
+    if (data.status === 'running') {
+        document.getElementById('wfBtnStart').style.display = 'none';
+        document.getElementById('wfBtnStop').style.display = 'inline-block';
+    } else {
+        document.getElementById('wfBtnStart').style.display = 'inline-block';
+        document.getElementById('wfBtnStop').style.display = 'none';
+    }
+}
+
+// ─── Global Settings Modal ───
+function openGlobalSettings() {
+    document.getElementById('globalSettingsModal').classList.add('visible');
+    // Load current values
+    fetch(WF_API + '/config').then(r => r.json()).then(cfg => {
+        if (cfg.search) {
+            document.getElementById('gsCfgMinScore').value = cfg.search.minScore || 60;
+            document.getElementById('gsCfgTargetCount').value = cfg.search.targetCount || 10;
+            document.getElementById('gsCfgMaxResults').value = cfg.search.maxResults || 30;
+        }
+    }).catch(() => {});
+}
+function closeGlobalSettings(e) {
+    if (!e || e.target === document.getElementById('globalSettingsModal') || e.target.classList.contains('close-btn'))
+        document.getElementById('globalSettingsModal').classList.remove('visible');
+}
+async function saveGlobalSettings() {
+    var body = { search: {
+        minScore: parseInt(document.getElementById('gsCfgMinScore').value) || 60,
+        targetCount: parseInt(document.getElementById('gsCfgTargetCount').value) || 10,
+        maxResults: parseInt(document.getElementById('gsCfgMaxResults').value) || 30
+    }};
+    try {
+        var res = await fetch(WF_API + '/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (res.ok) { closeGlobalSettings(); alert('Settings saved'); }
+        else { var d = await res.json(); alert(d.errors ? d.errors.join(', ') : 'Save failed'); }
+    } catch (e) { alert(e.message); }
+}
+
+// ─── Add Website Modal ───
+function openAddWebsite() { document.getElementById('addWebsiteModal').classList.add('visible'); }
+function closeAddWebsite(e) {
+    if (!e || e.target === document.getElementById('addWebsiteModal') || e.target.classList.contains('close-btn'))
+        document.getElementById('addWebsiteModal').classList.remove('visible');
+}
+async function submitAddWebsite() {
+    var body = {
+        name: document.getElementById('awName').value,
+        url: document.getElementById('awUrl').value,
+        loginUrl: document.getElementById('awLoginUrl').value,
+        connectionType: document.getElementById('awConnType').value
+    };
+    try {
+        var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        var data = await res.json();
+        if (data.success) { closeAddWebsite(); refreshWorkflowStatus(); }
+        else { alert(data.error || 'Failed to add'); }
+    } catch (e) { alert(e.message); }
+}
+
+// ─── Alert Modal ───
+function showAlert(title, msg) {
+    document.getElementById('alertTitle').textContent = title;
+    document.getElementById('alertMessage').textContent = msg;
+    document.getElementById('alertModal').classList.add('visible');
+}
+function closeAlert(e) {
+    if (!e || e.target === document.getElementById('alertModal') || e.target.classList.contains('close-btn'))
+        document.getElementById('alertModal').classList.remove('visible');
+}
+
+// ─── Platform Login Functions ───
+async function platformLogin(platformId) {
+    try {
+        var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId + '/' + encodeURIComponent(platformId) + '/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+        });
+        var data = await res.json();
+        if (data.method === 'url') { window.open(data.url, '_blank'); }
+        else if (!data.success) { showAlert('Login', data.error || 'Login failed'); }
+        refreshWorkflowStatus();
+    } catch (e) { showAlert('Error', e.message); }
+}
+
+async function confirmLogin(platformId) {
+    try {
+        var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId + '/' + encodeURIComponent(platformId) + '/confirm-login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+        });
+        var data = await res.json();
+        if (data.success) { refreshWorkflowStatus(); }
+        else { showAlert('Confirm', data.error || 'Confirm failed'); }
+    } catch (e) { showAlert('Error', e.message); }
+}
+
+async function bindEnv(platformId) {
+    var sel = document.querySelector('#env_' + platformId);
+    if (!sel) return;
+    var envId = sel.value;
+    if (!envId) { showAlert('Bind', 'Select an environment first'); return; }
+    try {
+        var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId + '/' + encodeURIComponent(platformId) + '/bind-env', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ envId: envId })
+        });
+        var data = await res.json();
+        if (data.success) { refreshWorkflowStatus(); }
+        else { showAlert('Bind', data.error || 'Bind failed'); }
+    } catch (e) { showAlert('Error', e.message); }
+}
+
+async function populateEnvSelectors() {
+    try {
+        var res = await fetch(BASE_URL + '/api/envs');
+        var envs = await res.json();
+        var selects = document.querySelectorAll('.wf-env-select');
+        selects.forEach(function(sel) {
+            sel.innerHTML = '<option value="">-- Select Env --</option>' +
+                envs.map(function(e) { return '<option value="' + e.id + '">' + esc(e.name) + '</option>'; }).join('');
+        });
+    } catch {}
+}
+
+// ─── Script Builder ───
+async function buildToolForPlatform(platformId, toolType) {
+    try {
+        var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId + '/' + encodeURIComponent(platformId) + '/tools/' + toolType + '/build', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+        });
+        var data = await res.json();
+        if (!data.success) alert(data.error || 'Build failed');
+        refreshWorkflowStatus();
+    } catch (e) { alert(e.message); }
+}
+
+async function executeSearchForPlatform(platformId) {
+    var keywords = prompt('Search keywords:', 'software engineer');
+    if (!keywords) return;
+    try {
+        var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId + '/' + encodeURIComponent(platformId) + '/tools/search/execute', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keywords: keywords, location: '' })
+        });
+        var data = await res.json();
+        if (data.success) { alert('Found ' + (data.jobs || []).length + ' jobs'); refresh(); }
+        else { alert(data.error || 'Search failed'); }
+    } catch (e) { alert(e.message); }
+}
+
+// ─── Job Filter & Pagination ───
+var _jobPage = 1;
+var _jobPageSize = 20;
+
+async function filterJobs() {
+    _jobPage = 1;
+    await refreshJobRecords();
+}
+
+async function refreshJobRecords() {
+    var status = document.getElementById('jobFilterStatus').value;
+    var minScore = document.getElementById('jobFilterMinScore').value;
+    var params = 'page=' + _jobPage + '&pageSize=' + _jobPageSize;
+    if (status) params += '&status=' + status;
+    if (minScore) params += '&minScore=' + minScore;
+    try {
+        var res = await fetch(BASE_URL + '/api/jobs/' + _wfSessionId + '?' + params);
+        var data = await res.json();
+        var jobBody = document.getElementById('jobTableBody');
+        var noJobsEl = document.getElementById('noJobs');
+        var paginationEl = document.getElementById('jobPagination');
+        if (data.jobs && data.jobs.length > 0) {
+            jobBody.innerHTML = data.jobs.map(renderJobRow).join('');
+            noJobsEl.style.display = 'none';
+            document.getElementById('jobTable').style.display = 'table';
+            // Render pagination
+            var pages = data.totalPages || 1;
+            var html = '';
+            html += '<button onclick="goJobPage(' + Math.max(1, _jobPage - 1) + ')"' + (_jobPage <= 1 ? ' disabled' : '') + '>&lt;</button>';
+            for (var i = 1; i <= pages; i++) {
+                html += '<button class="' + (i === _jobPage ? 'active' : '') + '" onclick="goJobPage(' + i + ')">' + i + '</button>';
+            }
+            html += '<button onclick="goJobPage(' + Math.min(pages, _jobPage + 1) + ')"' + (_jobPage >= pages ? ' disabled' : '') + '>&gt;</button>';
+            paginationEl.innerHTML = html;
+        } else {
+            jobBody.innerHTML = '';
+            noJobsEl.style.display = 'block';
+            document.getElementById('jobTable').style.display = 'none';
+            paginationEl.innerHTML = '';
+        }
+    } catch (e) { console.error('[jobs]', e); }
+}
+
+function goJobPage(p) {
+    _jobPage = p;
+    refreshJobRecords();
+}
+
 refresh();
-setInterval(function() { refresh(); refreshWorkflowStatus(); }, 5000);
+pollWfStatus();
+setInterval(function() { refresh(); refreshWorkflowStatus(); pollWfStatus(); }, 5000);
 // Initial load
 refreshWorkflowStatus();
+populateEnvSelectors();
 </script>
 </body>
 </html>`;

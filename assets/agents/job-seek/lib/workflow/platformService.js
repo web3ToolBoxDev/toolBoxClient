@@ -16,6 +16,22 @@ const platformStore = require('./platformStore');
 
 const MAIN_SERVER = process.env.MAIN_SERVER_URL || 'http://127.0.0.1:30001';
 
+// Lazy-require dashboardServer to bridge platform status updates to the UI grid.
+let _dashboardServer = null;
+function getDashboardServer() {
+    if (!_dashboardServer) _dashboardServer = require('../dashboardServer');
+    return _dashboardServer;
+}
+
+/**
+ * Sync a platform's status to the dashboard grid.
+ * Safe to call even if dashboardServer hasn't started — silently no-ops.
+ */
+function _syncToDashboard(sessionId, platformId, update) {
+    try { getDashboardServer().updatePlatformCell(sessionId, platformId, update); }
+    catch (_) { /* dashboardServer not ready yet */ }
+}
+
 /**
  * Shared browser tracking: envId → browserId.
  * When multiple platforms share the same envId, they share the same browser
@@ -270,6 +286,7 @@ async function verifyLogin(sessionId, platformId) {
         // DOM matched — confirmed logged in, clear any stale hint
         platformStore.updateConnectionStatus(sessionId, platformId, 'connected');
         _staleSelectorHints.delete(detector.pattern);
+        _syncToDashboard(sessionId, platformId, { cell: 'login', status: 'verified', message: 'Login verified on ' + detector.label });
         return { success: true, status: 'logged_in', method: 'dom', message: 'Login verified on ' + detector.label };
     }
 
@@ -281,6 +298,7 @@ async function verifyLogin(sessionId, platformId) {
             );
             if (loggedIn) {
                 platformStore.updateConnectionStatus(sessionId, platformId, 'connected');
+                _syncToDashboard(sessionId, platformId, { cell: 'login', status: 'verified', message: 'AI verified login on ' + detector.label });
 
                 // DOM failed but screenshot passed → selector is stale
                 if (detector.selector) {
@@ -431,6 +449,12 @@ async function launchLogin(sessionId, platformId, options = {}) {
     platform._browserId = browserId;
     platform._pageIndex = pageIndex;
 
+    _syncToDashboard(sessionId, platformId, {
+        cell: 'login', status: 'verifying',
+        name: platform.name, icon: platform.icon, url: platform.url,
+        message: 'Login launched — waiting for user to log in'
+    });
+
     return {
         success: true,
         method: 'fingerprint',
@@ -450,7 +474,11 @@ async function launchLogin(sessionId, platformId, options = {}) {
  * @returns {object} { success, platform? }
  */
 function confirmLogin(sessionId, platformId) {
-    return platformStore.updateConnectionStatus(sessionId, platformId, 'connected');
+    const result = platformStore.updateConnectionStatus(sessionId, platformId, 'connected');
+    if (result.success) {
+        _syncToDashboard(sessionId, platformId, { cell: 'login', status: 'verified', message: 'Login confirmed manually' });
+    }
+    return result;
 }
 
 /**
