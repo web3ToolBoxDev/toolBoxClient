@@ -1418,12 +1418,6 @@ function buildDashboardHTML(sessionId) {
   .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; background: rgba(106,126,255,0.2); color: #8b9aff; margin-top: 0.5rem; }
   .refresh-indicator { position: fixed; top: 8px; right: 12px; font-size: 0.7rem; color: #555; }
 
-  /* Search config panel */
-  .search-config { display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; }
-  .search-config .field { display: flex; flex-direction: column; gap: 0.3rem; }
-  .search-config .field label { color: #9da0c3; font-size: 0.8rem; }
-  .search-config input[type="number"] { background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 6px; color: #dfe3ff; padding: 0.5rem 0.75rem; width: 100px; font-size: 0.95rem; }
-  .search-config input:focus { border-color: #8b9aff; outline: none; }
   .btn { border: none; border-radius: 6px; padding: 0.5rem 1.2rem; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
   .btn-primary { background: #6a7eff; color: #fff; }
   .btn-primary:hover { background: #8b9aff; }
@@ -1435,15 +1429,6 @@ function buildDashboardHTML(sessionId) {
   .btn-warning:hover { background: #fbbf24; }
   .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.75rem; }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  /* Pipeline status */
-  .pipe-status { display: flex; align-items: center; gap: 1rem; margin-top: 0.75rem; flex-wrap: wrap; }
-  .pipe-status .phase { font-weight: 600; font-size: 0.9rem; }
-  .pipe-status .progress-bar { flex: 1; min-width: 200px; height: 8px; background: #2d2f4a; border-radius: 4px; overflow: hidden; }
-  .pipe-status .progress-fill { height: 100%; background: #6a7eff; transition: width 0.3s; }
-  .pipe-status .counts { font-size: 0.8rem; color: #9da0c3; }
-  .pipe-errors { margin-top: 0.5rem; }
-  .pipe-errors .error { color: #f87171; font-size: 0.8rem; margin-top: 0.25rem; }
 
   /* Job table */
   .job-table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; }
@@ -1476,16 +1461,6 @@ function buildDashboardHTML(sessionId) {
   .tab-bar .tab:hover { color: #dfe3ff; }
   .tab-content { display: none; }
   .tab-content.active { display: block; }
-
-  /* Search logs */
-  .log-entry { color: #9da0c3; }
-  .log-entry.search { color: #60a5fa; }
-  .log-entry.found { color: #8b9aff; }
-  .log-entry.match-yes { color: #4ade80; }
-  .log-entry.match-no { color: #f87171; }
-  .log-entry.error { color: #f87171; font-weight: 600; }
-  .log-entry.info { color: #fbbf24; }
-  .log-entry .time { color: #555; margin-right: 0.5rem; }
 
   /* Workflow Status Grid */
   .wf-status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
@@ -1593,42 +1568,6 @@ function buildDashboardHTML(sessionId) {
     <div class="item"><label data-i18n="platformsReady">Platforms Ready</label><div class="val" id="statPlatformsReady">0</div></div>
     <div class="item"><label data-i18n="workflowStatus">Workflow Status</label><div class="val" id="statWfStatus">idle</div></div>
     <div class="item"><label data-i18n="runHistory">Run History</label><div class="val" id="statHistoryCount">0</div></div>
-  </div>
-</div>
-
-<h2 data-i18n="automatedSearch">Automated Job Search</h2>
-<div class="card">
-  <div class="search-config">
-    <div class="field">
-      <label>Min Match Score (%)</label>
-      <input type="number" id="cfgMinScore" value="60" min="0" max="100" step="5">
-    </div>
-    <div class="field">
-      <label>Target Matches</label>
-      <input type="number" id="cfgTargetCount" value="10" min="1" max="100">
-    </div>
-    <div class="field">
-      <label>Max Search Results</label>
-      <input type="number" id="cfgMaxResults" value="30" min="5" max="200" step="5">
-    </div>
-    <div class="field" id="envIdField" style="display:none;">
-      <label>Fingerprint Env ID</label>
-      <select id="cfgEnvId"><option value="">Loading...</option></select>
-    </div>
-  </div>
-  <div style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
-    <button class="btn btn-primary" id="btnStartApi" onclick="startSearch('api')">Search by API</button>
-    <button class="btn btn-success" id="btnStartFp" onclick="startSearch('fingerprint')">Search by Fingerprint</button>
-    <button class="btn btn-danger" id="btnStop" onclick="stopSearch()" style="display:none;">Stop</button>
-    <span id="searchModeLabel" style="font-size:0.8rem;color:#9da0c3;"></span>
-  </div>
-  <div class="pipe-status" id="pipeStatus" style="display:none;">
-    <span class="phase" id="pipePhase"></span>
-    <div class="progress-bar"><div class="progress-fill" id="pipeFill" style="width:0%"></div></div>
-    <span class="counts" id="pipeCounts"></span>
-  </div>
-  <div class="pipe-errors" id="pipeErrors"></div>
-  <div id="searchLogs" style="display:none;margin-top:0.75rem;max-height:300px;overflow-y:auto;background:#1a1b2e;border-radius:8px;padding:0.75rem;font-family:monospace;font-size:0.78rem;line-height:1.5;">
   </div>
 </div>
 
@@ -1759,7 +1698,7 @@ let _sessionChecked = false;
 var _i18n = {
     en: {
         direction: 'Direction', profile: 'Profile', workflowProgress: 'Workflow Progress',
-        workflowGrid: 'Workflow Grid', automatedSearch: 'Automated Job Search',
+        workflowGrid: 'Workflow Grid',
         statsOverview: 'Stats Overview', applicationPipeline: 'Application Pipeline', jobRecords: 'Job Records',
         startWorkflow: 'Start Workflow', stop: 'Stop', settings: 'Settings',
         addWebsite: '+ Add Website', login: 'Login', confirm: 'Confirm',
@@ -1774,7 +1713,7 @@ var _i18n = {
     },
     'zh-CN': {
         direction: '求职方向', profile: '个人资料', workflowProgress: '工作流进度',
-        workflowGrid: '工作流网格', automatedSearch: '自动化求职搜索',
+        workflowGrid: '工作流网格',
         statsOverview: '统计概览', applicationPipeline: '申请流水线', jobRecords: '职位记录',
         startWorkflow: '启动工作流', stop: '停止', settings: '设置',
         addWebsite: '+ 添加网站', login: '登录', confirm: '确认',
@@ -1835,117 +1774,7 @@ function switchTab(name) {
     if (name === 'history') refreshHistory();
 }
 
-// ─── Pipeline control ───
-var _lastLogCount = 0;
-
-async function startSearch(mode) {
-    var minScore = parseInt(document.getElementById('cfgMinScore').value) || 60;
-    var targetCount = parseInt(document.getElementById('cfgTargetCount').value) || 10;
-    var maxResults = parseInt(document.getElementById('cfgMaxResults').value) || 30;
-    var envId = null;
-
-    if (mode === 'fingerprint') {
-        var sel = document.getElementById('cfgEnvId');
-        envId = sel ? sel.value : null;
-        if (!envId) { alert('No fingerprint environment selected. Select one or use API mode.'); return; }
-    }
-
-    // Clear previous logs
-    _lastLogCount = 0;
-    var logsEl = document.getElementById('searchLogs');
-    logsEl.innerHTML = '';
-    logsEl.style.display = 'block';
-
-    var label = document.getElementById('searchModeLabel');
-    label.textContent = mode === 'fingerprint' ? 'Mode: Fingerprint Browser' : 'Mode: API (HTTP)';
-
-    try {
-        var body = { minScore: minScore, targetCount: targetCount, maxResults: maxResults };
-        if (envId) body.envId = envId;
-
-        var res = await fetch(PIPE_URL + '/start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
-        var data = await res.json();
-        if (data.error) { alert('Error: ' + data.error); return; }
-        document.getElementById('btnStartApi').style.display = 'none';
-        document.getElementById('btnStartFp').style.display = 'none';
-        document.getElementById('btnStop').style.display = 'inline-block';
-    } catch (e) { alert('Failed to start: ' + e.message); }
-}
-
-async function stopSearch() {
-    try {
-        await fetch(PIPE_URL + '/stop', { method: 'POST' });
-        document.getElementById('btnStartApi').style.display = 'inline-block';
-        document.getElementById('btnStartFp').style.display = 'inline-block';
-        document.getElementById('btnStop').style.display = 'none';
-        document.getElementById('searchModeLabel').textContent = '';
-    } catch (e) { alert('Failed to stop: ' + e.message); }
-}
-
-function logClass(msg) {
-    if (msg.startsWith('Searching')) return 'search';
-    if (msg.startsWith('+')) return 'found';
-    if (msg.includes('QUALIFIED') || msg.startsWith('\\u2713')) return 'match-yes';
-    if (msg.startsWith('\\u2717')) return 'match-no';
-    if (msg.startsWith('ERROR') || msg.includes('ERROR')) return 'error';
-    if (msg.startsWith('Starting') || msg.startsWith('Config') || msg.startsWith('Done')) return 'info';
-    return '';
-}
-
-function renderLogs(logs) {
-    if (!logs || logs.length === 0) return;
-    var logsEl = document.getElementById('searchLogs');
-    if (!logsEl) return;
-    // Only render new logs
-    if (logs.length <= _lastLogCount) return;
-    var newLogs = logs.slice(_lastLogCount);
-    _lastLogCount = logs.length;
-    for (var i = 0; i < newLogs.length; i++) {
-        var l = newLogs[i];
-        var cls = 'log-entry ' + logClass(l.msg);
-        var t = l.time ? l.time.slice(11, 19) : '';
-        logsEl.innerHTML += '<div class="' + cls + '"><span class="time">' + t + '</span>' + esc(l.msg) + '</div>';
-    }
-    logsEl.scrollTop = logsEl.scrollHeight;
-    logsEl.style.display = 'block';
-}
-
-async function refreshPipelineStatus() {
-    try {
-        var res = await fetch(PIPE_URL + '/status');
-        var data = await res.json();
-        var statusEl = document.getElementById('pipeStatus');
-        var errorsEl = document.getElementById('pipeErrors');
-        if (!data.progress) { statusEl.style.display = 'none'; return; }
-
-        statusEl.style.display = 'flex';
-        var p = data.progress;
-        document.getElementById('pipePhase').textContent = p.phase || 'idle';
-        var pct = data.config && data.config.targetCount ? Math.min(100, Math.round((p.qualified / data.config.targetCount) * 100)) : 0;
-        document.getElementById('pipeFill').style.width = pct + '%';
-        document.getElementById('pipeCounts').textContent =
-            'Searched: ' + p.searched + ' | Parsed: ' + p.parsed + ' | Matched: ' + p.matched + ' | Qualified: ' + p.qualified + '/' + (data.config?.targetCount || '?');
-
-        if (data.running) {
-            document.getElementById('btnStartApi').style.display = 'none';
-            document.getElementById('btnStartFp').style.display = 'none';
-            document.getElementById('btnStop').style.display = 'inline-block';
-        } else {
-            document.getElementById('btnStartApi').style.display = 'inline-block';
-            document.getElementById('btnStartFp').style.display = 'inline-block';
-            document.getElementById('btnStop').style.display = 'none';
-        }
-
-        errorsEl.innerHTML = (p.errors || []).map(function(e) { return '<div class="error">' + esc(e) + '</div>'; }).join('');
-
-        // Render search activity logs
-        renderLogs(p.logs);
-    } catch {}
-}
+// Search is now handled entirely by Start Workflow + Global Settings config
 
 // ─── Action buttons ───
 async function genResume(jobUrl) {
@@ -2126,7 +1955,7 @@ async function refresh() {
                                 var retryData = await retry.json();
                                 render(retryData);
                                 document.getElementById('refresh').textContent = 'Auto-refresh: active (session switched)';
-                                refreshPipelineStatus();
+                                // pipeline status handled by workflow engine
                                 return;
                             }
                         }
@@ -2140,43 +1969,9 @@ async function refresh() {
     } catch (e) {
         document.getElementById('refresh').textContent = 'Auto-refresh: disconnected';
     }
-    refreshPipelineStatus();
 }
 
-// Load fingerprint environments for the env selector
-async function loadEnvs() {
-    try {
-        var res = await fetch(BASE_URL + '/api/envs');
-        if (!res.ok) return;
-        var envs = await res.json();
-        var field = document.getElementById('envIdField');
-        var sel = document.getElementById('cfgEnvId');
-        if (!field || !sel) return;
-        sel.innerHTML = '<option value="">-- select env --</option>';
-        for (var i = 0; i < envs.length; i++) {
-            var opt = document.createElement('option');
-            opt.value = envs[i].id;
-            opt.textContent = envs[i].name || envs[i].id;
-            sel.appendChild(opt);
-        }
-        var manualOpt = document.createElement('option');
-        manualOpt.value = 'manual'; manualOpt.textContent = 'Enter manually...';
-        sel.appendChild(manualOpt);
-        field.style.display = 'flex';
-        sel.onchange = function() {
-            if (sel.value === 'manual') {
-                var id = prompt('Enter fingerprint environment ID:');
-                if (id) {
-                    var o = document.createElement('option');
-                    o.value = id; o.textContent = id;
-                    sel.insertBefore(o, sel.lastElementChild);
-                    sel.value = id;
-                } else { sel.value = ''; }
-            }
-        };
-    } catch {}
-}
-loadEnvs();
+// Env selectors are handled by workflow grid platform env dropdowns
 
 // ─── Workflow Status Grid ───
 var _wfSessionId = ${JSON.stringify(encodedSid)};
