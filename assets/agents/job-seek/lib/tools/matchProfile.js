@@ -36,6 +36,9 @@ const TOOL_DEF = {
  */
 function extractSkillTokens(text) {
     if (!text) return [];
+    // Handle arrays (e.g. profile.skills is often ['React', 'Node.js', ...])
+    if (Array.isArray(text)) return text.map(s => String(s).trim().toLowerCase()).filter(Boolean);
+    if (typeof text !== 'string') text = String(text);
 
     // Split by common delimiters and clean up
     const raw = text
@@ -151,13 +154,13 @@ function handler({ profile, requirements, jobTitle, jobUrl }) {
 
     // Experience matching
     const expMatch = calculateExperienceMatch(
-        profile.experience || '',
-        sections.experience || ''
+        Array.isArray(profile.experience) ? profile.experience.join('; ') : String(profile.experience || ''),
+        Array.isArray(sections.experience) ? sections.experience.join('; ') : String(sections.experience || '')
     );
 
     // Education matching (simple keyword check)
-    const profileEdu = (profile.education || '').toLowerCase();
-    const reqEdu = (sections.education || '').toLowerCase();
+    const profileEdu = (Array.isArray(profile.education) ? profile.education.join(' ') : String(profile.education || '')).toLowerCase();
+    const reqEdu = (Array.isArray(sections.education) ? sections.education.join(' ') : String(sections.education || '')).toLowerCase();
     let eduScore = 50;
     let eduDetail = 'No education requirement specified';
     if (reqEdu) {

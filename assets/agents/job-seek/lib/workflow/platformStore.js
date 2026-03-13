@@ -83,11 +83,28 @@ function _saveToolScript(platformUrl, toolType, script, version) {
 }
 
 /**
- * Restore saved tool scripts onto a platform object (matched by URL).
+ * Restore saved tool scripts onto a platform object.
+ * Matches by exact URL first, then falls back to domain-based matching
+ * (e.g. ca.indeed.com matches saved script for www.indeed.com).
  */
 function _restoreTools(platform) {
     const cache = _loadToolCache();
-    const saved = cache[platform.url];
+    let saved = cache[platform.url];
+
+    // Fuzzy match: find a cached entry whose domain shares the same base
+    // e.g. ca.indeed.com/jobs → indeed.com, www.indeed.com → indeed.com
+    if (!saved) {
+        try {
+            const platHost = new URL(platform.url).hostname;
+            const platBase = platHost.split('.').slice(-2).join('.');
+            for (const [cachedUrl, cachedData] of Object.entries(cache)) {
+                const cachedHost = new URL(cachedUrl).hostname;
+                const cachedBase = cachedHost.split('.').slice(-2).join('.');
+                if (cachedBase === platBase) { saved = cachedData; break; }
+            }
+        } catch (_) { /* ignore parse errors */ }
+    }
+
     if (!saved) return;
 
     for (const toolType of ['search', 'apply']) {
@@ -98,6 +115,82 @@ function _restoreTools(platform) {
             console.log(`[platformStore] Restored ${toolType} tool for ${platform.name} (v${platform.tools[toolType].version})`);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Login status persistence
+// Keyed by platformUrl → { envId, verifiedAt }
+// Stored in the same data dir as tools.
+// ---------------------------------------------------------------------------
+
+const LOGIN_FILE = 'platform-login.json';
+
+function _loadLoginCache() {
+    try {
+        const filePath = path.join(_dataDir(), LOGIN_FILE);
+        if (!fs.existsSync(filePath)) return {};
+        return JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {};
+    } catch (_) {
+        return {};
+    }
+}
+
+/**
+ * Record that a platform+env login succeeded (cookies persisted in fingerprint browser).
+ * @param {string} platformUrl
+ * @param {string} envId
+ */
+function saveLoginStatus(platformUrl, envId) {
+    try {
+        const dir = _dataDir();
+        fs.mkdirSync(dir, { recursive: true });
+        const filePath = path.join(dir, LOGIN_FILE);
+
+        let data = {};
+        try { if (fs.existsSync(filePath)) data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {}; } catch (_) {}
+
+        data[platformUrl] = { envId, verifiedAt: new Date().toISOString() };
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+        console.log(`[platformStore] Saved login status for ${platformUrl} (env: ${envId})`);
+    } catch (err) {
+        console.error('[platformStore] Failed to save login status:', err.message);
+    }
+}
+
+/**
+ * Clear persisted login for a platform (e.g. when cookies expired).
+ * @param {string} platformUrl
+ */
+function clearLoginStatus(platformUrl) {
+    try {
+        const filePath = path.join(_dataDir(), LOGIN_FILE);
+        if (!fs.existsSync(filePath)) return;
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {};
+        delete data[platformUrl];
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+        console.log(`[platformStore] Cleared login status for ${platformUrl}`);
+    } catch (_) {}
+}
+
+/**
+ * Get persisted login info for a platform URL.
+ * @param {string} platformUrl
+ * @returns {{ envId: string, verifiedAt: string } | null}
+ */
+function getLoginStatus(platformUrl) {
+    const cache = _loadLoginCache();
+    return cache[platformUrl] || null;
+}
+
+/**
+ * Restore login status onto a platform object if previously verified.
+ * Returns the saved login info, or null.
+ */
+function _restoreLogin(platform) {
+    const saved = getLoginStatus(platform.url);
+    if (!saved) return null;
+    console.log(`[platformStore] Restored login for ${platform.name} (env: ${saved.envId}, verified: ${saved.verifiedAt})`);
+    return saved;
 }
 
 // ---------------------------------------------------------------------------
@@ -340,5 +433,8 @@ module.exports = {
     updateConnectionStatus,
     clearSession,
     getPresetsForRegion,
+    saveLoginStatus,
+    clearLoginStatus,
+    getLoginStatus,
     REGION_PRESETS
 };

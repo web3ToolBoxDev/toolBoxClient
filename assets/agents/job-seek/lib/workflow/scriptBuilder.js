@@ -195,15 +195,23 @@ async function buildTool(sessionId, platformId, toolType, options = {}) {
         buildLog.push(logEntry(1, `Loading ${platform.name} (${platform.url})`, 'running'));
         emitProgress(buildLog, onProgress);
 
-        // Reuse the logged-in env browser when available
+        // Reuse the logged-in env browser when available, with fallback if dead
         if (platform._browserId) {
-            browserId = platform._browserId;
-            reusedBrowser = true;
-            console.log(`[dashboard:build] Step 1 — Reusing logged-in browser ${browserId}, opening new tab...`);
-            const newTab = await toolCall('page_new', { browserId, url: platform.url, waitUntil: 'domcontentloaded' });
-            pageIndex = newTab.pageIndex !== undefined ? newTab.pageIndex : 0;
-            console.log(`[dashboard:build] Step 1 — New tab opened, pageIndex=${pageIndex}`);
-        } else {
+            console.log(`[dashboard:build] Step 1 — Reusing logged-in browser ${platform._browserId}, opening new tab...`);
+            try {
+                const newTab = await toolCall('page_new', { browserId: platform._browserId, url: platform.url, waitUntil: 'domcontentloaded' });
+                browserId = platform._browserId;
+                reusedBrowser = true;
+                pageIndex = newTab.pageIndex !== undefined ? newTab.pageIndex : 0;
+                console.log(`[dashboard:build] Step 1 — New tab opened, pageIndex=${pageIndex}`);
+            } catch (reuseErr) {
+                console.log(`[dashboard:build] Step 1 — Browser ${platform._browserId} is dead (${reuseErr.message}), falling back to fresh launch`);
+                delete platform._browserId;
+                delete platform._pageIndex;
+                // Fall through to fresh launch below
+            }
+        }
+        if (!browserId) {
             console.log(`[dashboard:build] Step 1 — No _browserId, launching fresh browser...`);
             const launchRes = await toolCall('browser_launch', { envId: platform.envId || undefined });
             browserId = launchRes.browserId;
@@ -388,9 +396,11 @@ The script will be executed inside an async function body that receives:
   - params: the input parameters object
 
 IMPORTANT — Available page methods (ONLY use these):
+
+  Basic:
   page.goto(url)                     — navigate to a URL
-  page.click(selector)               — click an element by CSS selector
-  page.type(selector, text, {delay}) — type text into an input
+  page.click(selector)               — click an element (use humanClick instead when possible)
+  page.type(selector, text, {delay}) — type text (use humanType instead when possible)
   page.focus(selector)               — focus an element
   page.keyboard.press(key)           — press a key ("Enter", "Tab", "Escape", etc.)
   page.waitForSelector(selector, {timeout, visible}) — wait for element to appear
@@ -400,10 +410,17 @@ IMPORTANT — Available page methods (ONLY use these):
   page.$eval(selector, fn, ...args)  — run JS on first matching element
   page.$$eval(selector, fn, ...args) — run JS on all matching elements
   page.$(selector)                   — check if element exists (returns selector string or null)
-  page.$$(selector)                  — get array of matching elements (array of placeholder objects with .length)
+  page.$$(selector)                  — get array of matching elements
   page.screenshot()                  — take a screenshot (returns base64)
   page.url()                         — get current page URL
   page.title()                       — get page title
+
+  Human-like (PREFERRED for anti-detection):
+  page.humanClick(selector)          — mouse moves to element with Bezier curve, then clicks
+  page.humanType(selector, text)     — click, clear via triple-click+Backspace, type with 80-220ms random delay
+  page.randomDelay(min, max)         — wait random ms between min and max
+  page.mouse.move(x, y, {steps})     — move mouse along curved path to coordinates
+  page.checkAntiBot({maxWait})       — detect Cloudflare/CAPTCHA, wait up to maxWait ms for resolution
 
 Return ONLY a JavaScript code block (no imports, no browser creation). The code must:
 1. Use \`page\` and \`params\` (do NOT require/import anything).
@@ -412,6 +429,9 @@ Return ONLY a JavaScript code block (no imports, no browser creation). The code 
 4. For apply: navigate to the job URL, fill form fields, submit.
 5. Wrap everything in try/catch and return { success: true, jobs: [...] } or { success: false, error: '...' }.
 6. Use page.evaluate() or page.$$eval() to extract data from the DOM — do NOT use page_extract directly.
+7. ANTI-DETECTION: Use page.humanClick() and page.humanType() instead of page.click()/page.type().
+   Add page.randomDelay(800, 2000) between major actions. Call page.checkAntiBot() after navigation.
+   NEVER use page.evaluate() to set input .value directly — always use page.humanType().
 
 DOM structure of the page:
 ${domSummary}
@@ -527,13 +547,26 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
     let reusedBrowser = false;
     try {
         let pageIndex;
-        // Reuse the logged-in env browser when available
+        // Reuse the logged-in env browser when available, with fallback if dead
         if (platform._browserId) {
-            browserId = platform._browserId;
-            reusedBrowser = true;
-            const newTab = await toolCall('page_new', { browserId, url: platform.url, waitUntil: 'domcontentloaded' });
-            pageIndex = newTab.pageIndex !== undefined ? newTab.pageIndex : 0;
-        } else {
+            try {
+                // Navigate on the existing login tab instead of opening a new tab.
+                // page_new triggers Cloudflare blocks on some sites; page_goto on an
+                // already-trusted tab preserves the session cookie context.
+                browserId = platform._browserId;
+                pageIndex = platform._pageIndex || 0;
+                reusedBrowser = true;
+                await toolCall('page_goto', { browserId, pageIndex, url: platform.url, waitUntil: 'domcontentloaded' });
+                console.log(`[search:exec] Navigated existing tab (pageIndex=${pageIndex}) to ${platform.url}`);
+            } catch (err) {
+                console.log(`[search:exec] Browser ${platform._browserId} is dead (${err.message}), falling back to fresh launch`);
+                browserId = null;
+                reusedBrowser = false;
+                delete platform._browserId;
+                delete platform._pageIndex;
+            }
+        }
+        if (!browserId) {
             const launchRes = await toolCall('browser_launch', { envId: options.envId || platform.envId || undefined });
             browserId = launchRes.browserId;
             const gotoRes = await toolCall('page_goto', { browserId, url: platform.url });
@@ -542,6 +575,25 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
 
         // Wait for dynamic content to render
         await new Promise(r => setTimeout(r, 3000));
+
+        // Check for anti-bot before running script
+        const blocked = await _detectAntiBot(browserId, pageIndex);
+        if (blocked) {
+            console.log(`[search:exec] Anti-bot detected before script: ${blocked}. Waiting up to 45s...`);
+            let resolved = false;
+            for (let i = 0; i < 15; i++) {
+                await new Promise(r => setTimeout(r, 3000));
+                const still = await _detectAntiBot(browserId, pageIndex);
+                if (!still) { resolved = true; break; }
+            }
+            if (!resolved) {
+                if (!reusedBrowser) {
+                    try { await toolCall('browser_close', { browserId }); } catch (_) {}
+                }
+                return { success: false, jobs: [], error: `Blocked by anti-bot: ${blocked}` };
+            }
+            console.log('[search:exec] Anti-bot cleared, proceeding with script.');
+        }
 
         // Build execution context — we create an AsyncFunction that receives `page` helpers and `params`
         // The script expects `page` (Puppeteer-like) and `params`. We bridge via toolServiceClient calls.
@@ -777,6 +829,103 @@ function buildPageProxy(browserId, pageIndex) {
         // -- Scroll --
         async scroll(direction) {
             return toolCall('page_scroll', { browserId, direction: direction || 'down' });
+        },
+
+        // ── Human-like helpers (anti-detection) ──
+
+        /**
+         * Random delay between min and max ms.
+         */
+        async randomDelay(min = 500, max = 2000) {
+            const ms = Math.floor(Math.random() * (max - min)) + min;
+            await new Promise(r => setTimeout(r, ms));
+        },
+
+        /**
+         * Mouse movement simulation via synthetic MouseEvent dispatch.
+         */
+        mouse: {
+            async move(x, y, opts = {}) {
+                const steps = opts.steps || 8;
+                const startX = Math.floor(Math.random() * 300);
+                const startY = Math.floor(Math.random() * 300);
+                const jitterX = Math.floor(Math.random() * 30 - 15);
+                const jitterY = Math.floor(Math.random() * 20 - 10);
+                await toolCall('page_evaluate', {
+                    browserId, pageIndex,
+                    expression: `(function(){
+                        var sX=${startX},sY=${startY},eX=${x},eY=${y},st=${steps},jX=${jitterX},jY=${jitterY};
+                        for(var i=0;i<=st;i++){
+                            var t=i/st;
+                            var cx=sX+(eX-sX)*t+Math.sin(t*Math.PI)*jX;
+                            var cy=sY+(eY-sY)*t+Math.cos(t*Math.PI)*jY;
+                            document.dispatchEvent(new MouseEvent('mousemove',{clientX:cx,clientY:cy,bubbles:true}));
+                        }
+                    })()`
+                });
+                await new Promise(r => setTimeout(r, 50 + Math.random() * 100));
+            }
+        },
+
+        /**
+         * Human-like click: move mouse to element center (with jitter) then click.
+         */
+        async humanClick(selector) {
+            try {
+                const res = await toolCall('page_evaluate', {
+                    browserId, pageIndex,
+                    expression: `(function(){
+                        var el=document.querySelector('${selector.replace(/'/g, "\\'")}');
+                        if(!el)return null;
+                        var r=el.getBoundingClientRect();
+                        return {x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height};
+                    })()`
+                });
+                const pos = res.result;
+                if (pos) {
+                    const offX = (Math.random() - 0.5) * pos.w * 0.3;
+                    const offY = (Math.random() - 0.5) * pos.h * 0.3;
+                    await proxy.mouse.move(pos.x + offX, pos.y + offY);
+                    await new Promise(r => setTimeout(r, 80 + Math.random() * 150));
+                }
+            } catch (_) { /* best-effort mouse movement */ }
+            return toolCall('page_click', { browserId, selector, pageIndex });
+        },
+
+        /**
+         * Human-like typing: click into field, clear via triple-click+Backspace, type with random delay.
+         */
+        async humanType(selector, text, opts = {}) {
+            await proxy.humanClick(selector);
+            await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
+            // Clear field using page_type clear:true
+            await toolCall('page_type', { browserId, selector, text: '', clear: true, pageIndex });
+            await new Promise(r => setTimeout(r, 100 + Math.random() * 200));
+            if (text) {
+                const delay = Math.floor(80 + Math.random() * 140); // 80-220ms avg
+                await toolCall('page_type', { browserId, selector, text, delay, pageIndex });
+            }
+        },
+
+        /**
+         * Detect Cloudflare / CAPTCHA / anti-bot pages.
+         * Polls until resolved or maxWait exceeded.
+         * @returns {{blocked: boolean}}
+         * @throws if still blocked after maxWait
+         */
+        async checkAntiBot(opts = {}) {
+            const maxWait = opts.maxWait || 45000;
+            const pollInterval = opts.pollInterval || 3000;
+            const startTime = Date.now();
+            while (true) {
+                const blocked = await _detectAntiBot(browserId, pageIndex);
+                if (!blocked) return { blocked: false };
+                if (Date.now() - startTime > maxWait) {
+                    throw new Error(`Anti-bot: ${blocked}. Timed out after ${Math.round(maxWait / 1000)}s.`);
+                }
+                console.log(`[pageProxy] Anti-bot detected: ${blocked}. Waiting for resolution...`);
+                await new Promise(r => setTimeout(r, pollInterval));
+            }
         }
     };
 

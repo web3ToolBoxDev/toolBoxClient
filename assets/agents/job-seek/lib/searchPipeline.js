@@ -13,11 +13,73 @@ const { handler: parseListingHandler } = require('./tools/parseListing');
 const { handler: matchProfileHandler } = require('./tools/matchProfile');
 const { handler: resumeGenHandler } = require('./tools/resumeGen');
 const { handler: coverLetterHandler } = require('./tools/coverLetter');
+const { handler: mockInterviewHandler } = require('./tools/mockInterview');
 const { getSourcesForLocation } = require('./sources/locationSources');
 const dashboardServer = require('./dashboardServer');
 
+// Lazy-loaded to avoid circular deps
+let _scriptBuilder = null;
+function getScriptBuilder() {
+    if (!_scriptBuilder) _scriptBuilder = require('./workflow/scriptBuilder');
+    return _scriptBuilder;
+}
+let _platformStore = null;
+function getPlatformStore() {
+    if (!_platformStore) _platformStore = require('./workflow/platformStore');
+    return _platformStore;
+}
+let _platformService = null;
+function getPlatformService() {
+    if (!_platformService) _platformService = require('./workflow/platformService');
+    return _platformService;
+}
+
 // Active pipeline runs: sessionId → PipelineState
 const _pipelines = new Map();
+
+// Source name → platform URL pattern mapping
+const SOURCE_URL_PATTERNS = {
+    indeed:   /indeed\./i,
+    linkedin: /linkedin\./i,
+    jobbank:  /jobbank/i,
+    google:   /google\./i,
+    glassdoor: /glassdoor\./i,
+    seek:     /seek\.com/i,
+    reed:     /reed\.co/i,
+    stepstone: /stepstone/i,
+    naukri:   /naukri\./i,
+    boss:     /zhipin\./i,
+    lagou:    /lagou\./i
+};
+
+/**
+ * Build a map of source → platform for platforms with ready search tools.
+ * @param {string} sessionId
+ * @param {string[]} selectedPlatformIds - Platform IDs selected in workflow editor (empty = all)
+ * @returns {Object<string, {id, name, url}>}
+ */
+function _buildPlatformToolMap(sessionId, selectedPlatformIds) {
+    const map = {};
+    try {
+        const platforms = getPlatformStore().getPlatforms(sessionId);
+        for (const p of platforms) {
+            // If user selected specific platforms, filter
+            if (selectedPlatformIds.length > 0 && !selectedPlatformIds.includes(p.id)) continue;
+            // Only use platforms with ready search tools
+            if (!p.tools || !p.tools.search || p.tools.search.status !== 'ready') continue;
+            // Map to source name by URL pattern
+            for (const [source, pattern] of Object.entries(SOURCE_URL_PATTERNS)) {
+                if (pattern.test(p.url || '')) {
+                    map[source] = { id: p.id, name: p.name, url: p.url };
+                    break;
+                }
+            }
+        }
+    } catch (err) {
+        console.error('[searchPipeline] Error building platform tool map:', err.message);
+    }
+    return map;
+}
 
 /**
  * Generate search queries based on user's direction (job title, location, skills).
@@ -35,7 +97,8 @@ function buildSearchQueries(direction, profile, options = {}) {
     const queries = [];
     const jobTitle = direction.q_job_title || direction.jobTitle || '';
     const location = direction.q_location || direction.location || '';
-    const skills = (profile.skills || '').split(/[,，\n]/).map(s => s.trim()).filter(Boolean).slice(0, 3);
+    const rawSkills = profile.skills || '';
+    const skills = (Array.isArray(rawSkills) ? rawSkills : rawSkills.split(/[,，\n]/)).map(s => String(s).trim()).filter(Boolean).slice(0, 3);
 
     if (!jobTitle) return queries;
 
@@ -88,7 +151,8 @@ function startPipeline(sessionId, config, direction, profile) {
             minScore: config.minScore || 60,
             targetCount: config.targetCount || 10,
             maxResults: config.maxResults || 30,
-            envId: config.envId || null
+            envId: config.envId || null,
+            platforms: config.platforms || []   // platform IDs from workflow editor
         },
         direction,
         profile,
@@ -151,29 +215,140 @@ async function _runPipeline(sessionId) {
         return;
     }
 
-    // Phase 1: Search
+    // Phase 1: Search — uses platform tool scripts only (no API fallback)
     pipeline.progress.phase = 'searching';
     const allListings = [];
     const seenUrls = new Set();
 
+    // Resolve available platform tools for search
+    const platformToolMap = _buildPlatformToolMap(sessionId, config.platforms || []);
+    if (Object.keys(platformToolMap).length > 0) {
+        _log(`Platform tools available: ${Object.entries(platformToolMap).map(([src, p]) => `${src}→${p.name}`).join(', ')}`);
+    }
+
+    // ── Pre-search validation: verify browser & login for each platform ──
+    const _checkedPlatforms = new Set();
+    const _blockedSources = new Set();
+
+    for (const [source, pt] of Object.entries(platformToolMap)) {
+        if (_checkedPlatforms.has(pt.id)) continue;
+        _checkedPlatforms.add(pt.id);
+
+        const platform = getPlatformStore().getPlatform(sessionId, pt.id);
+        if (!platform) {
+            _log(`⚠ [${source}] Platform "${pt.name}" not found — skipping`);
+            _blockedSources.add(source);
+            continue;
+        }
+
+        // Check 1: Browser open?
+        if (!platform._browserId) {
+            _log(`⚠ [${source}] No browser open for "${pt.name}" — cannot search`);
+            dashboardServer.updatePlatformCell(sessionId, pt.id, {
+                cell: 'login', status: 'error',
+                message: 'Browser not open. Launch login first.'
+            });
+            _blockedSources.add(source);
+            continue;
+        }
+
+        // Check 2: Login verified?
+        try {
+            const loginResult = await getPlatformService().verifyLogin(sessionId, pt.id);
+            if (loginResult.status === 'not_logged_in' || loginResult.status === 'no_browser') {
+                _log(`⚠ [${source}] Not logged in on "${pt.name}" — cannot search`);
+                dashboardServer.updatePlatformCell(sessionId, pt.id, {
+                    cell: 'login', status: 'error',
+                    message: 'Not logged in. Please login first.'
+                });
+                _blockedSources.add(source);
+                continue;
+            }
+            if (loginResult.status === 'logged_in') {
+                _log(`✓ [${source}] Login verified on "${pt.name}"`);
+            } else {
+                _log(`? [${source}] Login status unknown on "${pt.name}" — proceeding anyway`);
+            }
+        } catch (err) {
+            _log(`⚠ [${source}] Login check failed for "${pt.name}": ${err.message}`);
+        }
+    }
+
+    if (_blockedSources.size > 0 && Object.keys(platformToolMap).length > 0) {
+        const allBlocked = Object.keys(platformToolMap).every(s => _blockedSources.has(s));
+        if (allBlocked) {
+            _log('ERROR: All platform sources are blocked (browser not open or not logged in). Aborting search.');
+            pipeline.progress.errors.push('All platforms blocked — browser not open or not logged in');
+            _finishPipeline(sessionId, 'error');
+            return;
+        }
+    }
+
+    const _failedSources = new Set(); // Track sources that failed — skip subsequent queries
+
     for (const q of queries) {
         if (!pipeline.running) break; // Check for stop signal
 
-        _log(`Searching [${q.source}] "${q.query}" @ ${q.location || 'remote'}${q.envId ? ' (fingerprint)' : ''}...`);
+        const platformTool = platformToolMap[q.source];
+
+        // Skip blocked sources (pre-search validation failed)
+        if (platformTool && _blockedSources.has(q.source)) {
+            _log(`⊘ [${q.source}] Skipped — browser/login not ready`);
+            continue;
+        }
+
+        // Skip sources that already failed (fail-fast: don't retry same platform)
+        if (_failedSources.has(q.source)) {
+            _log(`⊘ [${q.source}] Skipped — previous query on this source failed`);
+            continue;
+        }
+
+        const method = platformTool ? 'platform tool' : 'skip (no tool)';
+        _log(`Searching [${q.source}] "${q.query}" @ ${q.location || 'remote'} via ${method}...`);
 
         try {
-            const result = await jobSearchHandler({
-                query: q.query,
-                location: q.location,
-                maxResults: Math.ceil(config.maxResults / queries.length),
-                source: q.source,
-                envId: q.envId
-            });
+            let listings = [];
 
-            const newCount = (result.listings || []).filter(l => l.url && !seenUrls.has(l.url)).length;
-            _log(`[${q.source}] Found ${(result.listings || []).length} results (${newCount} new) via ${result.source || q.source}`);
+            if (platformTool) {
+                // Use the persisted platform search script
+                const scriptResult = await getScriptBuilder().executeSearchScript(
+                    sessionId,
+                    platformTool.id,
+                    { keywords: q.query, location: q.location },
+                    { envId: q.envId || config.envId, maxResults: Math.ceil(config.maxResults / queries.length) }
+                );
+                if (scriptResult.success && scriptResult.jobs) {
+                    listings = scriptResult.jobs.map(j => ({
+                        title: j.title || '',
+                        company: j.company || '',
+                        location: j.location || q.location || '',
+                        url: j.url || j.link || '',
+                        salary: j.salary || '',
+                        source: q.source
+                    }));
+                    _log(`[${q.source}] Platform tool returned ${listings.length} results`);
+                } else {
+                    // Platform tool failed — do NOT fall back to API.
+                    // Mark login cell as error and skip all subsequent queries for this source.
+                    const errMsg = scriptResult.error || 'unknown error';
+                    _log(`✗ [${q.source}] Platform tool failed: ${errMsg}`);
+                    _failedSources.add(q.source);
+                    dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                        cell: 'login', status: 'error',
+                        message: 'Search failed: ' + errMsg
+                    });
+                    pipeline.progress.errors.push(`[${q.source}] Search tool failed: ${errMsg}`);
+                }
+            } else {
+                // No platform tool available for this source — skip silently
+                _log(`[${q.source}] No platform tool available — skipped`);
+                continue;
+            }
 
-            for (const listing of (result.listings || [])) {
+            const newCount = listings.filter(l => l.url && !seenUrls.has(l.url)).length;
+            _log(`[${q.source}] Found ${listings.length} results (${newCount} new)`);
+
+            for (const listing of listings) {
                 if (listing.url && !seenUrls.has(listing.url)) {
                     seenUrls.add(listing.url);
                     allListings.push(listing);
@@ -360,6 +535,34 @@ async function generateCoverLetter(sessionId, jobUrl, profile) {
 }
 
 /**
+ * Generate interview prep questions for a specific job.
+ */
+async function generateInterviewPrep(sessionId, jobUrl, profile) {
+    const cards = dashboardServer.getJobCards(sessionId);
+    const job = cards.find(c => c.url === jobUrl);
+    if (!job) return { error: 'Job not found' };
+
+    try {
+        const result = mockInterviewHandler({
+            action: 'generate',
+            profile,
+            jobTitle: job.title,
+            requirements: job.artifacts?.requirements || {},
+            count: 5
+        });
+
+        dashboardServer.upsertJobCard(sessionId, {
+            url: jobUrl,
+            artifacts: { interviewPrep: result.questions ? 'generated' : null }
+        });
+
+        return { success: true, questions: result.questions, job };
+    } catch (err) {
+        return { error: err.message };
+    }
+}
+
+/**
  * Mark a job as applied.
  */
 function markApplied(sessionId, jobUrl, note) {
@@ -385,6 +588,7 @@ module.exports = {
     getPipelineStatus,
     generateResume,
     generateCoverLetter,
+    generateInterviewPrep,
     markApplied,
     getHistory,
     buildSearchQueries
