@@ -2036,6 +2036,12 @@ function getDashboardData(sessionId) {
     //     console.log(`[dashboard:data] session=${sessionId.slice(0, 12)} | EMPTY`);
     // }
 
+    // Environment binding info
+    const runtimeCtx = state.runtimeContexts?.[sessionId] || {};
+    const boundEnvIds = Array.isArray(runtimeCtx.envIds) ? runtimeCtx.envIds : [];
+    const boundEnvs = Array.isArray(runtimeCtx.envs) ? runtimeCtx.envs : [];
+    const envNames = boundEnvs.map(e => e.name || e.id || e._id).filter(Boolean);
+
     return {
         sessionId,
         direction: {
@@ -2050,6 +2056,11 @@ function getDashboardData(sessionId) {
             experience: sections.experience || '',
             education: sections.education || '',
             highlights: sections.highlights || ''
+        },
+        env: {
+            bound: boundEnvIds.length > 0,
+            envIds: boundEnvIds,
+            envNames: envNames
         },
         subtasks: subtasks.map(t => ({ key: t.key, status: t.status })),
         intentVersion: intent?.version || 1,
@@ -2075,6 +2086,12 @@ function buildDashboardHTML(sessionId) {
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1b2e; color: #dfe3ff; padding: 2rem; margin: 0; }
   h1 { color: #8b9aff; border-bottom: 2px solid #2d2f4a; padding-bottom: 0.5rem; }
   h2 { color: #6a7eff; margin-top: 2rem; }
+  .env-banner { border-radius: 8px; padding: 0.8rem 1.2rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.75rem; font-size: 0.9rem; }
+  .env-banner--ok { background: #1a3a2a; border: 1px solid #2d6b45; color: #7dd3a8; }
+  .env-banner--warn { background: #3a2a1a; border: 1px solid #6b5a2d; color: #f0c060; }
+  .env-banner__icon { font-size: 1.2rem; flex-shrink: 0; }
+  .env-banner__text { flex: 1; }
+  .env-banner__names { font-weight: 600; color: #dfe3ff; }
   .meta { color: #7a7fa8; font-size: 0.8rem; margin-top: 0.5rem; }
   .card { background: #242640; border: 1px solid #2d2f4a; border-radius: 8px; padding: 1.2rem; margin-bottom: 1rem; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
@@ -2326,6 +2343,8 @@ function buildDashboardHTML(sessionId) {
   <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openAddWebsite()" data-i18n="addWebsite">+ Add Website</button>
   <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" id="langToggle" onclick="switchLang(_lang === 'en' ? 'zh-CN' : 'en'); this.textContent = _lang === 'en' ? '中文' : 'EN';">中文</button>
 </div>
+
+<div id="envBanner"></div>
 
 <h2 data-i18n="direction">Direction</h2>
 <div class="card">
@@ -2603,6 +2622,7 @@ let _sessionChecked = false;
 // ─── i18n ───
 var _i18n = {
     en: {
+        envBound: 'Environment bound', envNotBound: 'No browser environment bound. Please go to AI Panel → Runtime Settings → Bind an environment to enable login and search.',
         direction: 'Direction', profile: 'Profile', workflowProgress: 'Workflow Progress',
         workflowGrid: 'Workflow Grid',
         statsOverview: 'Stats Overview', applicationPipeline: 'Application Pipeline', jobRecords: 'Job Records',
@@ -2640,6 +2660,7 @@ var _i18n = {
         wfeMaxResultsHint: 'Max jobs to fetch per platform before moving to next'
     },
     'zh-CN': {
+        envBound: '已绑定浏览器环境', envNotBound: '未绑定浏览器环境。请前往 AI 面板 → 运行时设置 → 绑定环境，以启用登录和搜索功能。',
         direction: '求职方向', profile: '个人资料', workflowProgress: '工作流进度',
         workflowGrid: '工作流网格',
         statsOverview: '统计概览', applicationPipeline: '申请流水线', jobRecords: '职位记录',
@@ -2871,6 +2892,21 @@ async function refreshHistory() {
 }
 
 function render(data) {
+    // Environment binding banner
+    var envBanner = document.getElementById('envBanner');
+    var env = data.env || {};
+    if (env.bound) {
+        envBanner.innerHTML = '<div class="env-banner env-banner--ok">' +
+            '<span class="env-banner__icon">✓</span>' +
+            '<span class="env-banner__text">' + t('envBound') + ': <span class="env-banner__names">' + esc((env.envNames || []).join(', ')) + '</span></span>' +
+            '</div>';
+    } else {
+        envBanner.innerHTML = '<div class="env-banner env-banner--warn">' +
+            '<span class="env-banner__icon">⚠</span>' +
+            '<span class="env-banner__text">' + t('envNotBound') + '</span>' +
+            '</div>';
+    }
+
     var d = data.direction || {};
     document.getElementById('direction').innerHTML =
         renderItem('Job Title', d.jobTitle) +
