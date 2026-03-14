@@ -499,6 +499,96 @@ function start(getState, port) {
             return;
         }
 
+        // POST /api/pipeline/:sessionId/apply — trigger batch auto-apply
+        const batchApplyMatch = url.match(/^\/api\/pipeline\/(.+)\/apply$/);
+        if (batchApplyMatch && req.method === 'POST') {
+            const sessionId = decodeURIComponent(batchApplyMatch[1]);
+            _readBody(req, async (data) => {
+                try {
+                    const applyStep = require('./workflow/steps/apply');
+                    const state = _stateGetter ? _stateGetter() : {};
+                    const sections = state.profileSections?.[sessionId] || {};
+                    const config = state.workflowConfigs?.[sessionId] || {};
+
+                    // Override jobIds if provided in request body
+                    const applyConfig = { ...config };
+                    if (data.jobUrls?.length > 0) {
+                        const steps = (applyConfig.steps || []).map(s =>
+                            s.name === 'apply' ? { ...s, jobIds: data.jobUrls } : s
+                        );
+                        applyConfig.steps = steps;
+                    }
+
+                    const result = await applyStep.execute({
+                        sessionId,
+                        config: applyConfig,
+                        context: { profile: sections, direction: state.directions?.[sessionId] }
+                    });
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // POST /api/pipeline/:sessionId/apply-single/:encodedJobUrl — trigger single job apply
+        const singleApplyMatch = url.match(/^\/api\/pipeline\/([^/]+)\/apply-single\/(.+)$/);
+        if (singleApplyMatch && req.method === 'POST') {
+            const sessionId = decodeURIComponent(singleApplyMatch[1]);
+            const jobUrl = decodeURIComponent(singleApplyMatch[2]);
+            _readBody(req, async () => {
+                try {
+                    const applyStep = require('./workflow/steps/apply');
+                    const state = _stateGetter ? _stateGetter() : {};
+                    const sections = state.profileSections?.[sessionId] || {};
+                    const config = state.workflowConfigs?.[sessionId] || {};
+
+                    // Force single job
+                    const applyConfig = { ...config };
+                    applyConfig.steps = (applyConfig.steps || []).map(s =>
+                        s.name === 'apply' ? { ...s, jobIds: [jobUrl], maxApplyPerRun: 1 } : s
+                    );
+
+                    const result = await applyStep.execute({
+                        sessionId,
+                        config: applyConfig,
+                        context: { profile: sections, direction: state.directions?.[sessionId] }
+                    });
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // GET /api/pipeline/:sessionId/apply-screenshot/:encodedJobUrl — get apply screenshot
+        const applySSMatch = url.match(/^\/api\/pipeline\/([^/]+)\/apply-screenshot\/(.+)$/);
+        if (applySSMatch && req.method === 'GET') {
+            const sessionId = decodeURIComponent(applySSMatch[1]);
+            const jobUrl = decodeURIComponent(applySSMatch[2]);
+            const cards = getJobCards(sessionId);
+            const job = cards.find(c => c.url === jobUrl);
+            const screenshot = job?.artifacts?.applyScreenshot;
+            if (!screenshot) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ error: 'No apply screenshot available' }));
+            }
+            const imgBuf = Buffer.from(screenshot, 'base64');
+            res.writeHead(200, {
+                'Content-Type': 'image/png',
+                'Content-Length': imgBuf.length,
+                'Cache-Control': 'no-cache'
+            });
+            res.end(imgBuf);
+            return;
+        }
+
         // POST /api/pipeline/:sessionId/generate-interview-prep — generate interview prep
         const genPrepMatch = url.match(/^\/api\/pipeline\/(.+)\/generate-interview-prep$/);
         if (genPrepMatch && req.method === 'POST') {
@@ -3768,5 +3858,7 @@ module.exports = {
     // Platform workflow status
     updatePlatformCell, getWorkflowStatus, computeCellVisual,
     // Pipeline progress
-    updatePipelineProgress
+    updatePipelineProgress,
+    // SSE broadcaster (for apply step + external modules)
+    _getSSEBroadcaster: () => _broadcastSSE
 };

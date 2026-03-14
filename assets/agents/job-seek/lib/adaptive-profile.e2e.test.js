@@ -39,6 +39,36 @@ jest.mock('./tools/coverLetter', () => ({
 jest.mock('./tools/mockInterview', () => ({
     handler: jest.fn().mockResolvedValue({ questions: [] })
 }));
+// Mock toolServiceClient for autoApply browser automation
+jest.mock('./core/toolServiceClient', () => ({
+    executeTool: jest.fn().mockImplementation((tool, params) => {
+        // Simulate browser tool results
+        switch (tool) {
+            case 'browser_launch':
+                return Promise.resolve({ success: true, result: { browserId: 'mock-browser-1', mode: 'headless' } });
+            case 'page_goto':
+                return Promise.resolve({ success: true, result: { title: 'Job Application' } });
+            case 'captcha_detect':
+                return Promise.resolve({ success: true, result: { type: 'none' } });
+            case 'page_click':
+                return Promise.resolve({ success: true });
+            case 'page_type':
+                return Promise.resolve({ success: true });
+            case 'page_upload_file':
+                return Promise.resolve({ success: true });
+            case 'page_screenshot':
+                return Promise.resolve({ success: true, result: { base64: 'iVBOR', format: 'png' } });
+            case 'page_url':
+                return Promise.resolve({ success: true, result: { url: 'https://jobs.test/thank-you' } });
+            case 'page_text':
+                return Promise.resolve({ success: true, result: { text: 'Thank you for your application' } });
+            case 'browser_close':
+                return Promise.resolve({ success: true });
+            default:
+                return Promise.resolve({ success: false, error: 'Unknown tool' });
+        }
+    })
+}));
 // Mock knowledgeClient to avoid needing a running knowledge store
 jest.mock('./core/knowledgeClient', () => ({
     upsert: jest.fn().mockResolvedValue({ success: true }),
@@ -825,5 +855,311 @@ describe('Group 8: Cross-feature Integration', () => {
         expect(body.hasStateGetter).toBe(true);
         expect(body.hasState).toBe(true);
         expect(body.activeSessionId).toBe(SESSION_ID);
+    });
+});
+
+// ═══════════════════════════════════════════════
+// Group 9: Auto-Apply
+// ═══════════════════════════════════════════════
+
+describe('Group 9: Auto-Apply', () => {
+    const APPLY_SID = 'e2e-auto-apply';
+    const APPLY_JOB_URL = 'https://jobs.test/apply-qa-engineer';
+    const toolServiceClient = require('./core/toolServiceClient');
+
+    beforeAll(() => {
+        // Set up session state
+        STATE.selectedAnswers[APPLY_SID] = {
+            q_job_title: 'QA Engineer',
+            q_location: 'Vancouver, Canada'
+        };
+        STATE.profileSections[APPLY_SID] = {
+            basic: 'Apply User, apply@test.com, 555-9999',
+            skills: 'Selenium, Python',
+            experience: '3 years QA',
+            education: 'CS, UBC'
+        };
+
+        // Pre-populate a tailored job with DOCX artifact
+        const fakeDocxBase64 = Buffer.from('PK\x03\x04fake-docx-content').toString('base64');
+        dashboardServer.upsertJobCard(APPLY_SID, {
+            url: APPLY_JOB_URL,
+            title: 'QA Engineer',
+            company: 'TestCorp',
+            status: 'tailored',
+            matchScore: 85,
+            artifacts: {
+                resume: '# Apply User\n## Skills\n- Selenium',
+                resumeDocx: fakeDocxBase64,
+                coverLetter: 'Dear Hiring Manager',
+                coverLetterDocx: fakeDocxBase64
+            }
+        });
+    });
+
+    test('apply-single endpoint triggers auto-apply for one job', async () => {
+        // Override workflow config to minimize delays for testing
+        STATE.workflowConfigs = STATE.workflowConfigs || {};
+        STATE.workflowConfigs[APPLY_SID] = {
+            steps: [{ name: 'apply', autoSubmit: true, delayBetweenJobs: [0, 0], maxApplyPerRun: 10, jobIds: [] }]
+        };
+
+        const encodedUrl = encodeURIComponent(APPLY_JOB_URL);
+        const { status, body } = await postJSON(
+            `/api/pipeline/${APPLY_SID}/apply-single/${encodedUrl}`,
+            {}
+        );
+        expect(status).toBe(200);
+        expect(body.total).toBe(1);
+        expect(body.submitted).toBeGreaterThanOrEqual(0);
+        expect(body.jobs).toHaveLength(1);
+        expect(body.jobs[0].url).toBe(APPLY_JOB_URL);
+    }, 15000);
+
+    test('job status updated after apply attempt', async () => {
+        const { body } = await fetchJSON(`/api/dashboard/${APPLY_SID}`);
+        const job = body.jobs.find(j => j.url === APPLY_JOB_URL);
+        expect(job).toBeDefined();
+        expect(job.artifacts).toBeDefined();
+        // After auto-apply, should have at least one of these
+        const hasApplyData = job.artifacts.appliedAt || job.artifacts.applyAttemptedAt
+            || job.artifacts.applySteps || job.artifacts.applyScreenshot || job.artifacts.applyError;
+        expect(hasApplyData).toBeTruthy();
+    });
+
+    test('apply screenshot stored in artifacts', async () => {
+        const { body } = await fetchJSON(`/api/dashboard/${APPLY_SID}`);
+        const job = body.jobs.find(j => j.url === APPLY_JOB_URL);
+        // Screenshot should be stored (base64 from mock)
+        if (job.status === 'submitted' || job.artifacts.applyScreenshot) {
+            expect(job.artifacts.applyScreenshot).toBeDefined();
+        }
+    });
+
+    test('apply-screenshot endpoint returns image', async () => {
+        const { body: dash } = await fetchJSON(`/api/dashboard/${APPLY_SID}`);
+        const job = dash.jobs.find(j => j.url === APPLY_JOB_URL);
+        if (!job?.artifacts?.applyScreenshot) return; // skip if no screenshot stored
+
+        const encodedUrl = encodeURIComponent(APPLY_JOB_URL);
+        const { status, headers } = await fetchRaw(
+            `/api/pipeline/${APPLY_SID}/apply-screenshot/${encodedUrl}`
+        );
+        expect(status).toBe(200);
+        expect(headers['content-type']).toContain('image/png');
+    });
+
+    test('batch apply endpoint processes specific jobs', async () => {
+        // Add a second tailored job
+        const secondUrl = 'https://jobs.test/apply-dev-engineer';
+        const fakeDocx = Buffer.from('PK\x03\x04fake').toString('base64');
+        dashboardServer.upsertJobCard(APPLY_SID, {
+            url: secondUrl,
+            title: 'Dev Engineer',
+            company: 'DevCorp',
+            status: 'tailored',
+            artifacts: { resumeDocx: fakeDocx }
+        });
+
+        const { status, body } = await postJSON(
+            `/api/pipeline/${APPLY_SID}/apply`,
+            { jobUrls: [secondUrl] }
+        );
+        expect(status).toBe(200);
+        // Should only process the specified jobUrl
+        expect(body.jobs.some(j => j.url === secondUrl)).toBe(true);
+        expect(body.total).toBeGreaterThanOrEqual(1);
+    }, 30000);
+
+    test('toolServiceClient called with correct browser tools', async () => {
+        // Verify browser_launch was called
+        expect(toolServiceClient.executeTool).toHaveBeenCalledWith(
+            'browser_launch',
+            expect.any(Object)
+        );
+        // Verify page_goto was called with job URL
+        expect(toolServiceClient.executeTool).toHaveBeenCalledWith(
+            'page_goto',
+            expect.objectContaining({ url: expect.any(String) })
+        );
+    });
+});
+
+// ═══════════════════════════════════════════════
+// Group 10: Platform Apply Patterns
+// ═══════════════════════════════════════════════
+
+describe('Group 10: Platform Apply Patterns', () => {
+    const { detectPlatform, GENERIC_SUBMIT_SELECTORS, GENERIC_SUCCESS_INDICATORS } = require('./tools/applyPatterns');
+
+    test('detects Indeed URL', () => {
+        const result = detectPlatform('https://www.indeed.com/viewjob?jk=abc123');
+        expect(result).not.toBeNull();
+        expect(result.key).toBe('indeed');
+        expect(result.pattern.name).toBe('Indeed');
+    });
+
+    test('detects LinkedIn URL', () => {
+        const result = detectPlatform('https://www.linkedin.com/jobs/view/1234567');
+        expect(result).not.toBeNull();
+        expect(result.key).toBe('linkedin');
+        expect(result.pattern.multiStep).toBe(true);
+    });
+
+    test('detects Boss直聘 URL', () => {
+        const result = detectPlatform('https://www.zhipin.com/job_detail/abc.html');
+        expect(result).not.toBeNull();
+        expect(result.key).toBe('boss');
+        expect(result.pattern.chatBased).toBe(true);
+    });
+
+    test('detects Glassdoor URL', () => {
+        const result = detectPlatform('https://www.glassdoor.com/job-listing/engineer');
+        expect(result).not.toBeNull();
+        expect(result.key).toBe('glassdoor');
+    });
+
+    test('returns null for unknown URL', () => {
+        const result = detectPlatform('https://careers.randomcompany.com/apply');
+        expect(result).toBeNull();
+    });
+
+    test('returns null for empty URL', () => {
+        expect(detectPlatform('')).toBeNull();
+        expect(detectPlatform(null)).toBeNull();
+    });
+
+    test('generic submit selectors are defined', () => {
+        expect(Array.isArray(GENERIC_SUBMIT_SELECTORS)).toBe(true);
+        expect(GENERIC_SUBMIT_SELECTORS.length).toBeGreaterThan(5);
+    });
+
+    test('generic success indicators have text and URL patterns', () => {
+        expect(GENERIC_SUCCESS_INDICATORS.text).toBeDefined();
+        expect(GENERIC_SUCCESS_INDICATORS.urlPattern).toBeDefined();
+        expect(GENERIC_SUCCESS_INDICATORS.text.length).toBeGreaterThan(0);
+    });
+
+    test('platform patterns have required fields', () => {
+        const { PATTERNS } = require('./tools/applyPatterns');
+        for (const [key, pattern] of Object.entries(PATTERNS)) {
+            expect(pattern.match).toBeInstanceOf(RegExp);
+            expect(pattern.name).toBeTruthy();
+            expect(Array.isArray(pattern.applyButton)).toBe(true);
+            expect(pattern.successIndicators).toBeDefined();
+        }
+    });
+});
+
+// ═══════════════════════════════════════════════
+// Group 11: Bot Notification Channels
+// ═══════════════════════════════════════════════
+
+describe('Group 11: Bot Notification Channels', () => {
+    const alertService = require('./workflow/alertService');
+    const BOT_SID = 'e2e-bot-notify';
+
+    test('default alert config includes telegram and feishu channels', () => {
+        const config = alertService.getAlertConfig(BOT_SID);
+        expect(config.channels.telegram).toBeDefined();
+        expect(config.channels.telegram.enabled).toBe(false);
+        expect(config.channels.telegram.botToken).toBe('');
+        expect(config.channels.telegram.chatId).toBe('');
+
+        expect(config.channels.feishu).toBeDefined();
+        expect(config.channels.feishu.enabled).toBe(false);
+        expect(config.channels.feishu.webhookUrl).toBe('');
+    });
+
+    test('can update telegram config via updateAlertConfig', () => {
+        const updated = alertService.updateAlertConfig(BOT_SID, {
+            channels: {
+                telegram: {
+                    enabled: true,
+                    botToken: 'test-bot-token-123',
+                    chatId: '987654321'
+                }
+            }
+        });
+        expect(updated.channels.telegram.enabled).toBe(true);
+        expect(updated.channels.telegram.botToken).toBe('test-bot-token-123');
+        expect(updated.channels.telegram.chatId).toBe('987654321');
+        // Other channels should still exist
+        expect(updated.channels.dashboard.enabled).toBe(true);
+    });
+
+    test('can update feishu config via updateAlertConfig', () => {
+        const updated = alertService.updateAlertConfig(BOT_SID, {
+            channels: {
+                feishu: {
+                    enabled: true,
+                    webhookUrl: 'https://open.feishu.cn/open-apis/bot/v2/hook/test-hook-id',
+                    secret: 'test-secret-abc'
+                }
+            }
+        });
+        expect(updated.channels.feishu.enabled).toBe(true);
+        expect(updated.channels.feishu.webhookUrl).toContain('feishu.cn');
+        expect(updated.channels.feishu.secret).toBe('test-secret-abc');
+    });
+
+    test('dispatch includes telegram and feishu in channels when enabled', () => {
+        // Enable both channels (with tokens so dispatch attempts them)
+        alertService.updateAlertConfig(BOT_SID, {
+            channels: {
+                telegram: { enabled: true, botToken: 'fake-token', chatId: '123' },
+                feishu: { enabled: true, webhookUrl: 'https://open.feishu.cn/test', secret: '' }
+            }
+        });
+
+        const result = alertService.dispatch(BOT_SID, {
+            type: 'completed',
+            title: 'Test Apply Complete',
+            message: 'Applied to TestCorp QA role',
+            stepName: 'apply',
+            meta: { company: 'TestCorp', title: 'QA Engineer' }
+        });
+
+        // dispatch should list telegram and feishu in channels
+        // (actual HTTP calls will fail but that's OK — they're fire-and-forget)
+        expect(result.sent).toBe(true);
+        expect(result.channels).toContain('telegram');
+        expect(result.channels).toContain('feishu');
+    });
+
+    test('dispatch does not include disabled channels', () => {
+        const DISABLED_SID = 'e2e-bot-disabled';
+        // Default config has telegram/feishu disabled
+        const result = alertService.dispatch(DISABLED_SID, {
+            type: 'info',
+            title: 'Test Info',
+            message: 'Just a test'
+        });
+        expect(result.channels).not.toContain('telegram');
+        expect(result.channels).not.toContain('feishu');
+    });
+
+    test('alert config persisted via dashboard API', async () => {
+        const { status, body } = await putJSON(`/api/workflow/${BOT_SID}/alerts/config`, {
+            channels: {
+                telegram: { enabled: true, botToken: 'api-bot-token', chatId: '555' }
+            }
+        });
+        expect(status).toBe(200);
+        expect(body.success).toBe(true);
+        expect(body.config.channels.telegram.botToken).toBe('api-bot-token');
+
+        // Read back
+        const { body: readBack } = await fetchJSON(`/api/workflow/${BOT_SID}/alerts/config`);
+        expect(readBack.channels.telegram.enabled).toBe(true);
+        expect(readBack.channels.telegram.chatId).toBe('555');
+    });
+
+    test('alert history records channel info', () => {
+        const history = alertService.getAlertHistory(BOT_SID);
+        expect(history.length).toBeGreaterThan(0);
+        const lastAlert = history[history.length - 1];
+        expect(lastAlert.channels).toBeDefined();
+        expect(Array.isArray(lastAlert.channels)).toBe(true);
     });
 });

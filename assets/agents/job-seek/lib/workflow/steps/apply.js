@@ -1,21 +1,29 @@
 'use strict';
 
 /**
- * Step: Apply — auto-fill application forms with resume DOCX upload.
+ * Step: Apply — sequential auto-apply with rate limiting.
  *
  * For each tailored job:
  *   1. Write DOCX buffer to temp file
- *   2. Call autoApply tool (fills form + uploads resume)
- *   3. Track results per job
- *   4. Clean up temp files
- *
- * Does NOT auto-submit — user must review and click submit.
+ *   2. Call autoApply handler (fill form + upload resume + submit)
+ *   3. Update job card status (submitted/failed)
+ *   4. Broadcast progress via SSE
+ *   5. Dispatch alert (screenshot + result)
+ *   6. Clean up temp files
+ *   7. Random delay between jobs (anti-bot)
  */
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const dashboardServer = require('../../dashboardServer');
+const alertService = require('../alertService');
+const { handler: autoApplyHandler } = require('../../tools/autoApply');
+
+// ─── Defaults ───
+const DEFAULT_MAX_PER_RUN = 10;
+const DEFAULT_DELAY_RANGE = [10, 30]; // seconds between jobs
+const DEFAULT_AUTO_SUBMIT = true;
 
 /**
  * Write a base64-encoded DOCX buffer to a temp file.
@@ -51,7 +59,18 @@ function cleanupTempFiles(paths) {
 }
 
 /**
- * Execute the apply step.
+ * Random delay between min and max seconds.
+ * @param {number[]} range - [minSec, maxSec]
+ * @returns {Promise<void>}
+ */
+function randomDelay(range) {
+    const [min, max] = range;
+    const ms = (Math.random() * (max - min) + min) * 1000;
+    return new Promise(r => setTimeout(r, ms));
+}
+
+/**
+ * Execute the apply step — sequential auto-apply for each tailored job.
  * @param {object} params
  * @param {string} params.sessionId
  * @param {object} params.config - Workflow config
@@ -61,11 +80,14 @@ function cleanupTempFiles(paths) {
 async function execute({ sessionId, config, context }) {
     const cards = dashboardServer.getJobCards(sessionId);
     const tailored = cards.filter(c => c.status === 'tailored');
-    const submitted = cards.filter(c => c.status === 'submitted');
+    const alreadySubmitted = cards.filter(c => c.status === 'submitted');
 
     // Get apply step config
     const applyStep = (config?.steps || []).find(s => s.name === 'apply');
-    const confirmBeforeApply = applyStep?.confirmBeforeApply !== false;
+    const autoSubmit = applyStep?.autoSubmit ?? config?.apply?.autoSubmit ?? DEFAULT_AUTO_SUBMIT;
+    const maxPerRun = applyStep?.maxApplyPerRun ?? config?.apply?.maxApplyPerRun ?? DEFAULT_MAX_PER_RUN;
+    const delayRange = applyStep?.delayBetweenJobs ?? config?.apply?.delayBetweenJobs ?? DEFAULT_DELAY_RANGE;
+    const skipOnCaptchaFail = applyStep?.skipOnCaptchaFail ?? config?.apply?.skipOnCaptchaFail ?? true;
 
     // Filter to specific jobIds if configured
     let jobsToApply = tailored;
@@ -74,44 +96,221 @@ async function execute({ sessionId, config, context }) {
         jobsToApply = tailored.filter(j => jobIdSet.has(j.url));
     }
 
+    // Limit per run
+    jobsToApply = jobsToApply.slice(0, maxPerRun);
+
     const results = [];
-    const tempFiles = [];
+    let submittedCount = 0;
+    let failedCount = 0;
+    let skippedCount = 0;
 
-    for (const job of jobsToApply) {
-        // Write DOCX temp files for this job
-        const resumePath = writeTempDocx(
-            job.artifacts?.resumeDocx,
-            `Resume_${(job.company || 'Company').replace(/[^a-zA-Z0-9]/g, '_')}.docx`
-        );
-        const coverLetterPath = writeTempDocx(
-            job.artifacts?.coverLetterDocx,
-            `CoverLetter_${(job.company || 'Company').replace(/[^a-zA-Z0-9]/g, '_')}.docx`
-        );
-        if (resumePath) tempFiles.push(resumePath);
-        if (coverLetterPath) tempFiles.push(coverLetterPath);
+    // Broadcast start
+    _broadcastSSE(sessionId, 'applyStart', {
+        total: jobsToApply.length,
+        alreadyApplied: alreadySubmitted.length
+    });
 
-        results.push({
-            url: job.url,
+    for (let i = 0; i < jobsToApply.length; i++) {
+        const job = jobsToApply[i];
+        const jobTempFiles = [];
+
+        // Broadcast progress
+        _broadcastSSE(sessionId, 'applyProgress', {
+            jobUrl: job.url,
             title: job.title,
             company: job.company,
-            resumeDocxPath: resumePath,
-            coverLetterDocxPath: coverLetterPath,
-            status: 'ready'
+            index: i,
+            total: jobsToApply.length,
+            status: 'applying'
         });
+
+        try {
+            // Write DOCX temp files
+            const resumePath = writeTempDocx(
+                job.artifacts?.resumeDocx,
+                `Resume_${_sanitize(job.company)}.docx`
+            );
+            const coverLetterPath = writeTempDocx(
+                job.artifacts?.coverLetterDocx,
+                `CoverLetter_${_sanitize(job.company)}.docx`
+            );
+            if (resumePath) jobTempFiles.push(resumePath);
+            if (coverLetterPath) jobTempFiles.push(coverLetterPath);
+
+            // Call autoApply handler
+            const applyResult = await autoApplyHandler({
+                url: job.url,
+                profile: context.profile || {},
+                resumeDocxPath: resumePath,
+                coverLetterDocxPath: coverLetterPath,
+                autoSubmit,
+                headless: false
+            });
+
+            if (applyResult.submitted) {
+                // Success — mark as submitted
+                dashboardServer.upsertJobCard(sessionId, {
+                    url: job.url,
+                    status: 'submitted',
+                    artifacts: {
+                        ...(job.artifacts || {}),
+                        appliedAt: new Date().toISOString(),
+                        applyScreenshot: applyResult.screenshotBase64 || null,
+                        applySteps: applyResult.steps,
+                        applyPlatform: applyResult.platform
+                    }
+                });
+                submittedCount++;
+
+                _broadcastSSE(sessionId, 'applyProgress', {
+                    jobUrl: job.url, status: 'submitted',
+                    index: i, total: jobsToApply.length,
+                    screenshotAvailable: !!applyResult.screenshotBase64
+                });
+
+                // Alert: success
+                alertService.dispatch(sessionId, {
+                    type: 'completed',
+                    title: `Applied: ${job.company} — ${job.title}`,
+                    message: applyResult.message,
+                    stepName: 'apply',
+                    meta: {
+                        company: job.company,
+                        title: job.title,
+                        url: job.url,
+                        screenshotBase64: applyResult.screenshotBase64,
+                        platform: applyResult.platform
+                    }
+                });
+
+                alertService.resetFailureCounter(sessionId, 'apply');
+
+            } else {
+                // Could not submit — mark as apply_failed
+                dashboardServer.upsertJobCard(sessionId, {
+                    url: job.url,
+                    artifacts: {
+                        ...(job.artifacts || {}),
+                        applyError: applyResult.message,
+                        applyScreenshot: applyResult.screenshotBase64 || null,
+                        applySteps: applyResult.steps,
+                        applyAttemptedAt: new Date().toISOString()
+                    }
+                });
+                failedCount++;
+
+                _broadcastSSE(sessionId, 'applyProgress', {
+                    jobUrl: job.url, status: 'failed',
+                    message: applyResult.message,
+                    index: i, total: jobsToApply.length
+                });
+
+                // Alert: failure
+                alertService.dispatch(sessionId, {
+                    type: 'failure',
+                    title: `Apply failed: ${job.company} — ${job.title}`,
+                    message: applyResult.message,
+                    stepName: 'apply',
+                    meta: {
+                        company: job.company,
+                        title: job.title,
+                        url: job.url,
+                        screenshotBase64: applyResult.screenshotBase64,
+                        platform: applyResult.platform
+                    }
+                });
+
+                alertService.trackFailure(sessionId, 'apply', applyResult.message);
+            }
+
+            results.push({
+                url: job.url,
+                title: job.title,
+                company: job.company,
+                status: applyResult.submitted ? 'submitted' : 'failed',
+                message: applyResult.message,
+                platform: applyResult.platform,
+                screenshotAvailable: !!applyResult.screenshotBase64
+            });
+
+        } catch (err) {
+            console.error(`[apply] Error applying to ${job.url}:`, err.message);
+            failedCount++;
+
+            dashboardServer.upsertJobCard(sessionId, {
+                url: job.url,
+                artifacts: {
+                    ...(job.artifacts || {}),
+                    applyError: err.message,
+                    applyAttemptedAt: new Date().toISOString()
+                }
+            });
+
+            _broadcastSSE(sessionId, 'applyProgress', {
+                jobUrl: job.url, status: 'error',
+                message: err.message,
+                index: i, total: jobsToApply.length
+            });
+
+            results.push({
+                url: job.url,
+                title: job.title,
+                company: job.company,
+                status: 'error',
+                message: err.message
+            });
+
+            alertService.trackFailure(sessionId, 'apply', err.message);
+        } finally {
+            // Cleanup temp files for this job
+            cleanupTempFiles(jobTempFiles);
+        }
+
+        // Random delay between jobs (anti-bot), skip after last job
+        if (i < jobsToApply.length - 1) {
+            await randomDelay(delayRange);
+        }
     }
 
-    // Clean up temp files after step completes
-    // NOTE: In real auto-apply flow, cleanup happens after browser interaction.
-    // Here we defer cleanup to caller or autoApply handler completion.
+    // Broadcast completion
+    _broadcastSSE(sessionId, 'applyComplete', {
+        total: jobsToApply.length,
+        submitted: submittedCount,
+        failed: failedCount,
+        skipped: skippedCount,
+        alreadyApplied: alreadySubmitted.length
+    });
+
+    const summary = [
+        `${submittedCount} submitted`,
+        `${failedCount} failed`,
+        `${alreadySubmitted.length} already applied`
+    ].join(', ');
 
     return {
-        readyToApply: jobsToApply.length,
-        alreadyApplied: submitted.length,
+        total: jobsToApply.length,
+        submitted: submittedCount,
+        failed: failedCount,
+        skipped: skippedCount,
+        alreadyApplied: alreadySubmitted.length,
         jobs: results,
-        tempFiles,
-        confirmBeforeApply,
-        summary: `${jobsToApply.length} jobs ready to apply (${results.filter(r => r.resumeDocxPath).length} with DOCX resume), ${submitted.length} already submitted`
+        summary
     };
 }
 
-module.exports = { execute, writeTempDocx, cleanupTempFiles };
+// ─── Helpers ───
+
+function _sanitize(str) {
+    return (str || 'Company').replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+function _broadcastSSE(sessionId, event, data) {
+    try {
+        const broadcaster = dashboardServer._getSSEBroadcaster?.();
+        if (broadcaster) {
+            broadcaster(sessionId, event, data);
+        }
+    } catch (_) { /* best-effort SSE */ }
+}
+
+module.exports = { execute, writeTempDocx, cleanupTempFiles, randomDelay };
