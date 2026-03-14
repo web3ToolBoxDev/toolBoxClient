@@ -920,11 +920,35 @@ async function handleSubtaskAction(payload = {}) {
         state.profileCollectionMode[sessionId] = true;
     }
 
-    // When (re)starting the search subtask, build dashboard artifact so it opens
+    // When (re)starting the search subtask, seed platforms + build dashboard + auto-finish
     if (subtaskKey === 'search') {
         try { buildIntentFile(sessionId); } catch (e) {
             console.error('[agent] buildIntentFile on search start failed:', e.message);
         }
+
+        // Seed platforms from location (e.g. Ontario → canada → Indeed + LinkedIn + Job Bank)
+        const platformStore = require('./lib/workflow/platformStore');
+        const workflowStore = require('./lib/workflow/workflowStore');
+        const location = (state.selectedAnswers[sessionId] || {}).q_location || '';
+
+        // On restart, clear existing platforms so initWithPresets re-seeds fresh
+        if (isRestart) {
+            platformStore.clearSession(sessionId);
+        }
+
+        const platforms = platformStore.initWithPresets(sessionId, location);
+        for (const plat of platforms) {
+            dashboardServer.updatePlatformCell(sessionId, plat.id, {
+                name: plat.name, icon: plat.icon, url: plat.url
+            });
+        }
+        console.log(`[agent] Seeded ${platforms.length} platforms for location "${location}": ${platforms.map(p => p.name).join(', ')}`);
+
+        // Seed workflow config if not yet created
+        if (!workflowStore.getConfig(sessionId)) {
+            workflowStore.getConfig(sessionId, location);
+        }
+
         // Remove old dashboard artifacts before adding new one
         if (state.artifacts[sessionId]) {
             state.artifacts[sessionId] = state.artifacts[sessionId].filter(
@@ -940,6 +964,32 @@ async function handleSubtaskAction(payload = {}) {
             url: dashUrl,
             openUrl: true
         });
+
+        // Auto-finish: dashboard build is instant, mark done and unlock next subtask
+        updateSubTasks(sessionId, (list) => {
+            const idx = list.findIndex(i => i.key === 'search');
+            if (idx >= 0) {
+                list[idx].status = 'done';
+                list[idx].updatedAt = now();
+                if (list[idx + 1] && list[idx + 1].status === 'pending') {
+                    list[idx + 1].status = 'running';
+                    list[idx + 1].updatedAt = now();
+                }
+            }
+            return list;
+        });
+
+        appendSubtaskLog(sessionId, subtaskKey,
+            isZh() ? '仪表盘已构建，平台已添加' : 'Dashboard built, platforms seeded',
+            { level: 'info' }
+        );
+        appendConversation(sessionId, 'assistant', isZh()
+            ? `仪表盘已构建完成，已根据目标地区（${location}）自动添加 ${platforms.length} 个平台：${platforms.map(p => p.name).join('、')}。`
+            : `Dashboard built successfully. ${platforms.length} platforms seeded for "${location}": ${platforms.map(p => p.name).join(', ')}.`);
+
+        sendSnapshot();
+        scheduleSave();
+        return;  // early return — skip generic start/restart messages below
     }
 
     appendSubtaskLog(sessionId, subtaskKey,
