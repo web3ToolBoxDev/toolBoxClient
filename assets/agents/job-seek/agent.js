@@ -185,10 +185,18 @@ function restoreState() {
             state.prompts[sid] = _buildPresetPrompt(state.selectedAnswers[sid] || {});
         }
         // Migrate subtasks: remove deprecated keys (match, resume, coverLetter)
+        // and rename 'search' → 'dashboard'
         const VALID_SUBTASK_KEYS = new Set(['onboarding', 'profile', 'dashboard', 'search']);
         if (Array.isArray(state.subtasks[sid])) {
             const before = state.subtasks[sid].length;
             state.subtasks[sid] = state.subtasks[sid].filter((t) => VALID_SUBTASK_KEYS.has(t.key));
+            // Migrate old 'search' key → 'dashboard'
+            for (const t of state.subtasks[sid]) {
+                if (t.key === 'search') {
+                    t.key = 'dashboard';
+                    console.log(`[agent] Migrated subtask key 'search' → 'dashboard' for session ${sid}`);
+                }
+            }
             if (state.subtasks[sid].length !== before) {
                 console.log(`[agent] Migrated subtasks for ${sid}: ${before} -> ${state.subtasks[sid].length}`);
             }
