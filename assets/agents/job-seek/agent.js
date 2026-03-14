@@ -431,11 +431,8 @@ async function seedProfileFromKnowledge(sessionId) {
             return list;
         });
 
-        const daysAgo = profileDocs.length > 0
-            ? Math.round((Date.now() - new Date(profileDocs[0].updatedAt || profileDocs[0].updated_at || 0).getTime()) / 86400000)
-            : '?';
-        console.log(`[agent:seed] seeded ${seededCount} profile sections (${daysAgo}d ago)`);
-        appendRuntimeLog(sessionId, `profile_seeded -> ${seededCount} sections (${daysAgo}d ago)`, { source: 'knowledge' });
+        console.log(`[agent:seed] seeded ${seededCount} profile sections`);
+        appendRuntimeLog(sessionId, `profile_seeded -> ${seededCount} sections`, { source: 'knowledge' });
 
         // Build dashboard + seed platforms + auto-finish search subtask
         _buildDashboardAndFinish(sessionId);
