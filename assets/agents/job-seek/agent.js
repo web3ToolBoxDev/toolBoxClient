@@ -920,6 +920,28 @@ async function handleSubtaskAction(payload = {}) {
         state.profileCollectionMode[sessionId] = true;
     }
 
+    // When (re)starting the search subtask, build dashboard artifact so it opens
+    if (subtaskKey === 'search') {
+        try { buildIntentFile(sessionId); } catch (e) {
+            console.error('[agent] buildIntentFile on search start failed:', e.message);
+        }
+        // Remove old dashboard artifacts before adding new one
+        if (state.artifacts[sessionId]) {
+            state.artifacts[sessionId] = state.artifacts[sessionId].filter(
+                (a) => a.type !== 'dashboard'
+            );
+        }
+        const dashUrl = dashboardServer.getDashboardURL(sessionId);
+        console.log(`[agent] ★ Dashboard URL (search ${isRestart ? 'restart' : 'start'}): ${dashUrl}`);
+        appendArtifact(sessionId, {
+            id: `dashboard-${sessionId}`,
+            type: 'dashboard',
+            title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
+            url: dashUrl,
+            openUrl: true
+        });
+    }
+
     appendSubtaskLog(sessionId, subtaskKey,
         isRestart
             ? (isZh() ? '子任务已重新启动' : 'Subtask restarted')
