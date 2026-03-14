@@ -414,6 +414,7 @@ async function seedProfileFromKnowledge(sessionId) {
                 pr.status = 'done';
                 pr.updatedAt = now();
             }
+            // Set search to running so _buildDashboardAndFinishSearch can find & finish it
             const sr = list.find(t => t.key === 'search');
             if (sr && sr.status === 'pending') {
                 sr.status = 'running';
@@ -427,6 +428,9 @@ async function seedProfileFromKnowledge(sessionId) {
             : '?';
         console.log(`[agent:seed] seeded ${seededCount} profile sections (${daysAgo}d ago)`);
         appendRuntimeLog(sessionId, `profile_seeded -> ${seededCount} sections (${daysAgo}d ago)`, { source: 'knowledge' });
+
+        // Build dashboard + seed platforms + auto-finish search subtask
+        _buildDashboardAndFinishSearch(sessionId);
         return true;
     } catch (err) {
         console.error('[agent:seed] profile seeding failed:', err.message);
@@ -805,6 +809,83 @@ function moveSubTaskForward(sessionId) {
     });
 }
 
+// --------------- Build Dashboard helper (shared by profile-finish & search-start) ---------------
+
+/**
+ * Seed platforms, build dashboard artifact, and auto-finish the 'search' subtask.
+ * Called when profile finishes OR when user explicitly starts/restarts the search subtask.
+ * @param {string} sessionId
+ * @param {object} [opts]
+ * @param {boolean} [opts.clearFirst=false] - Clear existing platforms before re-seeding (restart)
+ */
+function _buildDashboardAndFinishSearch(sessionId, opts = {}) {
+    const { clearFirst = false } = opts;
+    try { buildIntentFile(sessionId); } catch (e) {
+        console.error('[agent] buildIntentFile on dashboard build failed:', e.message);
+    }
+
+    // Seed platforms from location (e.g. Ontario → canada → Indeed + LinkedIn + Job Bank)
+    const platformStore = require('./lib/workflow/platformStore');
+    const workflowStore = require('./lib/workflow/workflowStore');
+    const location = (state.selectedAnswers[sessionId] || {}).q_location || '';
+
+    if (clearFirst) {
+        platformStore.clearSession(sessionId);
+        dashboardServer.clearPlatformStatuses(sessionId);
+    }
+
+    const platforms = platformStore.initWithPresets(sessionId, location);
+    for (const plat of platforms) {
+        dashboardServer.updatePlatformCell(sessionId, plat.id, {
+            name: plat.name, icon: plat.icon, url: plat.url
+        });
+    }
+    console.log(`[agent] Seeded ${platforms.length} platforms for location "${location}": ${platforms.map(p => p.name).join(', ')}`);
+
+    // Seed workflow config if not yet created
+    if (!workflowStore.getConfig(sessionId)) {
+        workflowStore.getConfig(sessionId, location);
+    }
+
+    // Remove old dashboard artifacts before adding new one
+    if (state.artifacts[sessionId]) {
+        state.artifacts[sessionId] = state.artifacts[sessionId].filter(
+            (a) => a.type !== 'dashboard'
+        );
+    }
+    const dashUrl = dashboardServer.getDashboardURL(sessionId);
+    console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
+    appendArtifact(sessionId, {
+        id: `dashboard-${sessionId}`,
+        type: 'dashboard',
+        title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
+        url: dashUrl,
+        openUrl: true
+    });
+
+    // Auto-finish: dashboard build is instant, mark search done and unlock next subtask
+    updateSubTasks(sessionId, (list) => {
+        const idx = list.findIndex(i => i.key === 'search');
+        if (idx >= 0) {
+            list[idx].status = 'done';
+            list[idx].updatedAt = now();
+            if (list[idx + 1] && list[idx + 1].status === 'pending') {
+                list[idx + 1].status = 'running';
+                list[idx + 1].updatedAt = now();
+            }
+        }
+        return list;
+    });
+
+    appendSubtaskLog(sessionId, 'search',
+        isZh() ? '仪表盘已构建，平台已添加' : 'Dashboard built, platforms seeded',
+        { level: 'info' }
+    );
+    appendConversation(sessionId, 'assistant', isZh()
+        ? `仪表盘已构建完成，已根据目标地区（${location}）自动添加 ${platforms.length} 个平台：${platforms.map(p => p.name).join('、')}。`
+        : `Dashboard built successfully. ${platforms.length} platforms seeded for "${location}": ${platforms.map(p => p.name).join(', ')}.`);
+}
+
 // --------------- subtask actions (start / restart) ---------------
 
 async function handleSubtaskAction(payload = {}) {
@@ -867,27 +948,8 @@ async function handleSubtaskAction(payload = {}) {
                     console.error('[agent] profile extraction on finish failed:', exErr.message);
                 }
             }
-            try {
-                buildIntentFile(sessionId);
-                // Remove old dashboard artifacts before adding new one
-                if (state.artifacts[sessionId]) {
-                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(
-                        (a) => a.type !== 'dashboard'
-                    );
-                }
-                const dashUrl = dashboardServer.getDashboardURL(sessionId);
-                console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
-                appendArtifact(sessionId, {
-                    id: `dashboard-${sessionId}`,
-                    type: 'dashboard',
-                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
-                    url: dashUrl,
-                    openUrl: true
-                });
-            } catch (err) {
-                console.error('[agent] dashboard artifact failed:', err);
-                appendRuntimeLog(sessionId, `dashboard_error -> ${err.message}`, { source: 'error' });
-            }
+            // Build dashboard + seed platforms + auto-finish search subtask
+            _buildDashboardAndFinishSearch(sessionId);
             // Story 4.2: sync profile milestone to mem0
             syncProfileToMem0(sessionId);
         }
@@ -922,72 +984,7 @@ async function handleSubtaskAction(payload = {}) {
 
     // When (re)starting the search subtask, seed platforms + build dashboard + auto-finish
     if (subtaskKey === 'search') {
-        try { buildIntentFile(sessionId); } catch (e) {
-            console.error('[agent] buildIntentFile on search start failed:', e.message);
-        }
-
-        // Seed platforms from location (e.g. Ontario → canada → Indeed + LinkedIn + Job Bank)
-        const platformStore = require('./lib/workflow/platformStore');
-        const workflowStore = require('./lib/workflow/workflowStore');
-        const location = (state.selectedAnswers[sessionId] || {}).q_location || '';
-
-        // On restart, clear existing platforms so initWithPresets re-seeds fresh
-        if (isRestart) {
-            platformStore.clearSession(sessionId);
-            dashboardServer.clearPlatformStatuses(sessionId);
-        }
-
-        const platforms = platformStore.initWithPresets(sessionId, location);
-        for (const plat of platforms) {
-            dashboardServer.updatePlatformCell(sessionId, plat.id, {
-                name: plat.name, icon: plat.icon, url: plat.url
-            });
-        }
-        console.log(`[agent] Seeded ${platforms.length} platforms for location "${location}": ${platforms.map(p => p.name).join(', ')}`);
-
-        // Seed workflow config if not yet created
-        if (!workflowStore.getConfig(sessionId)) {
-            workflowStore.getConfig(sessionId, location);
-        }
-
-        // Remove old dashboard artifacts before adding new one
-        if (state.artifacts[sessionId]) {
-            state.artifacts[sessionId] = state.artifacts[sessionId].filter(
-                (a) => a.type !== 'dashboard'
-            );
-        }
-        const dashUrl = dashboardServer.getDashboardURL(sessionId);
-        console.log(`[agent] ★ Dashboard URL (search ${isRestart ? 'restart' : 'start'}): ${dashUrl}`);
-        appendArtifact(sessionId, {
-            id: `dashboard-${sessionId}`,
-            type: 'dashboard',
-            title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
-            url: dashUrl,
-            openUrl: true
-        });
-
-        // Auto-finish: dashboard build is instant, mark done and unlock next subtask
-        updateSubTasks(sessionId, (list) => {
-            const idx = list.findIndex(i => i.key === 'search');
-            if (idx >= 0) {
-                list[idx].status = 'done';
-                list[idx].updatedAt = now();
-                if (list[idx + 1] && list[idx + 1].status === 'pending') {
-                    list[idx + 1].status = 'running';
-                    list[idx + 1].updatedAt = now();
-                }
-            }
-            return list;
-        });
-
-        appendSubtaskLog(sessionId, subtaskKey,
-            isZh() ? '仪表盘已构建，平台已添加' : 'Dashboard built, platforms seeded',
-            { level: 'info' }
-        );
-        appendConversation(sessionId, 'assistant', isZh()
-            ? `仪表盘已构建完成，已根据目标地区（${location}）自动添加 ${platforms.length} 个平台：${platforms.map(p => p.name).join('、')}。`
-            : `Dashboard built successfully. ${platforms.length} platforms seeded for "${location}": ${platforms.map(p => p.name).join(', ')}.`);
-
+        _buildDashboardAndFinishSearch(sessionId, { clearFirst: isRestart });
         sendSnapshot();
         scheduleSave();
         return;  // early return — skip generic start/restart messages below
