@@ -1170,6 +1170,15 @@ function start(getState, port) {
             }
             _readBody(req, async (body) => {
                 try {
+                    // Inject session-bound envId if not provided in request body
+                    if (!body.sessionEnvId) {
+                        const state = _stateGetter ? _stateGetter() : {};
+                        const runtimeCtx = state.runtimeContexts?.[sid] || {};
+                        const boundEnvIds = Array.isArray(runtimeCtx.envIds) ? runtimeCtx.envIds : [];
+                        if (boundEnvIds.length > 0) {
+                            body.sessionEnvId = boundEnvIds[0];
+                        }
+                    }
                     // Set launching state before async browser launch
                     updatePlatformCell(sid, pid, { cell: 'login', status: 'running', message: 'Launching browser...' });
                     const result = await getPlatformService().launchLogin(sid, pid, body);
