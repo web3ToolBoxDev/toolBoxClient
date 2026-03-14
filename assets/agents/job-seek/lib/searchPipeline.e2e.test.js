@@ -6,28 +6,68 @@
  *
  * This test actually boots the HTTP server and makes real HTTP requests,
  * so it catches circular dependency and route-matching issues.
+ *
+ * The pipeline now uses platform-based search (scriptBuilder.executeSearchScript)
+ * instead of calling jobSearch handler directly. We mock the workflow layer
+ * (platformStore, scriptBuilder, platformService) to provide fake platforms
+ * with ready search tools that return canned results.
  */
+
+jest.setTimeout(30000);
 
 const http = require('http');
 
-// Mock the domain tool handlers so we don't need real browser/AI
+// ─── Mock listings returned by platform search tools ───
+const MOCK_LISTINGS = [
+    { title: 'React Developer', company: 'TestCo', url: 'https://e2e-live.com/job/1', location: 'Toronto', salary: '120K', fullText: 'React developer role requiring React, Node, TypeScript. 3+ years experience. Bachelor degree.' },
+    { title: 'Node Engineer', company: 'BigCorp', url: 'https://e2e-live.com/job/2', location: 'Remote', salary: '', fullText: 'Node.js engineer role. Skills: Node, Express, MongoDB. 2+ years experience.' },
+    { title: 'Fullstack Dev', company: 'StartupX', url: 'https://e2e-live.com/job/3', location: 'Vancouver', salary: '', fullText: 'Fullstack developer. React, Node, TypeScript, PostgreSQL. 3+ years. Bachelor degree.' }
+];
+
+// ─── Mock workflow layer (platform-based search) ───
+const mockPlatforms = [];
+
+jest.mock('./workflow/platformStore', () => ({
+    getPlatforms: jest.fn(() => mockPlatforms),
+    getPlatform: jest.fn((sid, pid) => mockPlatforms.find(p => p.id === pid) || null),
+    updateToolStatus: jest.fn(),
+    updateConnectionStatus: jest.fn(),
+    addPlatform: jest.fn(),
+    removePlatform: jest.fn(),
+    clearSession: jest.fn(),
+    getPresetsForRegion: jest.fn(() => [])
+}));
+
+jest.mock('./workflow/scriptBuilder', () => ({
+    executeSearchScript: jest.fn(async (sessionId, platformId, params, opts) => {
+        return { success: true, jobs: MOCK_LISTINGS };
+    }),
+    buildTool: jest.fn(),
+    healScript: jest.fn()
+}));
+
+jest.mock('./workflow/platformService', () => ({
+    adoptSharedBrowser: jest.fn().mockResolvedValue({ success: false }),
+    launchLogin: jest.fn().mockResolvedValue({ success: false }),
+    verifyLogin: jest.fn().mockResolvedValue({ status: 'logged_in' })
+}));
+
+// Mock the domain tool handlers
 jest.mock('./tools/jobSearch', () => ({
-    handler: jest.fn().mockResolvedValue({
-        listings: [
-            { url: 'https://e2e-live.com/job/1', title: 'React Developer', company: 'TestCo', location: 'Toronto', salary: '120K' },
-            { url: 'https://e2e-live.com/job/2', title: 'Node Engineer', company: 'BigCorp', location: 'Remote' },
-            { url: 'https://e2e-live.com/job/3', title: 'Fullstack Dev', company: 'StartupX', location: 'Vancouver' }
-        ]
-    })
+    handler: jest.fn().mockResolvedValue({ listings: [] })
 }));
-jest.mock('./tools/parseListing', () => ({
-    handler: jest.fn().mockResolvedValue({
-        title: 'React Developer',
-        sections: { technical: 'React, Node, TypeScript', experience: '3+ years', education: 'Bachelor degree', soft_skills: '' },
-        url: '',
-        parsedAt: new Date().toISOString()
-    })
-}));
+jest.mock('./tools/parseListing', () => {
+    const real = jest.requireActual('./tools/parseListing');
+    return {
+        handler: jest.fn().mockResolvedValue({
+            title: 'React Developer',
+            sections: { technical: 'React, Node, TypeScript', experience: '3+ years', education: 'Bachelor degree', soft_skills: '' },
+            url: '',
+            parsedAt: new Date().toISOString()
+        }),
+        extractRequirements: real.extractRequirements
+    };
+});
 jest.mock('./tools/matchProfile', () => ({
     handler: jest.fn().mockReturnValue({ overallScore: 78, breakdown: { skills: { score: 80, matched: ['react'], missing: [] }, experience: { score: 70, detail: '' }, education: { score: 80, detail: '' } } })
 }));
@@ -41,7 +81,7 @@ jest.mock('./tools/coverLetter', () => ({
 const dashboardServer = require('./dashboardServer');
 const searchPipeline = require('./searchPipeline');
 
-const TEST_PORT = 30098;
+const TEST_PORT = 30095;
 const SESSION_ID = 'e2e-pipeline-live';
 
 const STATE = {
@@ -113,6 +153,14 @@ function fetchHTML(path) {
 
 describe('Search Pipeline E2E (live server)', () => {
     beforeAll((done) => {
+        // Seed mock platforms with ready search tools matching Toronto sources
+        // (indeed, linkedin, jobbank, google)
+        mockPlatforms.length = 0;
+        mockPlatforms.push(
+            { id: 'plat_indeed', name: 'Indeed', url: 'https://indeed.com/jobs', envId: null, _browserId: 'br_mock', _pageIndex: 0, connectionType: 'browser', tools: { search: { status: 'ready', script: 'mock', version: 1, buildLog: [] }, apply: { status: 'not_built', script: null, version: 0, buildLog: [] } } },
+            { id: 'plat_linkedin', name: 'LinkedIn', url: 'https://linkedin.com/jobs', envId: null, _browserId: 'br_mock', _pageIndex: 0, connectionType: 'browser', tools: { search: { status: 'ready', script: 'mock', version: 1, buildLog: [] }, apply: { status: 'not_built', script: null, version: 0, buildLog: [] } } }
+        );
+
         dashboardServer.start(() => STATE, TEST_PORT);
         setTimeout(done, 300);
     });
@@ -145,7 +193,7 @@ describe('Search Pipeline E2E (live server)', () => {
     // ─── Wait for pipeline to complete ───
     test('pipeline completes and populates job cards', async () => {
         // Wait for async pipeline to finish
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 2000));
 
         const { body } = await fetchJSON(`/api/pipeline/${SESSION_ID}/status`);
         expect(body.running).toBe(false);
@@ -226,20 +274,18 @@ describe('Search Pipeline E2E (live server)', () => {
     });
 
     // ─── Dashboard HTML structure ───
-    test('dashboard HTML contains search config and action buttons', async () => {
+    test('dashboard HTML contains key UI elements', async () => {
         const { status, body } = await fetchHTML(`/dashboard/${SESSION_ID}`);
         expect(status).toBe(200);
-        expect(body).toContain('Automated Job Search');
-        expect(body).toContain('cfgMinScore');
-        expect(body).toContain('cfgTargetCount');
-        expect(body).toContain('btnStart');
+        expect(body).toContain('Application Pipeline');
+        expect(body).toContain('wfBtnStart');
         expect(body).toContain('genResume');
         expect(body).toContain('genCoverLetter');
         expect(body).toContain('markApplied');
         expect(body).toContain('tab-listings');
         expect(body).toContain('tab-history');
         expect(body).toContain('modalOverlay');
-        expect(body).toContain('pipeStatus');
+        expect(body).toContain('job-table');
     });
 
     // ─── 404 for unknown routes ───

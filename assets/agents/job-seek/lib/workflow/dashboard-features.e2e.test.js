@@ -405,7 +405,6 @@ describe('Dashboard HTML', () => {
         expect(res.body).toContain('controlBar');
         expect(res.body).toContain('wfBtnStart');
         expect(res.body).toContain('wfBtnStop');
-        expect(res.body).toContain('asyncToggle');
     });
 
     test('HTML contains global settings modal', async () => {

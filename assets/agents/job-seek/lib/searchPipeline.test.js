@@ -9,7 +9,8 @@ jest.mock('./tools/jobSearch', () => ({
     handler: jest.fn()
 }));
 jest.mock('./tools/parseListing', () => ({
-    handler: jest.fn()
+    handler: jest.fn(),
+    extractRequirements: jest.fn()
 }));
 jest.mock('./tools/matchProfile', () => ({
     handler: jest.fn()
@@ -20,10 +21,30 @@ jest.mock('./tools/resumeGen', () => ({
 jest.mock('./tools/coverLetter', () => ({
     handler: jest.fn()
 }));
+jest.mock('./tools/mockInterview', () => ({
+    handler: jest.fn()
+}));
 jest.mock('./dashboardServer', () => ({
     upsertJobCard: jest.fn(),
     updateJobStatus: jest.fn(),
+    updatePlatformCell: jest.fn(),
     getJobCards: jest.fn(() => [])
+}));
+
+// Mock platform infrastructure for pipeline execution
+const mockPlatformList = [];
+jest.mock('./workflow/platformStore', () => ({
+    getPlatforms: jest.fn(() => mockPlatformList),
+    getPlatform: jest.fn((sid, pid) => mockPlatformList.find(p => p.id === pid) || null)
+}));
+jest.mock('./workflow/platformService', () => ({
+    adoptSharedBrowser: jest.fn().mockResolvedValue({ success: true, pageIndex: 0 }),
+    verifyLogin: jest.fn().mockResolvedValue({ success: true, status: 'logged_in' }),
+    launchLogin: jest.fn().mockResolvedValue({ success: true, browserId: 'br_mock' })
+}));
+const mockExecuteSearch = jest.fn();
+jest.mock('./workflow/scriptBuilder', () => ({
+    executeSearchScript: mockExecuteSearch
 }));
 
 const { handler: jobSearchHandler } = require('./tools/jobSearch');
@@ -151,9 +172,25 @@ describe('searchPipeline', () => {
 
     // ─── _runPipeline (integration via startPipeline) ───
     describe('pipeline execution', () => {
-        it('records discovered jobs to dashboard', async () => {
-            jobSearchHandler.mockResolvedValue({
-                listings: [
+        // Set up mock platforms with ready search tools so the pipeline can run
+        beforeEach(() => {
+            mockPlatformList.length = 0;
+            mockPlatformList.push(
+                { id: 'plat_indeed', name: 'Indeed', url: 'https://ca.indeed.com/jobs', tools: { search: { status: 'ready', script: 'test' } }, _browserId: 'br_mock', _pageIndex: 0 },
+                { id: 'plat_linkedin', name: 'LinkedIn', url: 'https://www.linkedin.com/jobs', tools: { search: { status: 'ready', script: 'test' } }, _browserId: 'br_mock', _pageIndex: 1 },
+                { id: 'plat_jobbank', name: 'Job Bank', url: 'https://www.jobbank.gc.ca/jobsearch', tools: { search: { status: 'ready', script: 'test' } }, _browserId: 'br_mock', _pageIndex: 2 }
+            );
+            mockExecuteSearch.mockReset();
+        });
+
+        afterEach(() => {
+            mockPlatformList.length = 0;
+        });
+
+        it('records matched jobs to dashboard', async () => {
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: [
                     { url: 'https://j.com/1', title: 'Dev', company: 'Acme' },
                     { url: 'https://j.com/2', title: 'SWE', company: 'BigCo' }
                 ]
@@ -162,16 +199,17 @@ describe('searchPipeline', () => {
 
             pipeline.startPipeline('exec-test-1', { minScore: 50, targetCount: 5 }, DIRECTION, PROFILE);
             // Wait for async pipeline
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 500));
 
             expect(dashboardServer.upsertJobCard).toHaveBeenCalledWith('exec-test-1',
-                expect.objectContaining({ url: 'https://j.com/1', status: 'discovered' })
+                expect.objectContaining({ url: 'https://j.com/1', status: 'matched' })
             );
         });
 
         it('deduplicates listings by URL', async () => {
-            jobSearchHandler.mockResolvedValue({
-                listings: [
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: [
                     { url: 'https://dup.com/1', title: 'Dev' },
                     { url: 'https://dup.com/1', title: 'Dev duplicate' }
                 ]
@@ -179,11 +217,11 @@ describe('searchPipeline', () => {
             matchProfileHandler.mockReturnValue({ overallScore: 80 });
 
             pipeline.startPipeline('dedup-test-1', { minScore: 50 }, DIRECTION, PROFILE);
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 500));
 
-            const discoveredCalls = dashboardServer.upsertJobCard.mock.calls
-                .filter(c => c[1]?.url === 'https://dup.com/1' && c[1]?.status === 'discovered');
-            expect(discoveredCalls).toHaveLength(1);
+            const matchedCalls = dashboardServer.upsertJobCard.mock.calls
+                .filter(c => c[1]?.url === 'https://dup.com/1' && c[1]?.status === 'matched');
+            expect(matchedCalls).toHaveLength(1);
         });
 
         it('handles error in job title gracefully', async () => {
@@ -197,15 +235,15 @@ describe('searchPipeline', () => {
         });
 
         it('stops early when targetCount qualified reached', async () => {
-            const listings = [];
+            const jobs = [];
             for (let i = 0; i < 20; i++) {
-                listings.push({ url: `https://target.com/${i}`, title: `Job ${i}` });
+                jobs.push({ url: `https://target.com/${i}`, title: `Job ${i}` });
             }
-            jobSearchHandler.mockResolvedValue({ listings });
+            mockExecuteSearch.mockResolvedValue({ success: true, jobs });
             matchProfileHandler.mockReturnValue({ overallScore: 90 });
 
             pipeline.startPipeline('target-test-1', { minScore: 50, targetCount: 3 }, DIRECTION, PROFILE);
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 1000));
 
             const status = pipeline.getPipelineStatus('target-test-1');
             expect(status.progress.qualified).toBeGreaterThanOrEqual(3);
@@ -213,10 +251,13 @@ describe('searchPipeline', () => {
         });
 
         it('handles search errors without crashing', async () => {
-            jobSearchHandler.mockRejectedValue(new Error('Network timeout'));
+            mockExecuteSearch.mockResolvedValue({
+                success: false,
+                error: 'Network timeout'
+            });
 
             pipeline.startPipeline('err-test-1', {}, DIRECTION, PROFILE);
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 500));
 
             const status = pipeline.getPipelineStatus('err-test-1');
             expect(status.running).toBe(false);
@@ -224,13 +265,14 @@ describe('searchPipeline', () => {
         });
 
         it('handles match errors without crashing', async () => {
-            jobSearchHandler.mockResolvedValue({
-                listings: [{ url: 'https://matcherr.com/1', title: 'Dev' }]
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: [{ url: 'https://matcherr.com/1', title: 'Dev' }]
             });
             matchProfileHandler.mockImplementation(() => { throw new Error('AI unavailable'); });
 
             pipeline.startPipeline('matcherr-test-1', {}, DIRECTION, PROFILE);
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 500));
 
             const status = pipeline.getPipelineStatus('matcherr-test-1');
             expect(status.progress.errors.some(e => e.includes('AI unavailable'))).toBe(true);

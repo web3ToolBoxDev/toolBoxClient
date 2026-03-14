@@ -4,7 +4,8 @@ const platformStore = require('./platformStore');
 
 // Mock toolServiceClient — general tool calls go through toolService
 jest.mock('../core/toolServiceClient', () => ({
-    executeTool: jest.fn()
+    executeTool: jest.fn(),
+    request: jest.fn().mockResolvedValue({ success: false, browsers: [] })
 }));
 const toolServiceClient = require('../core/toolServiceClient');
 
@@ -115,7 +116,8 @@ describe('launchLogin', () => {
         // Mock toolService responses
         toolServiceClient.executeTool
             .mockResolvedValueOnce({ success: true, result: { browserId: 'br_abc' } })  // browser_launch
-            .mockResolvedValueOnce({ success: true });  // page_goto
+            .mockResolvedValueOnce({ success: true })  // page_goto
+            .mockResolvedValueOnce({ success: true, result: { results: ['<div>AccountMenu</div>'], count: 1 } });  // auto-verify DOM check
 
         const result = await platformService.launchLogin(SESSION, indeed.id, {});
 
@@ -126,7 +128,8 @@ describe('launchLogin', () => {
         expect(result.loginUrl).toContain('indeed.com');
 
         // Verify toolService was called with full env object (not just envId string)
-        expect(toolServiceClient.executeTool).toHaveBeenCalledTimes(2);
+        // Calls: browser_launch + page_goto + auto-verify (DOM selector check)
+        expect(toolServiceClient.executeTool).toHaveBeenCalledTimes(3);
         expect(toolServiceClient.executeTool).toHaveBeenCalledWith('browser_launch', expect.objectContaining({
             env: expect.objectContaining({ id: 'env_123', user_agent: 'Mozilla/5.0 Test' }),
             chromePath: 'C:/chrome.exe',
@@ -198,10 +201,10 @@ describe('launchLogin', () => {
         const indeed = platforms.find(p => p.name === 'Indeed');
         platformStore.updatePlatform(SESSION, indeed.id, { envId: 'env_fail' });
 
-        toolServiceClient.executeTool.mockResolvedValueOnce({
-            success: false,
-            error: 'Chrome not found'
-        });
+        // First launch fails, recovery path retries and also fails
+        toolServiceClient.executeTool
+            .mockResolvedValueOnce({ success: false, error: 'Chrome not found' })   // browser_launch (1st attempt)
+            .mockResolvedValueOnce({ success: false, error: 'Chrome not found' });  // browser_launch (retry after recovery)
 
         const result = await platformService.launchLogin(SESSION, indeed.id, {});
         expect(result.success).toBe(false);

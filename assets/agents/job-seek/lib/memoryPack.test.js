@@ -7,11 +7,11 @@ describe('memoryPack', () => {
         expect(domain).toBe('job-seek');
     });
 
-    test('has all 9 required types', () => {
+    test('has all 10 required types', () => {
         const expected = [
             'profile', 'direction', 'job_listing', 'match_result',
             'job_requirement', 'application_record', 'resume_variant',
-            'outreach_message', 'company_info'
+            'outreach_message', 'company_info', 'tailored_profile'
         ];
         expect(Object.keys(types).sort()).toEqual(expected.sort());
     });
@@ -28,7 +28,7 @@ describe('memoryPack', () => {
     });
 
     test('profile has correct subTypes', () => {
-        expect(types.profile.subTypes).toEqual(['basic', 'skills', 'experience', 'education', 'highlights']);
+        expect(types.profile.subTypes).toEqual(['basic', 'skills', 'experience', 'education', 'highlights', 'certifications', 'projects', 'publications', 'languages', 'volunteering', 'summary_templates']);
     });
 
     test('job_requirement has structured subTypes', () => {
@@ -43,12 +43,12 @@ describe('memoryPack', () => {
         expect(types.outreach_message.subTypes).toEqual(['cover_letter', 'thank_you', 'follow_up']);
     });
 
-    test('session-scoped types are match_result and outreach_message', () => {
+    test('session-scoped types are match_result, outreach_message, and tailored_profile', () => {
         const sessionTypes = Object.entries(types)
             .filter(([_, def]) => def.durability === 'session')
             .map(([name]) => name)
             .sort();
-        expect(sessionTypes).toEqual(['match_result', 'outreach_message']);
+        expect(sessionTypes).toEqual(['match_result', 'outreach_message', 'tailored_profile']);
     });
 
     test('durable types persist across sessions', () => {

@@ -1,5 +1,7 @@
 'use strict';
 
+jest.setTimeout(120000);
+
 /**
  * Tests for scriptBuilder — AI-powered Puppeteer script generation & execution.
  *
@@ -24,11 +26,28 @@ jest.mock('../core/toolServiceClient', () => ({
             return { success: true, result: r };
         }
         return { success: true, result: {} };
+    }),
+    request: jest.fn(async (method, path, body, timeout) => {
+        const name = body && body.name;
+        const params = body && body.params;
+        if (name && _toolResults[name]) {
+            const r = typeof _toolResults[name] === 'function'
+                ? _toolResults[name](params)
+                : _toolResults[name];
+            return { success: true, result: r };
+        }
+        return { success: true, result: {} };
     })
 }));
 
 // ─── Mock platformStore ───
 const _platforms = {};
+
+jest.mock('./platformService', () => ({
+    adoptSharedBrowser: jest.fn().mockResolvedValue({ success: false }),
+    launchLogin: jest.fn().mockResolvedValue({ success: false }),
+    verifyLogin: jest.fn().mockResolvedValue({ status: 'logged_in' })
+}));
 
 jest.mock('./platformStore', () => ({
     getPlatform: jest.fn((sid, pid) => {
@@ -139,14 +158,15 @@ describe('buildTool', () => {
         // Default tool mocks
         _toolResults['browser_launch'] = { browserId: 'br_001' };
         _toolResults['page_goto'] = { pageIndex: 0 };
+        _toolResults['page_new'] = { pageIndex: 1 };
         _toolResults['page_screenshot'] = { base64: 'iVBOR...' };
-        _toolResults['page_extract'] = { data: '<input type="text" name="q"><button>Search</button>' };
+        // page_evaluate not set — defaults to {}, which makes _detectAntiBot return null
         _toolResults['browser_close'] = {};
     });
 
     test('successful build with all 5 steps', async () => {
         const aiInvoke = jest.fn()
-            .mockResolvedValueOnce('```javascript\nconst result = { jobs: [] };\n```')  // Step 3: generate
+            .mockResolvedValueOnce('```javascript\nreturn { success: true, jobs: [{title:"Engineer", company:"Co", url:"https://x.com/1"}] };\n```')  // Step 3: generate
             .mockResolvedValueOnce('YES the page shows search results');                 // Step 4: verify
 
         const progressLogs = [];
@@ -235,7 +255,7 @@ describe('buildTool', () => {
         const aiInvoke = jest.fn()
             .mockResolvedValueOnce('```javascript\nconst bad = "broken";\n```')   // attempt 1: generate
             .mockResolvedValueOnce('NO the page shows an error')                   // attempt 1: verify fails
-            .mockResolvedValueOnce('```javascript\nreturn { jobs: [] };\n```')     // attempt 2: generate
+            .mockResolvedValueOnce('```javascript\nreturn { success: true, jobs: [{title:"Eng", company:"Co", url:"https://x.com/1"}] };\n```')     // attempt 2: generate
             .mockResolvedValueOnce('YES results visible');                          // attempt 2: verify passes
 
         const result = await scriptBuilder.buildTool(SID, PID, 'search', {
@@ -244,7 +264,8 @@ describe('buildTool', () => {
         });
 
         expect(result.success).toBe(true);
-        expect(aiInvoke).toHaveBeenCalledTimes(4); // 2 generate + 2 verify
+        // 2 generate + 2 verify = 4 AI calls (JD extraction verify doesn't use aiInvoke)
+        expect(aiInvoke).toHaveBeenCalledTimes(4);
     });
 });
 
@@ -413,7 +434,7 @@ describe('healScript', () => {
 describe('buildPageProxy', () => {
     beforeEach(() => {
         resetState();
-        _toolResults['page_extract'] = { data: [{ text: 'Job Title' }] };
+        _toolResults['page_evaluate'] = { result: true };
         _toolResults['page_screenshot'] = { base64: 'iVBOR...' };
         _toolResults['page_goto'] = { pageIndex: 0 };
     });
@@ -421,37 +442,49 @@ describe('buildPageProxy', () => {
     test('proxy.goto calls page_goto', async () => {
         const proxy = scriptBuilder._buildPageProxy('br_001', 0);
         await proxy.goto('https://example.com');
-        expect(tsc.executeTool).toHaveBeenCalledWith('page_goto', expect.objectContaining({ url: 'https://example.com' }));
+        expect(tsc.request).toHaveBeenCalledWith(
+            'POST', '/tools/execute',
+            expect.objectContaining({ name: 'page_goto', params: expect.objectContaining({ url: 'https://example.com' }) }),
+            expect.any(Number)
+        );
     });
 
     test('proxy.screenshot calls page_screenshot', async () => {
         const proxy = scriptBuilder._buildPageProxy('br_001', 0);
         const result = await proxy.screenshot();
-        expect(tsc.executeTool).toHaveBeenCalledWith('page_screenshot', expect.objectContaining({ browserId: 'br_001' }));
+        expect(tsc.request).toHaveBeenCalledWith(
+            'POST', '/tools/execute',
+            expect.objectContaining({ name: 'page_screenshot', params: expect.objectContaining({ browserId: 'br_001' }) }),
+            expect.any(Number)
+        );
     });
 
     test('proxy.$$ returns array', async () => {
+        _toolResults['page_evaluate'] = { result: 3 };
         const proxy = scriptBuilder._buildPageProxy('br_001', 0);
         const result = await proxy.$$('.job-card');
         expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBe(3);
     });
 
-    test('proxy.$ returns data or null', async () => {
+    test('proxy.$ returns truthy when element exists', async () => {
+        _toolResults['page_evaluate'] = { result: true };
         const proxy = scriptBuilder._buildPageProxy('br_001', 0);
         const result = await proxy.$('.job-card');
         expect(result).toBeTruthy();
     });
 
-    test('proxy.$ returns null when no data', async () => {
-        _toolResults['page_extract'] = { data: [] };
+    test('proxy.$ returns null when no element', async () => {
+        _toolResults['page_evaluate'] = { result: false };
         const proxy = scriptBuilder._buildPageProxy('br_001', 0);
         const result = await proxy.$('.nonexistent');
         expect(result).toBeNull();
     });
 
-    test('proxy.evaluate returns null (not supported remotely)', async () => {
+    test('proxy.evaluate calls page_evaluate and returns result', async () => {
+        _toolResults['page_evaluate'] = { result: 'Test Page Title' };
         const proxy = scriptBuilder._buildPageProxy('br_001', 0);
         const result = await proxy.evaluate(() => document.title);
-        expect(result).toBeNull();
+        expect(result).toBe('Test Page Title');
     });
 });

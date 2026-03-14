@@ -134,8 +134,9 @@ describe('auto_apply tool', () => {
             expect(result.success).toBe(true);
             expect(result.browserId).toBe('b1');
             expect(result.steps.length).toBeGreaterThan(0);
-            expect(result.steps[0].step).toBe('launch');
-            expect(result.steps[1].step).toBe('navigate');
+            expect(result.steps[0].step).toBe('detect_platform');
+            expect(result.steps[1].step).toBe('launch');
+            expect(result.steps[2].step).toBe('navigate');
         });
 
         test('handles CAPTCHA detection and solving', async () => {
