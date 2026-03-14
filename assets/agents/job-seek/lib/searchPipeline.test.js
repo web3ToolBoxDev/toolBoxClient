@@ -330,4 +330,124 @@ describe('searchPipeline', () => {
             expect(pipeline.getHistory('empty-hist')).toEqual([]);
         });
     });
+
+    // ─── _parseSkills ───
+    describe('_parseSkills', () => {
+        it('parses comma-separated skills', () => {
+            expect(pipeline._parseSkills('React, Node, TypeScript')).toEqual(['React', 'Node', 'TypeScript']);
+        });
+        it('parses newline-separated skills', () => {
+            expect(pipeline._parseSkills('React\nNode\nTS')).toEqual(['React', 'Node', 'TS']);
+        });
+        it('handles arrays', () => {
+            expect(pipeline._parseSkills(['React', 'Node'])).toEqual(['React', 'Node']);
+        });
+        it('strips bullet prefixes', () => {
+            expect(pipeline._parseSkills('- React\n• Node\n* TS')).toEqual(['React', 'Node', 'TS']);
+        });
+        it('returns empty for falsy input', () => {
+            expect(pipeline._parseSkills(null)).toEqual([]);
+            expect(pipeline._parseSkills('')).toEqual([]);
+        });
+    });
+
+    // ─── _analyzeGap ───
+    describe('_analyzeGap', () => {
+        it('returns empty when no pipeline exists', () => {
+            const gap = pipeline._analyzeGap(new Map(), 'no-exist');
+            expect(gap).toEqual({});
+        });
+
+        it('identifies sources below target', () => {
+            const pipelines = new Map();
+            pipelines.set('gap-test', {
+                config: { targetCount: 10 },
+                _sourceQualified: { indeed: 3, linkedin: 10 },
+                _sourceResultCount: { indeed: 15, linkedin: 20 }
+            });
+            const gap = pipeline._analyzeGap(pipelines, 'gap-test');
+            expect(gap.indeed).toBeDefined();
+            expect(gap.indeed.deficit).toBe(7);
+            expect(gap.linkedin).toBeUndefined();
+        });
+
+        it('handles sources with zero qualified', () => {
+            const pipelines = new Map();
+            pipelines.set('gap-zero', {
+                config: { targetCount: 5 },
+                _sourceQualified: {},
+                _sourceResultCount: { indeed: 10 }
+            });
+            const gap = pipeline._analyzeGap(pipelines, 'gap-zero');
+            expect(gap.indeed.qualified).toBe(0);
+            expect(gap.indeed.deficit).toBe(5);
+        });
+    });
+
+    // ─── _expandQueries ───
+    describe('_expandQueries', () => {
+        it('generates skill rotation queries', async () => {
+            const direction = { q_job_title: 'Frontend Engineer', q_location: 'Toronto' };
+            const prof = { skills: 'React, Node, TypeScript, Vue' };
+            const gap = { indeed: { qualified: 2, target: 10, deficit: 8 } };
+            const prev = [{ query: 'Frontend Engineer' }, { query: 'Frontend Engineer React' }];
+
+            const result = await pipeline._expandQueries(direction, prof, gap, prev, null);
+            // Should generate skill rotation with Node or TypeScript (not React, already used)
+            const skillQueries = result.filter(q => q.query.includes('Node') || q.query.includes('TypeScript'));
+            expect(skillQueries.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('drops seniority prefix as fallback', async () => {
+            const direction = { q_job_title: 'Senior QA Engineer', q_location: 'Vancouver' };
+            const prof = { skills: 'Selenium, Python' };
+            const gap = { indeed: { qualified: 1, target: 5, deficit: 4 } };
+            const prev = [{ query: 'Senior QA Engineer' }];
+
+            const result = await pipeline._expandQueries(direction, prof, gap, prev, null);
+            const broader = result.find(q => q.query === 'QA Engineer');
+            expect(broader).toBeDefined();
+        });
+
+        it('uses AI expander when provided', async () => {
+            const direction = { q_job_title: 'Nurse', q_location: 'Calgary' };
+            const prof = { skills: 'Patient Care, Triage', highlights: 'Emergency nursing' };
+            const gap = { indeed: { qualified: 0, target: 5, deficit: 5 } };
+            const prev = [{ query: 'Nurse' }];
+
+            const mockAi = jest.fn().mockResolvedValue(['RN', 'Registered Nurse', 'Staff Nurse ICU']);
+            const result = await pipeline._expandQueries(direction, prof, gap, prev, mockAi);
+
+            expect(mockAi).toHaveBeenCalledWith(expect.objectContaining({
+                jobTitle: 'Nurse',
+                location: 'Calgary'
+            }));
+            const aiQueries = result.filter(q => ['RN', 'Registered Nurse', 'Staff Nurse ICU'].includes(q.query));
+            expect(aiQueries.length).toBe(3);
+        });
+
+        it('handles AI expander failure gracefully', async () => {
+            const direction = { q_job_title: 'Chef', q_location: '' };
+            const prof = { skills: 'French cuisine, Pastry' };
+            const gap = { indeed: { qualified: 0, target: 5, deficit: 5 } };
+            const prev = [{ query: 'Chef' }];
+
+            const failingAi = jest.fn().mockRejectedValue(new Error('API error'));
+            const result = await pipeline._expandQueries(direction, prof, gap, prev, failingAi);
+            // Should still return deterministic results (skill rotation)
+            expect(result.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('deduplicates against previous queries', async () => {
+            const direction = { q_job_title: 'Dev', q_location: '' };
+            const prof = { skills: 'JS, Python' };
+            const gap = { indeed: { qualified: 0, target: 5, deficit: 5 } };
+            const prev = [{ query: 'Dev' }, { query: 'Dev JS' }];
+
+            const result = await pipeline._expandQueries(direction, prof, gap, prev, null);
+            // 'Dev JS' already in previous, should not appear again
+            const dupJS = result.filter(q => q.query.toLowerCase() === 'dev js');
+            expect(dupJS).toHaveLength(0);
+        });
+    });
 });

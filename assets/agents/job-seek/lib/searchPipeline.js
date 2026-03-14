@@ -9,7 +9,7 @@
  */
 
 const { handler: jobSearchHandler } = require('./tools/jobSearch');
-const { handler: parseListingHandler } = require('./tools/parseListing');
+const { handler: parseListingHandler, extractRequirements } = require('./tools/parseListing');
 const { handler: matchProfileHandler } = require('./tools/matchProfile');
 const { handler: resumeGenHandler } = require('./tools/resumeGen');
 const { handler: coverLetterHandler } = require('./tools/coverLetter');
@@ -36,6 +36,135 @@ function getPlatformService() {
 
 // Active pipeline runs: sessionId → PipelineState
 const _pipelines = new Map();
+
+// ─── S1: Gap Analyzer ───
+/**
+ * Analyze which sources still need more qualified results.
+ * @param {Map} pipelines - The _pipelines map
+ * @param {string} sessionId
+ * @returns {Object<string, {qualified, target, deficit, resultCount}>} gap per source
+ */
+function _analyzeGap(pipelines, sessionId) {
+    const pipeline = pipelines.get(sessionId);
+    if (!pipeline) return {};
+    const gap = {};
+    const targetCount = pipeline.config.targetCount;
+    const sourceQualified = pipeline._sourceQualified || {};
+    const sourceResultCount = pipeline._sourceResultCount || {};
+
+    // Check all sources that had results
+    for (const source of Object.keys(sourceResultCount)) {
+        const qualified = sourceQualified[source] || 0;
+        if (qualified < targetCount) {
+            gap[source] = {
+                qualified,
+                target: targetCount,
+                deficit: targetCount - qualified,
+                resultCount: sourceResultCount[source] || 0
+            };
+        }
+    }
+    return gap;
+}
+
+// ─── S2b: Query Expansion (async, AI-powered + deterministic fallback) ───
+/**
+ * Parse skills string into array.
+ */
+function _parseSkills(skillsRaw) {
+    if (!skillsRaw) return [];
+    const str = Array.isArray(skillsRaw) ? skillsRaw.join(',') : String(skillsRaw);
+    return str.split(/[,，\n]/).map(s => s.trim().replace(/^[-•*]\s*/, '')).filter(Boolean);
+}
+
+/**
+ * Generate expanded search queries based on gap analysis.
+ * Uses AI (via injected callback) for industry-aware alternatives,
+ * with deterministic fallbacks (skill rotation + seniority drop).
+ *
+ * @param {object} direction - { q_job_title, q_location }
+ * @param {object} profile - { skills, highlights, experience }
+ * @param {Object} gap - from _analyzeGap()
+ * @param {Array} previousQueries - all queries tried so far
+ * @param {Function} [aiExpander] - async callback for AI-powered expansion
+ * @returns {Promise<Array<{query, location, source}>>}
+ */
+async function _expandQueries(direction, profile, gap, previousQueries, aiExpander) {
+    const jobTitle = direction.q_job_title || direction.jobTitle || '';
+    const location = direction.q_location || direction.location || '';
+    const skills = _parseSkills(profile.skills);
+    const previousKeywords = new Set(previousQueries.map(q => (q.query || q).toString().toLowerCase()));
+    const newQueries = [];
+
+    // ── Strategy A: Deterministic skill rotation (no AI needed) ──
+    const gapSources = Object.keys(gap);
+    for (const source of gapSources) {
+        for (let i = 1; i < Math.min(skills.length, 4); i++) {
+            const candidate = `${jobTitle} ${skills[i]}`;
+            if (!previousKeywords.has(candidate.toLowerCase())) {
+                newQueries.push({ query: candidate, location, source });
+                previousKeywords.add(candidate.toLowerCase());
+                break; // one per source
+            }
+        }
+    }
+
+    // ── Strategy B: AI-generated alternatives (industry-aware) ──
+    if (typeof aiExpander === 'function') {
+        const profileSummary = [
+            profile.highlights || '',
+            `Skills: ${(profile.skills || '').toString().slice(0, 200)}`,
+            `Experience: ${(profile.experience || '').toString().slice(0, 200)}`
+        ].filter(Boolean).join('\n');
+
+        try {
+            const aiSuggestions = await aiExpander({
+                jobTitle,
+                location,
+                profileSummary,
+                previousQueries: previousQueries.map(q => q.query || q),
+                gap
+            });
+            for (const suggestion of (aiSuggestions || [])) {
+                if (typeof suggestion === 'string' && suggestion.trim() && !previousKeywords.has(suggestion.toLowerCase())) {
+                    // Distribute across gap sources round-robin
+                    const targetSource = gapSources[newQueries.length % gapSources.length] || gapSources[0] || 'indeed';
+                    newQueries.push({ query: suggestion.trim(), location, source: targetSource });
+                    previousKeywords.add(suggestion.toLowerCase());
+                }
+            }
+        } catch (err) {
+            console.log('[expandQueries] AI expansion failed:', err.message);
+        }
+    }
+
+    // ── Strategy C: Drop seniority prefix (deterministic fallback) ──
+    const seniority = /^(senior|sr\.?|junior|jr\.?|lead|staff|principal)\s+/i;
+    if (seniority.test(jobTitle)) {
+        const broader = jobTitle.replace(seniority, '').trim();
+        if (!previousKeywords.has(broader.toLowerCase())) {
+            newQueries.push({ query: broader, location, source: gapSources[0] || 'indeed' });
+        }
+    }
+
+    return newQueries;
+}
+
+// Seen jobs: sessionId → Set<url> — persists across pipeline runs within a session
+const _seenJobs = new Map();
+
+function _getSeenJobs(sessionId) {
+    if (!_seenJobs.has(sessionId)) _seenJobs.set(sessionId, new Set());
+    return _seenJobs.get(sessionId);
+}
+
+function _addSeenJob(sessionId, url) {
+    _getSeenJobs(sessionId).add(url);
+}
+
+function _clearSeenJobs(sessionId) {
+    _seenJobs.delete(sessionId);
+}
 
 // Source name → platform URL pattern mapping
 const SOURCE_URL_PATTERNS = {
@@ -152,7 +281,9 @@ function startPipeline(sessionId, config, direction, profile) {
             targetCount: config.targetCount || 10,
             maxResults: config.maxResults || 30,
             envId: config.envId || null,
-            platforms: config.platforms || []   // platform IDs from workflow editor
+            platforms: config.platforms || [],   // platform IDs from workflow editor
+            maxSearchRounds: config.maxSearchRounds || 3,
+            aiExpander: config.aiExpander || null  // injected AI callback for query expansion
         },
         direction,
         profile,
@@ -164,8 +295,14 @@ function startPipeline(sessionId, config, direction, profile) {
             qualified: 0,
             total: 0,
             errors: [],
-            logs: []
+            logs: [],
+            searchRound: 1
         },
+        // Adaptive search tracking
+        _searchRound: 1,
+        _allQueries: [],        // all queries tried across rounds (for dedup)
+        _sourceQualified: {},   // source → number of qualified jobs (persisted across rounds)
+        _sourceResultCount: {}, // source → number of results fetched (persisted across rounds)
         stoppedAt: null
     };
 
@@ -193,18 +330,20 @@ async function _runPipeline(sessionId) {
     if (!pipeline) return;
 
     const { config, direction, profile } = pipeline;
-    const queries = buildSearchQueries(direction, profile, { envId: config.envId });
+    const initialQueries = buildSearchQueries(direction, profile, { envId: config.envId });
+    pipeline._allQueries = initialQueries.slice(); // track for adaptive dedup
     const _log = (msg) => {
         const entry = { time: new Date().toISOString(), msg };
         pipeline.progress.logs.push(entry);
         console.log(`[pipeline:${sessionId.slice(0, 8)}] ${msg}`);
     };
+    const queries = initialQueries;
 
     const jobTitle = direction.q_job_title || direction.jobTitle || '';
     const location = direction.q_location || direction.location || '';
     const mode = config.envId ? 'fingerprint browser' : 'API (HTTP)';
     _log(`Starting search: "${jobTitle}" in "${location || 'any'}" via ${mode}`);
-    _log(`Config: minScore=${config.minScore}, target=${config.targetCount}, max=${config.maxResults}`);
+    _log(`Config: minScore=${config.minScore}, targetCount=${config.targetCount}/platform, maxResults=${config.maxResults}/platform`);
     _log(`Queries: ${queries.map(q => `[${q.source}] "${q.query}" @ ${q.location || 'remote'}`).join(' | ')}`);
 
     if (queries.length === 0) {
@@ -218,7 +357,12 @@ async function _runPipeline(sessionId) {
     // Phase 1: Search — uses platform tool scripts only (no API fallback)
     pipeline.progress.phase = 'searching';
     const allListings = [];
-    const seenUrls = new Set();
+    // Merge previously seen job URLs so we skip already-parsed jobs
+    const previouslySeen = _getSeenJobs(sessionId);
+    const seenUrls = new Set(previouslySeen);
+    if (previouslySeen.size > 0) {
+        _log(`Loaded ${previouslySeen.size} previously seen job URLs — will skip`);
+    }
 
     // Resolve available platform tools for search
     const platformToolMap = _buildPlatformToolMap(sessionId, config.platforms || []);
@@ -226,181 +370,247 @@ async function _runPipeline(sessionId) {
         _log(`Platform tools available: ${Object.entries(platformToolMap).map(([src, p]) => `${src}→${p.name}`).join(', ')}`);
     }
 
-    // ── Pre-search validation: verify browser & login for each platform ──
-    const _checkedPlatforms = new Set();
-    const _blockedSources = new Set();
+    // ── Group queries by source so all queries for one platform complete before the next ──
+    const sourceOrder = [];
+    const sourceQueries = {};
+    for (const q of queries) {
+        if (!sourceQueries[q.source]) {
+            sourceQueries[q.source] = [];
+            sourceOrder.push(q.source);
+        }
+        sourceQueries[q.source].push(q);
+    }
 
-    for (const [source, pt] of Object.entries(platformToolMap)) {
-        if (_checkedPlatforms.has(pt.id)) continue;
-        _checkedPlatforms.add(pt.id);
+    // ── Shared tracking state ──
+    const _checkedPlatforms = new Set();  // platforms already validated
+    const _blockedSources = new Set();    // sources that failed validation
+    const _failedSources = new Set();     // sources whose search query failed at runtime
+    // Use pipeline-level tracking for adaptive search support
+    const _sourceResultCount = pipeline._sourceResultCount;
 
-        const platform = getPlatformStore().getPlatform(sessionId, pt.id);
+    const runnableQueryCount = queries.filter(q => platformToolMap[q.source]).length;
+    _log(`Runnable queries: ${runnableQueryCount} of ${queries.length}, maxResults per platform: ${config.maxResults}`);
+
+    // ── Helper: validate browser & login for a platform (once per platform) ──
+    async function _validatePlatform(source, platformTool) {
+        if (_checkedPlatforms.has(platformTool.id)) return !_blockedSources.has(source);
+        _checkedPlatforms.add(platformTool.id);
+
+        const platform = getPlatformStore().getPlatform(sessionId, platformTool.id);
         if (!platform) {
-            _log(`⚠ [${source}] Platform "${pt.name}" not found — skipping`);
+            _log(`⚠ [${source}] Platform "${platformTool.name}" not found — skipping`);
             _blockedSources.add(source);
-            continue;
+            return false;
         }
 
-        // Check 1: Browser open?
+        // Check 1: Browser open? Try adopting shared browser or auto-launching.
         if (!platform._browserId) {
-            _log(`⚠ [${source}] No browser open for "${pt.name}" — cannot search`);
-            dashboardServer.updatePlatformCell(sessionId, pt.id, {
-                cell: 'login', status: 'error',
-                message: 'Browser not open. Launch login first.'
-            });
-            _blockedSources.add(source);
-            continue;
+            const adopted = await getPlatformService().adoptSharedBrowser(sessionId, platformTool.id);
+            if (adopted.success) {
+                _log(`↗ [${source}] Adopted shared browser for "${platformTool.name}" (tab ${adopted.pageIndex})`);
+            } else if (platform.envId) {
+                _log(`🚀 [${source}] No browser open for "${platformTool.name}" — auto-launching...`);
+                dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                    cell: 'login', status: 'running',
+                    message: 'Auto-launching browser...'
+                });
+                try {
+                    const launchResult = await getPlatformService().launchLogin(sessionId, platformTool.id);
+                    if (launchResult.success && launchResult.browserId) {
+                        _log(`✓ [${source}] Browser launched for "${platformTool.name}"`);
+                        dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                            cell: 'login', status: 'ok',
+                            message: 'Browser launched'
+                        });
+                    } else {
+                        _log(`⚠ [${source}] Auto-launch failed for "${platformTool.name}": ${launchResult.error || 'unknown'}`);
+                        dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                            cell: 'login', status: 'error',
+                            message: 'Auto-launch failed: ' + (launchResult.error || 'unknown')
+                        });
+                        _blockedSources.add(source);
+                        return false;
+                    }
+                } catch (launchErr) {
+                    _log(`⚠ [${source}] Auto-launch error for "${platformTool.name}": ${launchErr.message}`);
+                    dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                        cell: 'login', status: 'error',
+                        message: 'Auto-launch error: ' + launchErr.message
+                    });
+                    _blockedSources.add(source);
+                    return false;
+                }
+            } else {
+                _log(`⚠ [${source}] No browser open for "${platformTool.name}" and no envId — cannot search`);
+                dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                    cell: 'login', status: 'error',
+                    message: 'Browser not open. Launch login first.'
+                });
+                _blockedSources.add(source);
+                return false;
+            }
         }
 
         // Check 2: Login verified?
         try {
-            const loginResult = await getPlatformService().verifyLogin(sessionId, pt.id);
+            const loginResult = await getPlatformService().verifyLogin(sessionId, platformTool.id);
             if (loginResult.status === 'not_logged_in' || loginResult.status === 'no_browser') {
-                _log(`⚠ [${source}] Not logged in on "${pt.name}" — cannot search`);
-                dashboardServer.updatePlatformCell(sessionId, pt.id, {
+                _log(`⚠ [${source}] Not logged in on "${platformTool.name}" — cannot search`);
+                dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
                     cell: 'login', status: 'error',
                     message: 'Not logged in. Please login first.'
                 });
                 _blockedSources.add(source);
-                continue;
+                return false;
             }
             if (loginResult.status === 'logged_in') {
-                _log(`✓ [${source}] Login verified on "${pt.name}"`);
+                _log(`✓ [${source}] Login verified on "${platformTool.name}"`);
             } else {
-                _log(`? [${source}] Login status unknown on "${pt.name}" — proceeding anyway`);
+                _log(`? [${source}] Login status unknown on "${platformTool.name}" — proceeding anyway`);
             }
         } catch (err) {
-            _log(`⚠ [${source}] Login check failed for "${pt.name}": ${err.message}`);
+            _log(`⚠ [${source}] Login check failed for "${platformTool.name}": ${err.message}`);
         }
+        return true;
     }
 
-    if (_blockedSources.size > 0 && Object.keys(platformToolMap).length > 0) {
-        const allBlocked = Object.keys(platformToolMap).every(s => _blockedSources.has(s));
-        if (allBlocked) {
-            _log('ERROR: All platform sources are blocked (browser not open or not logged in). Aborting search.');
-            pipeline.progress.errors.push('All platforms blocked — browser not open or not logged in');
-            _finishPipeline(sessionId, 'error');
-            return;
-        }
-    }
+    // ── Helper: run all queries for a single source sequentially ──
+    async function _runSourceQueries(source) {
+        const sqList = sourceQueries[source] || [];
+        for (const q of sqList) {
+            if (!pipeline.running) break;
 
-    const _failedSources = new Set(); // Track sources that failed — skip subsequent queries
+            const platformTool = platformToolMap[q.source];
 
-    for (const q of queries) {
-        if (!pipeline.running) break; // Check for stop signal
-
-        const platformTool = platformToolMap[q.source];
-
-        // Skip blocked sources (pre-search validation failed)
-        if (platformTool && _blockedSources.has(q.source)) {
-            _log(`⊘ [${q.source}] Skipped — browser/login not ready`);
-            continue;
-        }
-
-        // Skip sources that already failed (fail-fast: don't retry same platform)
-        if (_failedSources.has(q.source)) {
-            _log(`⊘ [${q.source}] Skipped — previous query on this source failed`);
-            continue;
-        }
-
-        const method = platformTool ? 'platform tool' : 'skip (no tool)';
-        _log(`Searching [${q.source}] "${q.query}" @ ${q.location || 'remote'} via ${method}...`);
-
-        try {
-            let listings = [];
-
-            if (platformTool) {
-                // Use the persisted platform search script
-                const scriptResult = await getScriptBuilder().executeSearchScript(
-                    sessionId,
-                    platformTool.id,
-                    { keywords: q.query, location: q.location },
-                    { envId: q.envId || config.envId, maxResults: Math.ceil(config.maxResults / queries.length) }
-                );
-                if (scriptResult.success && scriptResult.jobs) {
-                    listings = scriptResult.jobs.map(j => ({
-                        title: j.title || '',
-                        company: j.company || '',
-                        location: j.location || q.location || '',
-                        url: j.url || j.link || '',
-                        salary: j.salary || '',
-                        source: q.source
-                    }));
-                    _log(`[${q.source}] Platform tool returned ${listings.length} results`);
-                } else {
-                    // Platform tool failed — do NOT fall back to API.
-                    // Mark login cell as error and skip all subsequent queries for this source.
-                    const errMsg = scriptResult.error || 'unknown error';
-                    _log(`✗ [${q.source}] Platform tool failed: ${errMsg}`);
-                    _failedSources.add(q.source);
-                    dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
-                        cell: 'login', status: 'error',
-                        message: 'Search failed: ' + errMsg
-                    });
-                    pipeline.progress.errors.push(`[${q.source}] Search tool failed: ${errMsg}`);
-                }
-            } else {
-                // No platform tool available for this source — skip silently
-                _log(`[${q.source}] No platform tool available — skipped`);
+            if (platformTool && _blockedSources.has(q.source)) {
+                _log(`⊘ [${q.source}] Skipped — browser/login not ready`);
+                continue;
+            }
+            if (_failedSources.has(q.source)) {
+                _log(`⊘ [${q.source}] Skipped — previous query on this source failed`);
+                continue;
+            }
+            const srcCount = _sourceResultCount[q.source] || 0;
+            if (srcCount >= config.maxResults) {
+                _log(`⊘ [${q.source}] Skipped — already fetched ${srcCount}/${config.maxResults} results`);
                 continue;
             }
 
-            const newCount = listings.filter(l => l.url && !seenUrls.has(l.url)).length;
-            _log(`[${q.source}] Found ${listings.length} results (${newCount} new)`);
-
-            for (const listing of listings) {
-                if (listing.url && !seenUrls.has(listing.url)) {
-                    seenUrls.add(listing.url);
-                    allListings.push(listing);
-
-                    _log(`+ "${listing.title}" @ ${listing.company || '?'} (${listing.location || '?'})`);
-
-                    // Record as discovered
-                    dashboardServer.upsertJobCard(sessionId, {
-                        url: listing.url,
-                        title: listing.title,
-                        company: listing.company,
-                        location: listing.location,
-                        salary: listing.salary,
-                        status: 'discovered'
-                    });
-                }
+            // Just-in-time platform validation
+            if (platformTool) {
+                const ok = await _validatePlatform(q.source, platformTool);
+                if (!ok) continue;
             }
 
-            pipeline.progress.searched++;
-            pipeline.progress.total = allListings.length;
-        } catch (err) {
-            _log(`ERROR [${q.source}]: ${err.message}`);
-            pipeline.progress.errors.push(`Search error: ${err.message}`);
+            const method = platformTool ? 'platform tool' : 'skip (no tool)';
+            _log(`Searching [${q.source}] "${q.query}" @ ${q.location || 'remote'} via ${method}...`);
+
+            try {
+                let listings = [];
+
+                if (platformTool) {
+                    const remaining = config.maxResults - (_sourceResultCount[q.source] || 0);
+                    const scriptResult = await getScriptBuilder().executeSearchScript(
+                        sessionId,
+                        platformTool.id,
+                        { keywords: q.query, location: q.location },
+                        { envId: q.envId || config.envId, maxResults: Math.min(remaining, config.maxResults) }
+                    );
+                    if (scriptResult.success && scriptResult.jobs) {
+                        listings = scriptResult.jobs.map(j => ({
+                            title: j.title || '',
+                            company: j.company || '',
+                            location: j.location || q.location || '',
+                            url: j.url || j.link || '',
+                            salary: j.salary || '',
+                            source: q.source,
+                            fullText: j.fullText || ''
+                        }));
+                        _log(`[${q.source}] Platform tool returned ${listings.length} results`);
+                    } else {
+                        const errMsg = scriptResult.error || 'unknown error';
+                        _log(`✗ [${q.source}] Platform tool failed: ${errMsg}`);
+                        _failedSources.add(q.source);
+                        dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                            cell: 'search', status: 'error',
+                            message: 'Search failed: ' + errMsg
+                        });
+                        pipeline.progress.errors.push(`[${q.source}] Search tool failed: ${errMsg}`);
+                    }
+                } else {
+                    _log(`[${q.source}] No platform tool available — skipped`);
+                    continue;
+                }
+
+                const newCount = listings.filter(l => l.url && !seenUrls.has(l.url)).length;
+                _log(`[${q.source}] Found ${listings.length} results (${newCount} new)`);
+
+                for (const listing of listings) {
+                    if (listing.url && !seenUrls.has(listing.url)) {
+                        seenUrls.add(listing.url);
+                        allListings.push(listing);
+                        _sourceResultCount[q.source] = (_sourceResultCount[q.source] || 0) + 1;
+                        _log(`+ "${listing.title}" @ ${listing.company || '?'} (${listing.location || '?'})`);
+                    }
+                }
+
+                pipeline.progress.searched++;
+                pipeline.progress.total = allListings.length;
+            } catch (err) {
+                _log(`ERROR [${q.source}]: ${err.message}`);
+                pipeline.progress.errors.push(`Search error: ${err.message}`);
+            }
         }
+    }
+
+    // ── Execute: sequential only (browser can only operate one active tab at a time) ──
+    for (const source of sourceOrder) {
+        if (!pipeline.running) break;
+        await _runSourceQueries(source);
     }
 
     _log(`Search complete: ${allListings.length} unique listings from ${pipeline.progress.searched} queries`);
 
     if (!pipeline.running) { _finishPipeline(sessionId, 'stopped'); return; }
 
-    // Phase 2: Parse & Match
+    // Phase 2: Parse & Match (targetCount is per-platform)
     pipeline.progress.phase = 'matching';
-    _log(`Matching ${allListings.length} listings against profile (minScore: ${config.minScore}%)...`);
+    _log(`Matching ${allListings.length} listings against profile (minScore: ${config.minScore}%, targetCount per platform: ${config.targetCount})...`);
+    // Use pipeline-level qualified tracking for adaptive rounds
+    const _sourceQualified = pipeline._sourceQualified;
 
     for (const listing of allListings) {
         if (!pipeline.running) break;
-        if (pipeline.progress.qualified >= config.targetCount) break;
+
+        // Per-platform targetCount: skip if this source already has enough qualified jobs
+        const srcQual = _sourceQualified[listing.source] || 0;
+        if (srcQual >= config.targetCount) {
+            _log(`⊘ [${listing.source}] Skipped matching — already ${srcQual}/${config.targetCount} qualified`);
+            continue;
+        }
 
         try {
-            // Parse listing requirements
+            // Parse listing requirements — prefer fullText from search script
             let requirements = null;
-            try {
-                const parsed = await parseListingHandler({
-                    url: listing.url,
-                    useBrowser: false
-                });
-                requirements = parsed;
+            if (listing.fullText) {
+                // JD already fetched by search script Phase 2
+                requirements = extractRequirements({ text: listing.fullText, title: listing.title || '' });
                 pipeline.progress.parsed++;
-
                 dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
-            } catch {
-                // Parse failure is non-fatal, use what we have
+                _log(`  Parsed JD from search script fullText (${listing.fullText.length} chars)`);
+            } else {
+                // Fallback: try HTTP fetch (may be blocked by anti-bot)
+                try {
+                    const parsed = await parseListingHandler({
+                        url: listing.url,
+                        useBrowser: false
+                    });
+                    requirements = parsed;
+                    pipeline.progress.parsed++;
+                    dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
+                } catch {
+                    // Parse failure is non-fatal, use what we have
+                }
             }
 
             // Match against profile
@@ -424,17 +634,26 @@ async function _runPipeline(sessionId) {
             const qualified = score >= config.minScore;
             _log(`${qualified ? '✓' : '✗'} "${listing.title}" @ ${listing.company || '?'} → score: ${score}%${qualified ? ' QUALIFIED' : ''}`);
 
-            // Update job card with score
-            dashboardServer.upsertJobCard(sessionId, {
-                url: listing.url,
-                matchScore: score,
-                status: qualified ? 'matched' : 'discovered',
-                artifacts: requirements ? { requirements: true } : {}
-            });
-
+            // Only store qualified jobs (score >= minScore)
             if (qualified) {
+                dashboardServer.upsertJobCard(sessionId, {
+                    url: listing.url,
+                    title: listing.title,
+                    company: listing.company,
+                    location: listing.location,
+                    salary: listing.salary,
+                    fullText: listing.fullText || '',
+                    matchScore: score,
+                    status: 'matched',
+                    artifacts: requirements ? { requirements } : {},
+                    matchBreakdown: matchResult.breakdown || null
+                });
                 pipeline.progress.qualified++;
+                _sourceQualified[listing.source] = (_sourceQualified[listing.source] || 0) + 1;
             }
+
+            // Track this URL as seen (persisted across pipeline runs)
+            _addSeenJob(sessionId, listing.url);
         } catch (err) {
             _log(`ERROR matching "${listing.title}": ${err.message}`);
             pipeline.progress.errors.push(`Match error (${listing.url}): ${err.message}`);
@@ -442,8 +661,139 @@ async function _runPipeline(sessionId) {
     }
 
     const p = pipeline.progress;
-    _log(`Done: ${p.qualified} qualified / ${p.matched} scored / ${allListings.length} found (${p.errors.length} errors)`);
-    _finishPipeline(sessionId, p.qualified >= config.targetCount ? 'completed' : 'done');
+    const srcSummary = Object.entries(_sourceQualified).map(([s, n]) => `${s}: ${n}/${config.targetCount}`).join(', ');
+    _log(`Round ${pipeline._searchRound}: ${p.qualified} qualified / ${p.matched} scored / ${allListings.length} found (${p.errors.length} errors)`);
+    _log(`Per-platform qualified: ${srcSummary || 'none'}`);
+
+    // ─── Adaptive expansion: retry if results insufficient ───
+    const gap = _analyzeGap(_pipelines, sessionId);
+    const hasGap = Object.keys(gap).length > 0;
+    const round = pipeline._searchRound;
+
+    if (hasGap && round < config.maxSearchRounds && pipeline.running) {
+        pipeline._searchRound = round + 1;
+        pipeline.progress.searchRound = round + 1;
+        _log(`Gap detected: ${Object.entries(gap).map(([s, g]) => `${s}: ${g.qualified}/${g.target}`).join(', ')}`);
+
+        const newQueries = await _expandQueries(
+            direction, profile, gap,
+            pipeline._allQueries,
+            config.aiExpander
+        );
+
+        if (newQueries.length > 0) {
+            _log(`Round ${round + 1}: ${newQueries.length} expanded queries → ${newQueries.map(q => `[${q.source}] "${q.query}"`).join(', ')}`);
+            pipeline.progress.phase = 'search_expand';
+            dashboardServer.updatePipelineProgress(sessionId, {
+                phase: 'search_expand',
+                message: `Round ${round + 1}: trying ${newQueries.length} alternative queries...`,
+                round: round + 1
+            });
+
+            // Track all queries for dedup
+            pipeline._allQueries.push(...newQueries);
+
+            // Group new queries by source
+            const newSourceQueries = {};
+            const newSourceOrder = [];
+            for (const q of newQueries) {
+                if (!newSourceQueries[q.source]) {
+                    newSourceQueries[q.source] = [];
+                    newSourceOrder.push(q.source);
+                }
+                newSourceQueries[q.source].push(q);
+            }
+
+            // Inject into the sourceQueries structure for _runSourceQueries
+            for (const [src, qList] of Object.entries(newSourceQueries)) {
+                sourceQueries[src] = qList;
+            }
+
+            // Phase 1 again: run new queries (only for gap sources)
+            pipeline.progress.phase = 'searching';
+            for (const source of newSourceOrder) {
+                if (!pipeline.running) break;
+                await _runSourceQueries(source);
+            }
+
+            if (!pipeline.running) { _finishPipeline(sessionId, 'stopped'); return; }
+
+            // Phase 2 again: match new results only
+            const newListings = allListings.filter(l => !_getSeenJobs(sessionId).has(l.url));
+            if (newListings.length > 0) {
+                pipeline.progress.phase = 'matching';
+                _log(`Matching ${newListings.length} new listings from round ${round + 1}...`);
+
+                for (const listing of newListings) {
+                    if (!pipeline.running) break;
+                    const srcQual = _sourceQualified[listing.source] || 0;
+                    if (srcQual >= config.targetCount) continue;
+
+                    try {
+                        let requirements = null;
+                        if (listing.fullText) {
+                            requirements = extractRequirements({ text: listing.fullText, title: listing.title || '' });
+                            pipeline.progress.parsed++;
+                            dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
+                        }
+
+                        const matchResult = matchProfileHandler({
+                            profile,
+                            requirements: requirements || {
+                                title: listing.title || '',
+                                sections: { technical: '', experience: '', education: '', soft_skills: '' }
+                            },
+                            jobTitle: listing.title
+                        });
+
+                        const score = matchResult.overallScore || 0;
+                        pipeline.progress.matched++;
+                        const qualified = score >= config.minScore;
+                        _log(`${qualified ? '✓' : '✗'} "${listing.title}" @ ${listing.company || '?'} → score: ${score}%${qualified ? ' QUALIFIED' : ''}`);
+
+                        if (qualified) {
+                            dashboardServer.upsertJobCard(sessionId, {
+                                url: listing.url,
+                                title: listing.title,
+                                company: listing.company,
+                                location: listing.location,
+                                salary: listing.salary,
+                                fullText: listing.fullText || '',
+                                matchScore: score,
+                                status: 'matched',
+                                artifacts: requirements ? { requirements } : {},
+                                matchBreakdown: matchResult.breakdown || null
+                            });
+                            pipeline.progress.qualified++;
+                            _sourceQualified[listing.source] = (_sourceQualified[listing.source] || 0) + 1;
+                        }
+                        _addSeenJob(sessionId, listing.url);
+                    } catch (err) {
+                        _log(`ERROR matching "${listing.title}": ${err.message}`);
+                        pipeline.progress.errors.push(`Match error (${listing.url}): ${err.message}`);
+                    }
+                }
+            }
+
+            // Check if another round is needed (recursive gap check, capped by maxSearchRounds)
+            const nextGap = _analyzeGap(_pipelines, sessionId);
+            const nextHasGap = Object.keys(nextGap).length > 0;
+            if (nextHasGap && pipeline._searchRound < config.maxSearchRounds && pipeline.running) {
+                // Log and continue (will be handled by next iteration if we refactor to loop)
+                const nextSrcSummary = Object.entries(_sourceQualified).map(([s, n]) => `${s}: ${n}/${config.targetCount}`).join(', ');
+                _log(`After round ${pipeline._searchRound}: ${nextSrcSummary} — still has gap, but max rounds reached or will try next round`);
+            }
+        } else {
+            _log(`Round ${round + 1}: no new queries generated — finishing`);
+        }
+    }
+
+    // Final completion
+    const finalGap = _analyzeGap(_pipelines, sessionId);
+    const allMet = Object.keys(finalGap).length === 0 && Object.keys(_sourceResultCount).length > 0;
+    const finalSummary = Object.entries(_sourceQualified).map(([s, n]) => `${s}: ${n}/${config.targetCount}`).join(', ');
+    _log(`Final (${pipeline._searchRound} round${pipeline._searchRound > 1 ? 's' : ''}): ${p.qualified} qualified — ${finalSummary || 'none'}`);
+    _finishPipeline(sessionId, allMet ? 'completed' : 'done');
 }
 
 function _finishPipeline(sessionId, reason) {
@@ -480,9 +830,30 @@ function getPipelineStatus(sessionId) {
 }
 
 /**
- * Generate a tailored resume for a specific job.
+ * Format interview prep questions into markdown.
  */
-async function generateResume(sessionId, jobUrl, profile) {
+function _formatInterviewPrep(questions) {
+    if (!Array.isArray(questions) || questions.length === 0) return '';
+    return questions.map((q, i) => {
+        let md = `### Q${i + 1}: ${q.question || q}`;
+        if (q.category || q.type) md += `\n**Category:** ${q.category || q.type}`;
+        if (q.hint) md += `\n**Hint:** ${q.hint}`;
+        if (q.sampleAnswer) md += `\n\n**Sample Answer:**\n${q.sampleAnswer}`;
+        return md;
+    }).join('\n\n---\n\n');
+}
+
+/**
+ * Generate a tailored resume for a specific job.
+ * Two-stage: uses sessionProfile (already tailored for role) if available,
+ * then applies JD-specific emphasis via matchResult.
+ *
+ * @param {string} sessionId
+ * @param {string} jobUrl
+ * @param {object} profile - Raw profile (fallback)
+ * @param {object} [sessionProfile] - Session-tailored profile (preferred)
+ */
+async function generateResume(sessionId, jobUrl, profile, sessionProfile) {
     const cards = dashboardServer.getJobCards(sessionId);
     const job = cards.find(c => c.url === jobUrl);
     if (!job) return { error: 'Job not found' };
@@ -490,18 +861,60 @@ async function generateResume(sessionId, jobUrl, profile) {
     try {
         const result = resumeGenHandler({
             profile,
+            sessionProfile: sessionProfile || null,
             jobTitle: job.title,
             company: job.company,
-            requirements: job.artifacts?.requirements || {}
+            requirements: job.artifacts?.requirements || {},
+            matchResult: job.matchBreakdown ? { breakdown: job.matchBreakdown } : undefined
         });
+
+        // Generate DOCX buffer for auto-apply file upload
+        let resumeDocx = null;
+        try {
+            const { markdownToDocx } = require('./tools/docxBuilder');
+            const docxResult = await markdownToDocx(result.markdown, {
+                type: 'Resume', company: job.company, title: job.title
+            });
+            resumeDocx = docxResult.buffer.toString('base64');
+        } catch (docxErr) {
+            console.error('[pipeline:resume] DOCX generation failed:', docxErr.message);
+        }
 
         dashboardServer.upsertJobCard(sessionId, {
             url: jobUrl,
             status: 'tailored',
-            artifacts: { resume: result.markdown ? 'generated' : null }
+            artifacts: { resume: result.markdown || null, resumeDocx }
         });
 
-        return { success: true, markdown: result.markdown, job };
+        // Store resume variant in knowledge store for history & dedup
+        const knowledgeClient = require('./core/knowledgeClient');
+        const crypto = require('crypto');
+        const urlHash = crypto.createHash('md5').update(jobUrl).digest('hex').slice(0, 12);
+        knowledgeClient.upsert({
+            refId: `resume_${urlHash}`,
+            type: 'resume_variant',
+            scope: `session:${sessionId}`,
+            content: result.markdown || '',
+            summary: `${job.title} @ ${job.company}`,
+            tags: ['resume', job.company || 'unknown'],
+            metadata: {
+                jobUrl,
+                jobTitle: job.title,
+                company: job.company,
+                matchScore: job.matchScore || 0,
+                derivationChain: result.derivationChain || [],
+                generatedAt: result.generatedAt
+            }
+        }).catch(err => {
+            console.error('[pipeline:resume] Failed to store resume variant:', err.message);
+        });
+
+        return {
+            success: true,
+            markdown: result.markdown,
+            derivationChain: result.derivationChain,
+            job
+        };
     } catch (err) {
         return { error: err.message };
     }
@@ -523,9 +936,21 @@ async function generateCoverLetter(sessionId, jobUrl, profile) {
             requirements: job.artifacts?.requirements || {}
         });
 
+        // Generate DOCX buffer for cover letter
+        let coverLetterDocx = null;
+        try {
+            const { markdownToDocx } = require('./tools/docxBuilder');
+            const docxResult = await markdownToDocx(result.markdown, {
+                type: 'CoverLetter', company: job.company, title: job.title
+            });
+            coverLetterDocx = docxResult.buffer.toString('base64');
+        } catch (docxErr) {
+            console.error('[pipeline:coverLetter] DOCX generation failed:', docxErr.message);
+        }
+
         dashboardServer.upsertJobCard(sessionId, {
             url: jobUrl,
-            artifacts: { coverLetter: result.markdown ? 'generated' : null }
+            artifacts: { coverLetter: result.markdown || null, coverLetterDocx }
         });
 
         return { success: true, markdown: result.markdown, job };
@@ -543,7 +968,7 @@ async function generateInterviewPrep(sessionId, jobUrl, profile) {
     if (!job) return { error: 'Job not found' };
 
     try {
-        const result = mockInterviewHandler({
+        const result = await mockInterviewHandler({
             action: 'generate',
             profile,
             jobTitle: job.title,
@@ -551,12 +976,14 @@ async function generateInterviewPrep(sessionId, jobUrl, profile) {
             count: 5
         });
 
+        const prepMarkdown = result.questions ? _formatInterviewPrep(result.questions) : null;
+
         dashboardServer.upsertJobCard(sessionId, {
             url: jobUrl,
-            artifacts: { interviewPrep: result.questions ? 'generated' : null }
+            artifacts: { interviewPrep: prepMarkdown }
         });
 
-        return { success: true, questions: result.questions, job };
+        return { success: true, questions: result.questions, markdown: prepMarkdown, job };
     } catch (err) {
         return { error: err.message };
     }
@@ -591,5 +1018,10 @@ module.exports = {
     generateInterviewPrep,
     markApplied,
     getHistory,
-    buildSearchQueries
+    buildSearchQueries,
+    clearSeenJobs: _clearSeenJobs,
+    // Exported for testing
+    _analyzeGap,
+    _expandQueries,
+    _parseSkills
 };

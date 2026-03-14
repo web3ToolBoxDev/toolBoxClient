@@ -36,16 +36,36 @@ const TOOL_DEF = {
 
 /**
  * Generate tailored resume as Markdown.
+ *
+ * Two-stage flow:
+ *   1. If `sessionProfile` is provided (already tailored for target role), use it as base.
+ *   2. Apply JD-specific keyword emphasis from `matchResult` on top.
+ *
  * @param {object} params
- * @returns {object} { markdown, summary }
+ * @param {object} [params.sessionProfile] - Session-tailored profile (preferred over raw profile)
+ * @param {object} params.profile - Raw/master profile (fallback)
+ * @returns {object} { markdown, derivationChain, summary }
  */
-function handler({ profile, requirements, matchResult, jobTitle, company, style = 'professional' }) {
-    if (!profile) throw new Error('profile is required');
+function handler({ profile, sessionProfile, requirements, matchResult, jobTitle, company, style = 'professional' }) {
+    // Use session-tailored profile if available, otherwise raw profile
+    const effectiveProfile = sessionProfile || profile;
+    if (!effectiveProfile) throw new Error('profile is required');
+
+    // Track derivation chain for lineage
+    const derivationChain = [];
+    if (sessionProfile) {
+        derivationChain.push('master', 'session-tailored', 'job-specific');
+    } else {
+        derivationChain.push('raw', 'job-specific');
+    }
+
+    // Use effectiveProfile from here
+    profile = effectiveProfile;
 
     const basic = profile.basic || '';
-    const skills = profile.skills || '';
-    const experience = profile.experience || '';
-    const education = profile.education || '';
+    const skills = Array.isArray(profile.skills) ? profile.skills.join(', ') : (profile.skills || '');
+    const experience = Array.isArray(profile.experience) ? profile.experience.join('\n') : (profile.experience || '');
+    const education = Array.isArray(profile.education) ? profile.education.join('\n') : (profile.education || '');
     const highlights = profile.highlights || '';
 
     // Determine which skills to emphasize based on match result
@@ -125,6 +145,30 @@ function handler({ profile, requirements, matchResult, jobTitle, company, style 
         sections.push('');
     }
 
+    // Certifications (from extended profile)
+    const certifications = Array.isArray(profile.certifications) ? profile.certifications.join('\n') : (profile.certifications || '');
+    if (certifications) {
+        sections.push('## Certifications');
+        sections.push(formatMultiLine(certifications));
+        sections.push('');
+    }
+
+    // Projects (from extended profile)
+    const projects = Array.isArray(profile.projects) ? profile.projects.join('\n') : (profile.projects || '');
+    if (projects) {
+        sections.push('## Projects');
+        sections.push(formatMultiLine(projects));
+        sections.push('');
+    }
+
+    // Languages (from extended profile)
+    const languages = Array.isArray(profile.languages) ? profile.languages.join(', ') : (profile.languages || '');
+    if (languages) {
+        sections.push('## Languages');
+        sections.push(languages);
+        sections.push('');
+    }
+
     const markdown = sections.join('\n');
 
     return {
@@ -133,6 +177,7 @@ function handler({ profile, requirements, matchResult, jobTitle, company, style 
         targetJob: targetTitle,
         targetCompany,
         style,
+        derivationChain,
         generatedAt: new Date().toISOString()
     };
 }

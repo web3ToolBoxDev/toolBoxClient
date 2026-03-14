@@ -113,7 +113,7 @@ async function main() {
     const platforms = [
         {
             name: 'Indeed',
-            url: 'https://ca.indeed.com/jobs',
+            url: 'https://ca.indeed.com/',
             loginUrl: 'https://secure.indeed.com/account/login',
             icon: '💼',
             connectionType: 'browser',
@@ -147,6 +147,7 @@ async function main() {
                     dashboardServer.updatePlatformCell(SESSION_ID, plat.id, {
                         cell: toolType, status: 'ready',
                         version: plat.tools[toolType].version,
+                        jdVerified: plat.tools[toolType].jdVerified || false,
                         message: `Restored v${plat.tools[toolType].version}`
                     });
                     console.log(`[mock-dashboard]   ✓ ${p.name} ${toolType} tool restored (v${plat.tools[toolType].version})`);

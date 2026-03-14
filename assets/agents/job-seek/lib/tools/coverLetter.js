@@ -30,8 +30,8 @@ function handler({ profile, requirements, jobTitle, company, tone = 'professiona
     if (!jobTitle) throw new Error('jobTitle is required');
 
     const basic = profile.basic || '';
-    const skills = profile.skills || '';
-    const experience = profile.experience || '';
+    const skills = Array.isArray(profile.skills) ? profile.skills.join(', ') : (profile.skills || '');
+    const experience = Array.isArray(profile.experience) ? profile.experience.join('\n') : (profile.experience || '');
     const highlights = profile.highlights || '';
 
     const nameMatch = basic.match(/^([^,\n]+)/);

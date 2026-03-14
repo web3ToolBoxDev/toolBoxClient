@@ -55,7 +55,7 @@ function _loadToolCache() {
 /**
  * Save a platform's tool script to disk (keyed by URL for cross-session matching).
  */
-function _saveToolScript(platformUrl, toolType, script, version) {
+function _saveToolScript(platformUrl, toolType, script, version, jdVerified) {
     try {
         const dir = _dataDir();
         fs.mkdirSync(dir, { recursive: true });
@@ -72,6 +72,7 @@ function _saveToolScript(platformUrl, toolType, script, version) {
         data[platformUrl][toolType] = {
             script,
             version: version || 1,
+            jdVerified: jdVerified || false,
             savedAt: new Date().toISOString()
         };
 
@@ -111,8 +112,9 @@ function _restoreTools(platform) {
         if (saved[toolType] && saved[toolType].script) {
             platform.tools[toolType].script = saved[toolType].script;
             platform.tools[toolType].version = saved[toolType].version || 1;
+            platform.tools[toolType].jdVerified = saved[toolType].jdVerified || false;
             platform.tools[toolType].status = 'ready';
-            console.log(`[platformStore] Restored ${toolType} tool for ${platform.name} (v${platform.tools[toolType].version})`);
+            console.log(`[platformStore] Restored ${toolType} tool for ${platform.name} (v${platform.tools[toolType].version}, jdVerified=${platform.tools[toolType].jdVerified})`);
         }
     }
 }
@@ -389,10 +391,11 @@ function updateToolStatus(sessionId, platformId, toolType, status, extra = {}) {
     tool.status = status;
     if (extra.script !== undefined) tool.script = extra.script;
     if (extra.buildLog) tool.buildLog = extra.buildLog;
+    if (extra.jdVerified !== undefined) tool.jdVerified = extra.jdVerified;
     if (status === 'ready' && extra.script) {
         tool.version++;
         // Persist script to disk so it survives session restarts
-        _saveToolScript(platform.url, toolType, extra.script, tool.version);
+        _saveToolScript(platform.url, toolType, extra.script, tool.version, tool.jdVerified);
     }
 
     return { success: true, tool };

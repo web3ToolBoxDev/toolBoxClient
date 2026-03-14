@@ -40,6 +40,22 @@ function _syncToDashboard(sessionId, platformId, update) {
 const _envBrowsers = new Map(); // envId → browserId
 
 /**
+ * Clear stale _browserId from all platforms in a session that reference a dead browser.
+ */
+function _clearStaleBrowserId(sessionId, deadBrowserId) {
+    try {
+        const platforms = platformStore.getPlatforms(sessionId);
+        for (const p of platforms) {
+            if (p._browserId === deadBrowserId) {
+                console.log(`[platformService] Clearing stale _browserId on platform ${p.id}`);
+                delete p._browserId;
+                delete p._pageIndex;
+            }
+        }
+    } catch (_) { /* ignore */ }
+}
+
+/**
  * Screenshot verifier — a function that analyzes a screenshot to determine login status.
  * Set by the agent/dashboard via setScreenshotVerifier().
  *
@@ -274,7 +290,8 @@ async function verifyLogin(sessionId, platformId) {
             }
             const result = await toolServiceClient.executeTool('page_extract', extractParams);
             const extracted = result.result || {};
-            if (result.success && extracted.results && extracted.results.length > 0) {
+            // count > 0 means selectors matched elements (even if attribute extraction returns null)
+            if (result.success && extracted.count > 0) {
                 domPassed = true;
             }
         } catch (_) {
@@ -404,65 +421,136 @@ async function launchLogin(sessionId, platformId, options = {}) {
 
     if (existingBrowserId) {
         // Reuse existing browser — open a new tab
-        browserId = existingBrowserId;
         const newTab = await toolServiceClient.executeTool('page_new', {
-            browserId,
+            browserId: existingBrowserId,
             url: loginUrl,
             waitUntil: 'domcontentloaded'
         });
         if (!newTab.success) {
-            // Browser might have been closed externally — fall through to launch new
+            // Browser dead — clean up stale reference, will launch fresh below
+            console.log(`[platformService] Browser ${existingBrowserId} is dead, cleaning up`);
             _envBrowsers.delete(envId);
+            // Also clear _browserId on any platforms that referenced it
+            _clearStaleBrowserId(sessionId, existingBrowserId);
         } else {
+            browserId = existingBrowserId;
             pageIndex = newTab.result.pageIndex;
         }
     }
 
     if (!browserId || pageIndex === undefined) {
         // Launch new fingerprint browser via toolService
-        const launch = await toolServiceClient.executeTool('browser_launch', {
+        let launch = await toolServiceClient.executeTool('browser_launch', {
             env,
             chromePath,
             savePath,
             headless: false
         });
 
+        // If launch failed (e.g. user data dir locked by existing browser),
+        // try to recover: list active browsers and attempt to reuse one,
+        // or close all and retry launch.
         if (!launch.success) {
-            return { success: false, error: 'Browser launch failed: ' + (launch.error || 'unknown') };
+            console.log(`[platformService] browser_launch failed: ${launch.error}, attempting recovery...`);
+            try {
+                // Ask toolService for active browsers — one might be the orphaned instance
+                const listRes = await toolServiceClient.request('GET', '/browser/list');
+                if (listRes.success && listRes.browsers && listRes.browsers.length > 0) {
+                    // Try the most recent browser — open a new tab to test
+                    const candidate = listRes.browsers[listRes.browsers.length - 1];
+                    console.log(`[platformService] Found existing browser ${candidate.id}, attempting reuse...`);
+                    const testTab = await toolServiceClient.executeTool('page_new', {
+                        browserId: candidate.id,
+                        url: loginUrl,
+                        waitUntil: 'domcontentloaded'
+                    });
+                    if (testTab.success) {
+                        browserId = candidate.id;
+                        _envBrowsers.set(envId, browserId);
+                        pageIndex = testTab.result.pageIndex;
+                        console.log(`[platformService] Recovered orphaned browser ${browserId}`);
+                    }
+                }
+            } catch (recoveryErr) {
+                console.log(`[platformService] Recovery failed: ${recoveryErr.message}`);
+            }
+
+            // If still no browser, close all known browsers and retry
+            if (!browserId) {
+                try {
+                    const allBrowsers = await toolServiceClient.request('GET', '/browser/list');
+                    if (allBrowsers.browsers) {
+                        for (const b of allBrowsers.browsers) {
+                            try { await toolServiceClient.executeTool('browser_close', { browserId: b.id }); } catch (_) {}
+                        }
+                    }
+                } catch (_) {}
+                launch = await toolServiceClient.executeTool('browser_launch', {
+                    env, chromePath, savePath, headless: false
+                });
+                if (!launch.success) {
+                    return { success: false, error: 'Browser launch failed: ' + (launch.error || 'unknown') };
+                }
+                browserId = launch.result.browserId;
+                _envBrowsers.set(envId, browserId);
+            }
+        } else {
+            browserId = launch.result.browserId;
+            _envBrowsers.set(envId, browserId);
         }
 
-        browserId = launch.result.browserId;
-        _envBrowsers.set(envId, browserId);
-
-        // Navigate to login page on the default tab
-        await toolServiceClient.executeTool('page_goto', {
-            browserId,
-            url: loginUrl,
-            waitFor: 3000
-        });
-
-        // Default tab is page 0
-        pageIndex = 0;
+        if (pageIndex === undefined) {
+            // Navigate to login page on the default tab
+            await toolServiceClient.executeTool('page_goto', {
+                browserId,
+                url: loginUrl,
+                waitFor: 3000
+            });
+            pageIndex = 0;
+        }
     }
 
     // Store browserId + pageIndex on platform object for subsequent operations
     platform._browserId = browserId;
     platform._pageIndex = pageIndex;
 
+    // Auto-verify: cookies from previous session may still be valid
     _syncToDashboard(sessionId, platformId, {
         cell: 'login', status: 'verifying',
         name: platform.name, icon: platform.icon, url: platform.url,
-        message: 'Login launched — waiting for user to log in'
+        message: 'Checking login status...'
+    });
+
+    try {
+        const verifyResult = await verifyLogin(sessionId, platformId);
+        if (verifyResult.status === 'logged_in') {
+            // Cookie still valid — auto-verified, no manual action needed
+            console.log(`[platformService] Auto-verified login on ${platform.name}: ${verifyResult.message}`);
+            return {
+                success: true,
+                method: 'fingerprint',
+                autoVerified: true,
+                envId, browserId, pageIndex, loginUrl,
+                message: verifyResult.message
+            };
+        }
+    } catch (verifyErr) {
+        console.log(`[platformService] Auto-verify failed for ${platform.name}: ${verifyErr.message}`);
+    }
+
+    // Not auto-verified — user needs to log in manually then click Confirm
+    _syncToDashboard(sessionId, platformId, {
+        cell: 'login', status: 'verifying',
+        name: platform.name, icon: platform.icon, url: platform.url,
+        message: 'Browser opened — log in then click Confirm'
     });
 
     return {
         success: true,
         method: 'fingerprint',
-        envId,
-        browserId,
-        pageIndex,
-        loginUrl,
-        message: 'Fingerprint browser opened. Please log in manually, then click "Confirm Login".'
+        autoVerified: false,
+        envId, browserId, pageIndex, loginUrl,
+        message: 'Please log in manually, then click Confirm.'
     };
 }
 
@@ -544,6 +632,43 @@ async function closeBrowser(sessionId, platformId) {
     return result;
 }
 
+/**
+ * Try to adopt a shared browser for a platform that has no _browserId.
+ * If another platform with the same envId already has a browser open,
+ * open a new tab in that browser for this platform.
+ * Returns { success, browserId, pageIndex } or { success: false }.
+ */
+async function adoptSharedBrowser(sessionId, platformId) {
+    const platform = platformStore.getPlatform(sessionId, platformId);
+    if (!platform || platform._browserId) return { success: false };
+
+    const envId = platform.envId;
+    if (!envId) return { success: false };
+
+    const sharedBrowserId = _envBrowsers.get(envId);
+    if (!sharedBrowserId) return { success: false };
+
+    try {
+        const newTab = await toolServiceClient.executeTool('page_new', {
+            browserId: sharedBrowserId,
+            url: platform.url,
+            waitUntil: 'networkidle'
+        });
+        if (!newTab.success) return { success: false };
+
+        // Wait for dynamic content to render (login state, SPA hydration)
+        await new Promise(r => setTimeout(r, 3000));
+
+        platform._browserId = sharedBrowserId;
+        platform._pageIndex = newTab.result.pageIndex;
+        console.log(`[platformService] Adopted shared browser ${sharedBrowserId} for ${platform.name} (tab ${platform._pageIndex})`);
+        return { success: true, browserId: sharedBrowserId, pageIndex: platform._pageIndex };
+    } catch (err) {
+        console.log(`[platformService] adoptSharedBrowser failed for ${platform.name}: ${err.message}`);
+        return { success: false };
+    }
+}
+
 module.exports = {
     launchLogin,
     verifyLogin,
@@ -551,6 +676,7 @@ module.exports = {
     bindEnv,
     getActiveBrowser,
     closeBrowser,
+    adoptSharedBrowser,
     getDetector,
     setScreenshotVerifier,
     getStaleSelectorHints,

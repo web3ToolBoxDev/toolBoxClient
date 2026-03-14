@@ -20,9 +20,9 @@ const SOURCE_META = {
 /** Step definitions with defaults. */
 const STEP_DEFAULTS = {
     customizeProfile: { enabled: true, order: 0 },
-    search:           { enabled: true, order: 1 },
-    generate:         { enabled: true, order: 2 },
-    apply:            { enabled: true, order: 3 }
+    search:           { enabled: true, order: 1, platforms: [] },
+    generate:         { enabled: true, order: 2, tailorResume: true, coverLetter: true, interviewPrep: true, jobIds: [] },
+    apply:            { enabled: true, order: 3, confirmBeforeApply: true, platforms: [], jobIds: [] }
 };
 
 const VALID_STEPS = Object.keys(STEP_DEFAULTS);
@@ -131,11 +131,16 @@ function mergeConfig(base, patch) {
 
     if (patch.steps) {
         if (typeof patch.steps === 'object' && !Array.isArray(patch.steps)) {
-            // Object form: { search: { enabled: false } }
-            merged.steps = base.steps.map(s => ({
-                ...s,
-                ...(patch.steps[s.name] || {})
-            }));
+            // Object form: { search: { enabled: false, platforms: ['indeed'] } }
+            merged.steps = base.steps.map(s => {
+                const override = patch.steps[s.name];
+                if (!override) return s;
+                const merged_step = { ...s, ...override };
+                // Array fields: replace entirely (not merge)
+                if (override.platforms) merged_step.platforms = override.platforms;
+                if (override.jobIds) merged_step.jobIds = override.jobIds;
+                return merged_step;
+            });
         }
     }
 

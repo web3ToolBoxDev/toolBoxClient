@@ -21,6 +21,9 @@ const browserLauncher = require('./lib/core/browserLauncher');
 const memoryPack = require('./lib/memoryPack');
 const markerParser = require('./lib/markerParser');
 const dashboardServer = require('./lib/dashboardServer');
+const userStore = require('./lib/core/userStore');
+const masterProfileClient = require('./lib/core/masterProfileClient');
+const tailorProfile = require('./lib/tools/tailorProfile');
 
 // Register domain pack at startup (before any upsert can happen).
 // Retries on failure since dbservice may not be ready yet.
@@ -149,7 +152,10 @@ const state = {
     savePath: '',
     walletExtensionPath: '',
     resumeProfile: '',
-    intentFiles: {}
+    intentFiles: {},
+    masterProfile: {},
+    activeUserId: '',
+    resumeHashes: {}
 };
 
 // Track active browser instances (not persisted)
@@ -198,6 +204,34 @@ function saveState() {
 
 // Restore on startup
 restoreState();
+
+// Initialize multi-user store and migrate existing data
+(function initUserStore() {
+    const { users, activeUserId } = userStore.init(_dataDir);
+    if (!state.activeUserId) {
+        state.activeUserId = activeUserId;
+    }
+    // Migration: if masterProfile is empty but we have session profileSections,
+    // find the richest session and promote it as the master for the active user.
+    if (state.activeUserId && (!state.masterProfile || Object.keys(state.masterProfile).length === 0)) {
+        let bestSid = null;
+        let bestCount = 0;
+        for (const [sid, sections] of Object.entries(state.profileSections || {})) {
+            const count = Object.values(sections || {}).filter(v => v && v.trim()).length;
+            if (count > bestCount) {
+                bestCount = count;
+                bestSid = sid;
+            }
+        }
+        if (bestSid && bestCount > 0) {
+            state.masterProfile = { ...state.profileSections[bestSid] };
+            console.log(`[agent:migration] Promoted session ${bestSid.slice(0, 8)} profile (${bestCount} sections) as master for ${state.activeUserId}`);
+            // Async: persist to knowledge store
+            masterProfileClient.saveAllSections(state.activeUserId, state.masterProfile)
+                .catch(err => console.error('[agent:migration] Failed to save master to knowledge store:', err.message));
+        }
+    }
+})();
 
 // Debounced auto-save: triggers after state mutations, avoids excessive writes
 let _saveTimer = null;
@@ -314,14 +348,56 @@ async function seedProfileFromKnowledge(sessionId) {
         await ensurePack(); // lazy re-register if startup failed
 
         let seededCount = 0;
-        const profileDocs = await knowledgeClient.findFresh('profile', 'agent:job-seek', 30);
-        console.log(`[agent:seed] findFresh returned ${profileDocs.length} docs`);
-        for (const doc of profileDocs) {
-            const subType = doc.subType || doc.sub_type;
-            const content = doc.content;
-            if (subType && content) {
-                state.profileSections[sessionId][subType] = content;
-                seededCount++;
+        const userId = state.activeUserId;
+
+        // Priority 1: load from master profile (user-scoped, no staleness window)
+        if (userId) {
+            const master = await masterProfileClient.loadMaster(userId);
+            const masterKeys = Object.keys(master).filter(k => master[k] && master[k].trim());
+            if (masterKeys.length > 0) {
+                state.masterProfile = master;
+
+                // Auto-tailor for target direction if available
+                const direction = state.selectedAnswers[sessionId] || {};
+                const targetRole = direction.q_job_title;
+                if (targetRole) {
+                    const { tailoredSections, droppedItems } = tailorProfile.handler({
+                        masterProfile: master,
+                        targetRole,
+                        targetLocation: direction.q_location || '',
+                        workMode: direction.q_work_mode || '',
+                        salaryRange: direction.q_salary || ''
+                    });
+                    for (const [key, val] of Object.entries(tailoredSections)) {
+                        if (val) {
+                            state.profileSections[sessionId][key] = val;
+                            seededCount++;
+                        }
+                    }
+                    console.log(`[agent:seed] auto-tailored ${seededCount} sections for "${targetRole}" (dropped: ${droppedItems.length})`);
+                    appendRuntimeLog(sessionId, `profile_tailored -> ${seededCount} sections for "${targetRole}", dropped ${droppedItems.length} items`, { source: 'tailoring' });
+                } else {
+                    // No direction yet — copy master as-is
+                    for (const key of masterKeys) {
+                        state.profileSections[sessionId][key] = master[key];
+                        seededCount++;
+                    }
+                    console.log(`[agent:seed] seeded ${seededCount} sections from master (no direction yet)`);
+                }
+            }
+        }
+
+        // Priority 2: fall back to agent-scoped fresh docs (legacy behavior)
+        if (seededCount === 0) {
+            const profileDocs = await knowledgeClient.findFresh('profile', 'agent:job-seek', 30);
+            console.log(`[agent:seed] findFresh returned ${profileDocs.length} docs`);
+            for (const doc of profileDocs) {
+                const subType = doc.subType || doc.sub_type;
+                const content = doc.content;
+                if (subType && content) {
+                    state.profileSections[sessionId][subType] = content;
+                    seededCount++;
+                }
             }
         }
 
@@ -1781,8 +1857,30 @@ async function extractResumeFromAttachments(sessionId, attachments) {
     const { provider: activeProvider } = resolveProvider();
     if (!activeProvider) return;
 
+    const userId = state.activeUserId || 'default';
+
     for (const attachment of attachments) {
         try {
+            // MD5 dedup: skip re-parsing if same file was uploaded before
+            const fileHash = fileParser.computeHash(attachment.contentBase64);
+            if (!state.resumeHashes) state.resumeHashes = {};
+            if (!state.resumeHashes[userId]) state.resumeHashes[userId] = {};
+            const cached = state.resumeHashes[userId][fileHash];
+            if (cached && cached.sections) {
+                console.log(`[agent:resume] MD5 match (${fileHash.slice(0, 8)}) — reusing cached sections from ${cached.fileName}`);
+                appendRuntimeLog(sessionId, `resume_dedup -> ${attachment.name} matches cached ${cached.fileName} (${fileHash.slice(0, 8)})`, { source: 'extraction' });
+                appendConversation(sessionId, 'assistant', isZh()
+                    ? `♻️ 检测到相同文件 ${attachment.name}，复用之前的解析结果。`
+                    : `♻️ Detected same file ${attachment.name}, reusing previous parse results.`,
+                    { _system: true });
+                // Apply cached sections to session + master
+                state.profileSections[sessionId] = { ...(state.profileSections[sessionId] || {}), ...cached.sections };
+                state.masterProfile = masterProfileClient.mergeMaster(state.masterProfile || {}, cached.sections);
+                masterProfileClient.saveAllSections(userId, state.masterProfile).catch(() => {});
+                scheduleSave();
+                continue;
+            }
+
             const parsed = await fileParser.extractText(
                 attachment.contentBase64,
                 attachment.mimeType,
@@ -1894,6 +1992,19 @@ async function extractResumeFromAttachments(sessionId, attachments) {
                         if (result?.success) stored++;
                         console.log(`[agent:knowledge] Stored profile/${subType} (${content.length} chars)`);
                     }
+
+                    // Also store in master profile (user-scoped, persists across sessions)
+                    state.masterProfile = masterProfileClient.mergeMaster(state.masterProfile || {}, sections);
+                    masterProfileClient.saveAllSections(userId, state.masterProfile).catch(e =>
+                        console.error('[agent:knowledge] master profile save error:', e.message));
+
+                    // Cache MD5 hash for dedup on re-upload
+                    if (!state.resumeHashes[userId]) state.resumeHashes[userId] = {};
+                    state.resumeHashes[userId][fileHash] = {
+                        fileName: attachment.name,
+                        parsedAt: Date.now(),
+                        sections
+                    };
 
                     // Also store a summary in mem0 for semantic search (lightweight pointer)
                     const ns = getMemoryNamespace();
@@ -2079,23 +2190,48 @@ async function applyMarkers(sessionId, markers) {
     let directionChanged = false;
 
     // Separate profile markers from PROFILE_COMPLETE to avoid conflict
-    const profileMarkers = markers.filter(m => m.type === 'profile');
+    const profileMarkers = markers.filter(m => m.type === 'profile' || m.type === 'master_profile');
     const hasProfileComplete = markers.some(m => m.type === 'profile_complete');
     const hasExplicitProfileOps = profileMarkers.length > 0;
 
+    // Sections that should propagate additive ops to master profile
+    const ADDITIVE_SECTIONS = new Set(['skills', 'certifications', 'projects', 'publications', 'languages', 'volunteering']);
+    let masterChanged = false;
+
     for (const m of markers) {
         if (m.type === 'profile') {
+            // PROFILE_* markers update session profile
             const prev = sections[m.field] || '';
             if (m.op === 'SET') {
                 sections[m.field] = m.value;
             } else if (m.op === 'ADD') {
                 sections[m.field] = markerParser.applyAdd(prev, m.value);
+                // Propagate additive ops to master for list-like sections
+                if (ADDITIVE_SECTIONS.has(m.field) && state.masterProfile) {
+                    const masterPrev = state.masterProfile[m.field] || '';
+                    state.masterProfile[m.field] = markerParser.applyAdd(masterPrev, m.value);
+                    masterChanged = true;
+                }
             } else if (m.op === 'REMOVE') {
                 sections[m.field] = markerParser.applyRemove(prev, m.value);
             }
             profileChanged = true;
             console.log(`[agent:marker-debug] PROFILE_${m.op} ${m.field}: "${prev}" -> "${sections[m.field]}"`);
             appendRuntimeLog(sessionId, `marker_apply -> PROFILE_${m.op} ${m.field}="${sections[m.field]}"`, { source: 'knowledge' });
+        } else if (m.type === 'master_profile') {
+            // MASTER_* markers update master profile directly
+            if (!state.masterProfile) state.masterProfile = {};
+            const prev = state.masterProfile[m.field] || '';
+            if (m.op === 'SET') {
+                state.masterProfile[m.field] = m.value;
+            } else if (m.op === 'ADD') {
+                state.masterProfile[m.field] = markerParser.applyAdd(prev, m.value);
+            } else if (m.op === 'REMOVE') {
+                state.masterProfile[m.field] = markerParser.applyRemove(prev, m.value);
+            }
+            masterChanged = true;
+            console.log(`[agent:marker-debug] MASTER_${m.op} ${m.field}: "${prev}" -> "${state.masterProfile[m.field]}"`);
+            appendRuntimeLog(sessionId, `marker_apply -> MASTER_${m.op} ${m.field}="${state.masterProfile[m.field]}"`, { source: 'knowledge' });
         } else if (m.type === 'direction' || m.type === 'answer') {
             // Both DIRECTION and ANSWER markers update selectedAnswers (onboarding direction fields)
             if (!state.selectedAnswers[sessionId]) state.selectedAnswers[sessionId] = {};
@@ -2140,6 +2276,13 @@ async function applyMarkers(sessionId, markers) {
         appendSubtaskLog(sessionId, 'profile', isZh()
             ? `档案已更新：${Object.keys(sections).join('、')}`
             : `Profile updated: ${Object.keys(sections).join(', ')}`);
+    }
+
+    // Persist master profile changes to knowledge store
+    if (masterChanged && state.activeUserId && state.masterProfile) {
+        masterProfileClient.saveAllSections(state.activeUserId, state.masterProfile).catch(err => {
+            console.error('[agent:marker] master profile save failed:', err.message);
+        });
     }
 
     // Persist direction changes to knowledge store

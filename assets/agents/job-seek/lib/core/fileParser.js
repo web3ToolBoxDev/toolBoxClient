@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('crypto');
+
 /**
  * General-purpose file content extractor.
  * Converts PDF, DOCX, and text files from base64 to plain text.
@@ -94,4 +96,14 @@ async function parseDocx(base64) {
     return (result?.value || '').trim();
 }
 
-module.exports = { extractText, stripDataUriPrefix };
+/**
+ * Compute MD5 hash of base64 content (for resume dedup).
+ * @param {string} contentBase64
+ * @returns {string} hex MD5 hash
+ */
+function computeHash(contentBase64) {
+    const raw = stripDataUriPrefix(contentBase64);
+    return crypto.createHash('md5').update(raw).digest('hex');
+}
+
+module.exports = { extractText, stripDataUriPrefix, computeHash };

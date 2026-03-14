@@ -9,7 +9,7 @@ const DOMAIN = 'job-seek';
 
 const TYPES = {
     // ─── Existing types ───
-    profile:            { durability: 'durable',  conflictPolicy: 'replace', description: 'User career profile section', subTypes: ['basic', 'skills', 'experience', 'education', 'highlights'] },
+    profile:            { durability: 'durable',  conflictPolicy: 'replace', description: 'User career profile section', subTypes: ['basic', 'skills', 'experience', 'education', 'highlights', 'certifications', 'projects', 'publications', 'languages', 'volunteering', 'summary_templates'] },
     direction:          { durability: 'durable',  conflictPolicy: 'replace', description: 'Job search direction', subTypes: ['target', 'history'] },
     job_listing:        { durability: 'durable',  conflictPolicy: 'replace', description: 'Scraped job posting', subTypes: [] },
     match_result:       { durability: 'session',  conflictPolicy: 'replace', description: 'Job match score', subTypes: [] },
@@ -19,7 +19,10 @@ const TYPES = {
     application_record: { durability: 'durable',  conflictPolicy: 'replace', description: 'Application status tracking', subTypes: ['submitted', 'in_review', 'interview', 'offer', 'rejected'] },
     resume_variant:     { durability: 'durable',  conflictPolicy: 'replace', description: 'Tailored resume for specific job target', subTypes: [] },
     outreach_message:   { durability: 'session',  conflictPolicy: 'replace', description: 'Cover letter, thank-you email, follow-up', subTypes: ['cover_letter', 'thank_you', 'follow_up'] },
-    company_info:       { durability: 'durable',  conflictPolicy: 'replace', description: 'Company research brief', subTypes: [] }
+    company_info:       { durability: 'durable',  conflictPolicy: 'replace', description: 'Company research brief', subTypes: [] },
+
+    // ─── Profile tailoring (Total Profile → Session-Tailored) ───
+    tailored_profile:   { durability: 'session',  conflictPolicy: 'replace', description: 'Session-tailored profile derived from master, optimized for target role', subTypes: ['basic', 'skills', 'experience', 'education', 'highlights', 'certifications', 'projects', 'publications', 'languages', 'volunteering', 'summary_templates'] }
 };
 
 module.exports = { domain: DOMAIN, types: TYPES };

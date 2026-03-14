@@ -35,7 +35,10 @@ const PERSIST_KEYS = [
     'savePath',
     'walletExtensionPath',
     'resumeProfile',
-    'intentFiles'
+    'intentFiles',
+    'masterProfile',
+    'activeUserId',
+    'resumeHashes'
 ];
 
 /**

@@ -19,11 +19,15 @@ const searchPipeline = require('../../searchPipeline');
 async function execute({ sessionId, config, context }) {
     const { direction, profile } = context;
 
+    // Get platform IDs selected in workflow editor for search step
+    const searchStep = (config.steps || []).find(s => s.name === 'search');
     const searchConfig = {
         minScore: config.search?.minScore || 60,
         targetCount: config.search?.targetCount || 10,
         maxResults: config.search?.maxResults || 30,
-        envId: context.envId || null
+        maxSearchRounds: config.search?.maxSearchRounds || 3,
+        envId: context.envId || null,
+        platforms: searchStep?.platforms || []
     };
 
     // Start pipeline

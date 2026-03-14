@@ -1,6 +1,8 @@
 'use strict';
 
 const http = require('http');
+const { spawn } = require('child_process');
+const path = require('path');
 
 const DASHBOARD_PORT = 30003;
 
@@ -42,7 +44,24 @@ function getPlatformStore() {
 }
 let _platformService = null;
 function getPlatformService() {
-    if (!_platformService) _platformService = require('./workflow/platformService');
+    if (!_platformService) {
+        _platformService = require('./workflow/platformService');
+        // Wire up screenshot verifier so verifyLogin can use AI + screenshot
+        _platformService.setScreenshotVerifier(async (base64png, platformLabel) => {
+            const state = _stateGetter ? _stateGetter() : {};
+            const aiInvoke = _createAiInvoke(state);
+            const prompt = `Analyze this screenshot of "${platformLabel}". Is the user currently logged in? `
+                + 'Look for signs like profile avatars, user menus, dashboard content, or logout buttons. '
+                + 'Respond with JSON: { "loggedIn": true/false, "reasoning": "..." }';
+            const raw = await aiInvoke(prompt, base64png);
+            try {
+                const text = typeof raw === 'string' ? raw : (raw.content || raw);
+                const match = String(text).match(/\{[\s\S]*\}/);
+                if (match) return JSON.parse(match[0]);
+            } catch (_) {}
+            return { loggedIn: false, reasoning: 'Failed to parse AI response' };
+        });
+    }
     return _platformService;
 }
 let _scriptBuilder = null;
@@ -66,6 +85,180 @@ function getAlertService() {
 let _port = DASHBOARD_PORT;
 let _server = null;
 let _stateGetter = null; // function that returns current agent state
+
+/**
+ * Build provider-keyed imageContent for aiClient.callAPI.
+ * @param {string} base64png - base64-encoded PNG screenshot
+ * @param {string} textPrompt - the user prompt text (included alongside image)
+ * @returns {{ openai: Array, anthropic: Array, google: Array }}
+ */
+function _buildImageContent(base64png, textPrompt) {
+    return {
+        // OpenAI vision format
+        openai: [
+            { type: 'text', text: textPrompt },
+            { type: 'image_url', image_url: { url: `data:image/png;base64,${base64png}` } }
+        ],
+        // Anthropic multimodal format
+        anthropic: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64png } },
+            { type: 'text', text: textPrompt }
+        ],
+        // Google Gemini format
+        google: [
+            { inlineData: { mimeType: 'image/png', data: base64png } },
+            { text: textPrompt }
+        ]
+    };
+}
+
+/**
+ * Build an AI expander callback for adaptive search query expansion.
+ * Uses _stateGetter to get AI credentials at call time (not at creation time).
+ *
+ * @returns {Function} async ({ jobTitle, location, profileSummary, previousQueries, gap }) => string[]
+ */
+function _buildAiExpander() {
+    return async ({ jobTitle, location, profileSummary, previousQueries, gap }) => {
+        const state = _stateGetter ? _stateGetter() : {};
+        const subProvider = state.currentSubProvider || '';
+        const apiKey = state.runtimeApiKey || '';
+        const model = state.currentModel || 'default';
+        if (!apiKey) return []; // no AI credentials → skip
+
+        const prompt = `You are a job search optimization assistant.
+
+The user is searching for "${jobTitle}" jobs${location ? ` in ${location}` : ''}.
+
+User's profile summary:
+${profileSummary}
+
+Previous search queries tried (not enough results):
+${previousQueries.map(q => `- "${q}"`).join('\n')}
+
+Gap info: ${JSON.stringify(gap)}
+
+Generate 3-5 alternative search keyword phrases that would find similar jobs on job boards.
+Consider:
+- Industry-specific title synonyms (e.g., for nursing: "RN", "Registered Nurse", "Staff Nurse")
+- Related roles in the same field
+- Technology/skill-specific variations from the user's profile
+- Common abbreviations or alternative naming conventions in this industry
+
+Return ONLY a JSON array of strings, each being a search phrase. No explanation.
+Example: ["Staff Nurse ICU", "RN Critical Care", "Registered Nurse Hospital"]`;
+
+        try {
+            const aiClient = require('./aiClient');
+            const result = await aiClient.callAPI({
+                subProvider,
+                apiKey,
+                model: model !== 'default' ? model : undefined,
+                conversationHistory: [{ role: 'user', content: prompt }],
+                systemPrompt: 'You output only valid JSON arrays. No markdown, no explanation.'
+            });
+            const text = (result?.content || '').trim();
+            const match = text.match(/\[[\s\S]*\]/);
+            if (match) {
+                const parsed = JSON.parse(match[0]);
+                console.log(`[aiExpander] AI generated ${parsed.length} query suggestions`);
+                return Array.isArray(parsed) ? parsed.filter(s => typeof s === 'string') : [];
+            }
+            return [];
+        } catch (err) {
+            console.log('[aiExpander] AI call failed, falling back to deterministic expansion:', err.message);
+            return [];
+        }
+    };
+}
+
+/**
+ * Create an aiInvoke function from the current provider config.
+ * Signature: async (prompt: string, screenshot?: string) => string
+ *
+ * Supports:
+ *  - 'claude-code' / 'codex-cli' → spawn CLI with prompt piped via stdin
+ *    (screenshots saved to workspace file, path included in prompt for CLI to read)
+ *  - API providers (openai, anthropic, google) → use aiClient.callAPI
+ */
+function _createAiInvoke(state) {
+    const provider = state.currentProvider;
+    const model = state.currentModel || 'default';
+    const subProvider = state.currentSubProvider || '';
+    const apiKey = state.runtimeApiKey || '';
+
+    if (provider === 'claude-code' || provider === 'codex-cli') {
+        // CLI-based provider — spawn process with prompt on stdin.
+        // For screenshots: save to workspace file, include path in prompt
+        // so the CLI can read the image via its built-in Read tool.
+        // (Same pattern as agent.js invokeCliAsync with resume images)
+        const workspaceDir = path.resolve(__dirname, '..', 'workspace');
+        return async function aiInvoke(prompt, screenshot) {
+            let imgPath = null;
+            let fullPrompt = prompt;
+            if (screenshot) {
+                const fs = require('fs');
+                try { fs.mkdirSync(workspaceDir, { recursive: true }); } catch (_) {}
+                imgPath = path.join(workspaceDir, `screenshot_${Date.now()}.png`);
+                fs.writeFileSync(imgPath, Buffer.from(screenshot, 'base64'));
+                fullPrompt = `Look at the screenshot image at ${imgPath}. ${prompt}`;
+            }
+            return new Promise((resolve, reject) => {
+                let bin, args;
+                if (provider === 'codex-cli') {
+                    bin = 'codex';
+                    args = ['exec'];
+                    if (model && model !== 'default') args.push('--model', model);
+                } else {
+                    bin = 'claude';
+                    args = ['-p'];
+                    if (model && model !== 'default') args.push('--model', model);
+                }
+                const cleanEnv = { ...process.env };
+                delete cleanEnv.CLAUDECODE; // Allow nested Claude Code invocation
+                const child = spawn(bin, args, {
+                    stdio: ['pipe', 'pipe', 'pipe'],
+                    timeout: 120000,
+                    shell: true,
+                    cwd: workspaceDir,
+                    env: cleanEnv
+                });
+                let stdout = '';
+                let stderr = '';
+                child.stdin.write(fullPrompt);
+                child.stdin.end();
+                child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+                child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+                child.on('close', (code) => {
+                    // Cleanup temp screenshot
+                    if (imgPath) { try { require('fs').unlinkSync(imgPath); } catch (_) {} }
+                    if (code === 0) resolve(stdout.trim());
+                    else reject(new Error(`${bin} exited with code ${code}: ${stderr.trim()}`));
+                });
+                child.on('error', (err) => {
+                    if (imgPath) { try { require('fs').unlinkSync(imgPath); } catch (_) {} }
+                    reject(new Error(`${bin} spawn failed: ${err.message}`));
+                });
+            });
+        };
+    }
+
+    // API-based provider — use aiClient
+    return async function aiInvoke(prompt, screenshot) {
+        const aiClient = require('./aiClient');
+        const conversationHistory = [{ role: 'user', content: prompt }];
+        const imageContent = screenshot ? _buildImageContent(screenshot, prompt) : undefined;
+        const result = await aiClient.callAPI({
+            subProvider: subProvider || provider,
+            apiKey,
+            model: model !== 'default' ? model : undefined,
+            conversationHistory,
+            systemPrompt: 'You are a helpful assistant that generates Puppeteer automation scripts.',
+            imageContent
+        });
+        return typeof result === 'string' ? result : (result.content || '');
+    };
+}
 
 /**
  * Start a tiny HTTP server that serves dashboard data as JSON
@@ -180,13 +373,17 @@ function start(getState, port) {
             req.on('data', chunk => { body += chunk; });
             req.on('end', () => {
                 try {
-                    const { minScore, targetCount, maxResults, envId } = JSON.parse(body);
+                    const { minScore, targetCount, maxResults, envId, platforms, maxSearchRounds } = JSON.parse(body);
                     const state = _stateGetter ? _stateGetter() : {};
                     const answers = state.selectedAnswers?.[sessionId] || {};
                     const sections = state.profileSections?.[sessionId] || {};
+
+                    // Build AI expander callback for adaptive search query expansion
+                    const aiExpander = _buildAiExpander();
+
                     const result = getSearchPipeline().startPipeline(
                         sessionId,
-                        { minScore, targetCount, maxResults, envId: envId || null },
+                        { minScore, targetCount, maxResults, envId: envId || null, platforms: platforms || [], maxSearchRounds, aiExpander },
                         answers,
                         sections
                     );
@@ -228,8 +425,28 @@ function start(getState, port) {
                 try {
                     const { jobUrl } = JSON.parse(body);
                     const state = _stateGetter ? _stateGetter() : {};
-                    const sections = state.profileSections?.[sessionId] || {};
-                    const result = await getSearchPipeline().generateResume(sessionId, jobUrl, sections);
+                    const sessionProfile = state.profileSections?.[sessionId] || {};
+                    const masterProfile = state.masterProfile || {};
+                    // Two-stage: pass session-tailored profile (preferred) + raw master (fallback)
+                    const result = await getSearchPipeline().generateResume(
+                        sessionId, jobUrl, masterProfile, sessionProfile
+                    );
+                    // Enrich with derivation metadata
+                    if (result.success) {
+                        const userStore = require('./core/userStore');
+                        const user = userStore.getActiveUser();
+                        const masterKeys = Object.values(masterProfile).filter(v => v && v.trim()).length;
+                        const tailoredKeys = Object.values(sessionProfile).filter(v => v && v.trim()).length;
+                        result.derivation = {
+                            userId: user?.id || '',
+                            userName: user?.name || '',
+                            masterSections: masterKeys,
+                            tailoredSections: tailoredKeys,
+                            derivationChain: result.derivationChain || [],
+                            targetRole: state.selectedAnswers?.[sessionId]?.q_job_title || '',
+                            matchScore: result.job?.matchScore || 0
+                        };
+                    }
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(result));
                 } catch (e) {
@@ -280,6 +497,88 @@ function start(getState, port) {
                 }
             });
             return;
+        }
+
+        // POST /api/pipeline/:sessionId/generate-interview-prep — generate interview prep
+        const genPrepMatch = url.match(/^\/api\/pipeline\/(.+)\/generate-interview-prep$/);
+        if (genPrepMatch && req.method === 'POST') {
+            const sessionId = decodeURIComponent(genPrepMatch[1]);
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', async () => {
+                try {
+                    const { jobUrl } = JSON.parse(body);
+                    const state = _stateGetter ? _stateGetter() : {};
+                    const sections = state.profileSections?.[sessionId] || {};
+                    const result = await getSearchPipeline().generateInterviewPrep(sessionId, jobUrl, sections);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(result));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // GET /api/pipeline/:sessionId/download/:encodedJobUrl/:type — download generated document
+        const downloadMatch = url.match(/^\/api\/pipeline\/([^/]+)\/download\/([^/]+)\/(resume|coverLetter|interviewPrep)$/);
+        if (downloadMatch && req.method === 'GET') {
+            const sessionId = decodeURIComponent(downloadMatch[1]);
+            const jobUrl = decodeURIComponent(downloadMatch[2]);
+            const docType = downloadMatch[3];
+            const cards = getJobCards(sessionId);
+            const job = cards.find(c => c.url === jobUrl);
+            if (!job || !job.artifacts?.[docType]) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ error: 'Document not found' }));
+            }
+            const content = job.artifacts[docType];
+            const safeCompany = (job.company || 'Company').replace(/[^a-zA-Z0-9_-]/g, '_');
+            const safeTitle = (job.title || 'Job').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
+            const typeLabel = { resume: 'Resume', coverLetter: 'CoverLetter', interviewPrep: 'InterviewPrep' }[docType];
+
+            // Check query param for format override (?format=md for raw markdown)
+            const rawQuery = (req.url || '').split('?')[1] || '';
+            const queryFormat = new URLSearchParams(rawQuery).get('format');
+
+            // Resume & cover letter → DOCX by default; interviewPrep stays markdown
+            if ((docType === 'resume' || docType === 'coverLetter') && queryFormat !== 'md') {
+                // Convert markdown → DOCX (async)
+                const { markdownToDocx } = require('./tools/docxBuilder');
+                (async () => {
+                    try {
+                        const { buffer, filename } = await markdownToDocx(content, {
+                            type: typeLabel,
+                            company: job.company,
+                            title: job.title
+                        });
+                        res.writeHead(200, {
+                            'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                            'Content-Disposition': `attachment; filename="${filename}"`,
+                            'Content-Length': buffer.length
+                        });
+                        res.end(buffer);
+                    } catch (docxErr) {
+                        console.error('[dashboard] DOCX conversion failed, falling back to markdown:', docxErr.message);
+                        const filename = `${typeLabel}_${safeCompany}_${safeTitle}.md`;
+                        res.writeHead(200, {
+                            'Content-Type': 'text/markdown; charset=utf-8',
+                            'Content-Disposition': `attachment; filename="${filename}"`
+                        });
+                        res.end(content);
+                    }
+                })();
+                return;
+            }
+
+            // Markdown fallback (interviewPrep, or ?format=md, or DOCX conversion failure)
+            const filename = `${typeLabel}_${safeCompany}_${safeTitle}.md`;
+            res.writeHead(200, {
+                'Content-Type': 'text/markdown; charset=utf-8',
+                'Content-Disposition': `attachment; filename="${filename}"`
+            });
+            return res.end(content);
         }
 
         // GET /api/pipeline/:sessionId/history — get application history
@@ -777,13 +1076,19 @@ function start(getState, port) {
             }
             _readBody(req, async (body) => {
                 try {
+                    // Set launching state before async browser launch
+                    updatePlatformCell(sid, pid, { cell: 'login', status: 'running', message: 'Launching browser...' });
                     const result = await getPlatformService().launchLogin(sid, pid, body);
-                    if (result.success) {
-                        updatePlatformCell(sid, pid, { cell: 'login', status: 'verifying', message: 'Login launched' });
+                    // On success: platformService._syncToDashboard() already broadcast
+                    // SSE 'platformUpdate' with status='verifying' after browser opened.
+                    // On failure: update cell to error so SSE notifies frontend.
+                    if (!result.success) {
+                        updatePlatformCell(sid, pid, { cell: 'login', status: 'error', message: result.error || 'Login failed' });
                     }
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(result));
                 } catch (e) {
+                    updatePlatformCell(sid, pid, { cell: 'login', status: 'error', message: e.message });
                     res.writeHead(500, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: false, error: e.message }));
                 }
@@ -869,14 +1174,35 @@ function start(getState, port) {
             const pid = decodeURIComponent(toolBuildSearchMatch[2]);
             _readBody(req, async (body) => {
                 try {
-                    // Check AI provider
-                    if (!body.aiInvoke && typeof body.aiInvoke !== 'function') {
-                        const state = _stateGetter ? _stateGetter() : {};
-                        if (!state.currentProvider) {
+                    // Create aiInvoke from state.currentProvider if not provided
+                    const state = _stateGetter ? _stateGetter() : {};
+                    if (!state.currentProvider) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ success: false, error: 'No AI provider configured. Set an AI provider first.' }));
+                    }
+                    const aiInvoke = _createAiInvoke(state);
+                    body.aiInvoke = aiInvoke;
+
+                    // Inject testParams from user's direction for realistic verify
+                    if (!body.testParams) {
+                        const answers = (state.selectedAnswers || {})[sid] || {};
+                        body.testParams = {
+                            keywords: answers.q_job_title || 'software engineer',
+                            location: answers.q_location || ''
+                        };
+                    }
+
+                    // Pre-flight: ensure browser is alive & logged in
+                    const plat = getPlatformStore().getPlatform(sid, pid);
+                    if (plat && plat._browserId) {
+                        const loginCheck = await getPlatformService().verifyLogin(sid, pid);
+                        if (loginCheck.status === 'not_logged_in') {
+                            updatePlatformCell(sid, pid, { cell: 'login', status: 'error', message: 'Session expired — please re-login' });
                             res.writeHead(400, { 'Content-Type': 'application/json' });
-                            return res.end(JSON.stringify({ success: false, error: 'No AI provider configured. Set an AI provider first.' }));
+                            return res.end(JSON.stringify({ success: false, error: 'Login session expired. Please re-login first.' }));
                         }
                     }
+
                     updatePlatformCell(sid, pid, { cell: 'search', status: 'building', message: 'Building search tool...' });
                     const result = await getScriptBuilder().buildTool(sid, pid, 'search', body);
                     if (result.success) {
@@ -884,6 +1210,7 @@ function start(getState, port) {
                         updatePlatformCell(sid, pid, {
                             cell: 'search', status: 'ready',
                             version: plat?.tools?.search?.version || 1,
+                            jdVerified: plat?.tools?.search?.jdVerified || false,
                             message: 'Search tool ready'
                         });
                     } else {
@@ -907,6 +1234,12 @@ function start(getState, port) {
             const pid = decodeURIComponent(toolBuildApplyMatch[2]);
             _readBody(req, async (body) => {
                 try {
+                    const applyState = _stateGetter ? _stateGetter() : {};
+                    if (!applyState.currentProvider) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ success: false, error: 'No AI provider configured.' }));
+                    }
+                    body.aiInvoke = _createAiInvoke(applyState);
                     updatePlatformCell(sid, pid, { cell: 'apply', status: 'building', message: 'Building apply tool...' });
                     const result = await getScriptBuilder().buildTool(sid, pid, 'apply', body);
                     if (result.success) {
@@ -1063,6 +1396,145 @@ function start(getState, port) {
             }, 30000);
             res.on('close', () => clearInterval(keepAlive));
             return;
+        }
+
+        // ─── Profile & User Management API routes ───
+
+        // GET /api/profile/template — empty profile template with all section keys
+        if (url === '/api/profile/template' && req.method === 'GET') {
+            const masterProfileClient = require('./core/masterProfileClient');
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(masterProfileClient.getEmptyTemplate()));
+        }
+
+        // GET /api/profile/master — all master sections for active user
+        if (url === '/api/profile/master' && req.method === 'GET') {
+            const state = _stateGetter ? _stateGetter() : {};
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(state.masterProfile || {}));
+        }
+
+        // PUT /api/profile/master/:section — update a master section
+        const masterSectionMatch = url.match(/^\/api\/profile\/master\/([^/]+)$/);
+        if (masterSectionMatch && req.method === 'PUT') {
+            const section = decodeURIComponent(masterSectionMatch[1]);
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', async () => {
+                try {
+                    const { content } = JSON.parse(body);
+                    const state = _stateGetter ? _stateGetter() : {};
+                    const userId = state.activeUserId;
+                    if (!userId) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ error: 'No active user' }));
+                    }
+                    if (!state.masterProfile) state.masterProfile = {};
+                    state.masterProfile[section] = content || '';
+                    const masterProfileClient = require('./core/masterProfileClient');
+                    await masterProfileClient.saveMasterSection(userId, section, content || '');
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, section, content }));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // GET /api/profile/:sessionId/tailored — session-tailored profile
+        const tailoredMatch = url.match(/^\/api\/profile\/([^/]+)\/tailored$/);
+        if (tailoredMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(tailoredMatch[1]);
+            const state = _stateGetter ? _stateGetter() : {};
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(state.profileSections?.[sid] || {}));
+        }
+
+        // GET /api/profile/:sessionId/comparison — master vs tailored diff
+        const comparisonMatch = url.match(/^\/api\/profile\/([^/]+)\/comparison$/);
+        if (comparisonMatch && req.method === 'GET') {
+            const sid = decodeURIComponent(comparisonMatch[1]);
+            const state = _stateGetter ? _stateGetter() : {};
+            const master = state.masterProfile || {};
+            const tailored = state.profileSections?.[sid] || {};
+            const diff = {};
+            const allKeys = new Set([...Object.keys(master), ...Object.keys(tailored)]);
+            for (const key of allKeys) {
+                diff[key] = {
+                    master: master[key] || '',
+                    tailored: tailored[key] || '',
+                    changed: (master[key] || '') !== (tailored[key] || '')
+                };
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ master, tailored, diff }));
+        }
+
+        // GET /api/users — list all users
+        if (url === '/api/users' && req.method === 'GET') {
+            const userStore = require('./core/userStore');
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ users: userStore.listUsers(), activeUserId: userStore.getActiveUserId() }));
+        }
+
+        // POST /api/users — create new user { name }
+        if (url === '/api/users' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                try {
+                    const { name } = JSON.parse(body);
+                    const userStore = require('./core/userStore');
+                    const user = userStore.createUser(name);
+                    res.writeHead(201, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, user }));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // PUT /api/users/active — switch active user { userId }
+        if (url === '/api/users/active' && req.method === 'PUT') {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', async () => {
+                try {
+                    const { userId } = JSON.parse(body);
+                    const userStore = require('./core/userStore');
+                    const switched = userStore.switchUser(userId);
+                    if (!switched) {
+                        res.writeHead(404, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ error: 'User not found' }));
+                    }
+                    // Reload master profile for new user
+                    const state = _stateGetter ? _stateGetter() : {};
+                    state.activeUserId = userId;
+                    const masterProfileClient = require('./core/masterProfileClient');
+                    state.masterProfile = await masterProfileClient.loadMaster(userId);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, activeUserId: userId, masterProfile: state.masterProfile }));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // GET /api/users/active — get current active user + master profile summary
+        if (url === '/api/users/active' && req.method === 'GET') {
+            const userStore = require('./core/userStore');
+            const user = userStore.getActiveUser();
+            const state = _stateGetter ? _stateGetter() : {};
+            const master = state.masterProfile || {};
+            const sectionCount = Object.values(master).filter(v => v && v.trim()).length;
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ user, masterProfileSections: sectionCount }));
         }
 
         // GET /ping — health check with instance identification
@@ -1232,7 +1704,8 @@ function _getPlatformStatuses(sessionId) {
 function computeCellVisual(cellType, platform) {
     if (cellType === 'login') {
         const l = platform.login || {};
-        if (l.status === 'verifying') return { visual: 'running', tip: 'Verifying login...', action: null };
+        if (l.status === 'running') return { visual: 'launching', tip: 'Launching browser...', action: null };
+        if (l.status === 'verifying') return { visual: 'verifying', tip: 'Browser opened — log in then click Confirm', action: 'confirm' };
         if (l.status === 'error') return { visual: 'error', tip: `Login failed: ${l.message || 'Unknown error'}`, action: 'relogin' };
         if (l.status === 'verified') {
             const age = Date.now() - (l.verifiedAt || 0);
@@ -1250,14 +1723,21 @@ function computeCellVisual(cellType, platform) {
             if (searchStatus !== 'ready') return { visual: 'locked', tip: '🔒 Build search tool first', action: null };
         }
         if (tool.status === 'building') return { visual: 'building', tip: `Building ${cellType} tool...`, action: null };
-        if (tool.status === 'error') return { visual: 'error', tip: `Build failed: ${tool.message || 'Unknown'}`, action: 'rebuild' };
+        if (tool.status === 'error') {
+            const msg = tool.message || 'Unknown';
+            const tip = msg.startsWith('Search failed:') ? msg : `Build failed: ${msg}`;
+            return { visual: 'error', tip, action: 'rebuild' };
+        }
         if (tool.status === 'ready') {
             // Check if login expired → warning
             const l = platform.login || {};
             if (l.status === 'verified' && (Date.now() - (l.verifiedAt || 0)) >= LOGIN_TTL_MS) {
                 return { visual: 'warning', tip: `${cellType} tool ready (v${tool.version || 1}) but session may have expired. Re-login first.`, action: 'relogin' };
             }
-            return { visual: 'ready', tip: `${cellType} tool ready (v${tool.version || 1})`, action: null };
+            const jdTag = cellType === 'search'
+                ? (tool.jdVerified ? ' ✓JD' : ' ⚠JD-fallback')
+                : '';
+            return { visual: 'ready', tip: `${cellType} tool ready (v${tool.version || 1})${jdTag}`, action: 'rebuild' };
         }
         return { visual: 'idle', tip: `${cellType} tool not built`, action: 'build' };
     }
@@ -1319,9 +1799,23 @@ function updatePlatformCell(sessionId, platformId, update) {
         if (cell === 'login' && update.status === 'verified') {
             p[cell].verifiedAt = Date.now();
             if (update.envId) p[cell].envId = update.envId;
+            // Persist login to disk — cookies saved in fingerprint browser
+            if (p.url) {
+                const pStore = getPlatformStore();
+                const plat = pStore.getPlatforms(sessionId).find(x => x.id === platformId);
+                const envId = update.envId || plat?.envId || '';
+                pStore.saveLoginStatus(p.url, envId);
+            }
+        }
+        if (cell === 'login' && update.status === 'error' && /expired/i.test(update.message || '')) {
+            // Clear persisted login — session expired, user needs to re-login
+            if (p.url) getPlatformStore().clearLoginStatus(p.url);
         }
         if ((cell === 'search' || cell === 'apply') && update.version !== undefined) {
             p[cell].version = update.version;
+        }
+        if (update.jdVerified !== undefined) {
+            p[cell].jdVerified = update.jdVerified;
         }
     }
     // Broadcast SSE update
@@ -1363,6 +1857,8 @@ function upsertJobCard(sessionId, job) {
         matchScore: job.matchScore ?? existing.matchScore ?? null,
         status: job.status || existing.status || 'discovered',
         artifacts: { ...(existing.artifacts || {}), ...(job.artifacts || {}) },
+        matchBreakdown: job.matchBreakdown || existing.matchBreakdown || null,
+        fullText: job.fullText || existing.fullText || '',
         updatedAt: new Date().toISOString(),
         createdAt: existing.createdAt || new Date().toISOString()
     });
@@ -1515,6 +2011,9 @@ function buildDashboardHTML(sessionId) {
   .job-table .score-cell.mid { color: #fbbf24; }
   .job-table .score-cell.low { color: #f87171; }
   .job-table .actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+  .artifact-badges { display: flex; gap: 4px; margin-top: 3px; }
+  .artifact-badge { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; background: #10b981; color: #fff; font-size: 0.65rem; font-weight: 700; cursor: pointer; }
+  .artifact-badge:hover { background: #059669; }
   .status-badge { font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; display: inline-block; }
   .status-badge.discovered { background: rgba(106,126,255,0.2); color: #8b9aff; }
   .status-badge.parsed { background: rgba(168,85,247,0.2); color: #a855f7; }
@@ -1551,11 +2050,22 @@ function buildDashboardHTML(sessionId) {
   .wf-cell--building { outline: 3px dashed #8b5cf6; animation: wf-pulse-purple 2s ease-in-out infinite; }
   .wf-cell--warning  { outline: 3px solid #f59e0b; animation: wf-pulse-amber 2s ease-in-out infinite; }
   .wf-cell--error    { outline: 3px solid #ef4444; animation: wf-pulse-red 2s ease-in-out infinite; }
+  .wf-cell--launching { outline: 3px solid #6366f1; animation: wf-pulse-indigo 2s ease-in-out infinite; }
+  .wf-cell--verifying { outline: 3px solid #10b981; animation: wf-pulse-green 2s ease-in-out infinite; }
   .wf-cell--locked   { outline: 2px solid #374151; opacity: 0.35; }
   @keyframes wf-pulse-green  { 0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,0.4)} 50%{box-shadow:0 0 8px 4px rgba(16,185,129,0.15)} }
   @keyframes wf-pulse-red    { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.4)}  50%{box-shadow:0 0 8px 4px rgba(239,68,68,0.15)} }
   @keyframes wf-pulse-purple { 0%,100%{box-shadow:0 0 0 0 rgba(139,92,246,0.4)} 50%{box-shadow:0 0 8px 4px rgba(139,92,246,0.15)} }
   @keyframes wf-pulse-amber  { 0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.4)} 50%{box-shadow:0 0 8px 4px rgba(245,158,11,0.15)} }
+  @keyframes wf-pulse-indigo { 0%,100%{box-shadow:0 0 0 0 rgba(99,102,241,0.4)} 50%{box-shadow:0 0 8px 4px rgba(99,102,241,0.15)} }
+
+  /* Login button spinner */
+  .wf-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #10b981; border-radius: 50%; animation: wf-spin 0.8s linear infinite; vertical-align: middle; }
+  @keyframes wf-spin { to { transform: rotate(360deg); } }
+  .wf-btn-loading { opacity: 0.7; cursor: not-allowed; }
+  .wf-platform__actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-confirm-active { background: #10b981 !important; color: #fff !important; border-color: #10b981 !important; animation: wf-pulse-confirm 1.5s ease-in-out infinite; }
+  @keyframes wf-pulse-confirm { 0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,0.5)} 50%{box-shadow:0 0 6px 3px rgba(16,185,129,0.25)} }
 
   /* Cell status overlays */
   .cell-running { outline: 3px solid #10b981; animation: wf-pulse-green 2s ease-in-out infinite; }
@@ -1563,7 +2073,55 @@ function buildDashboardHTML(sessionId) {
   .cell-building { outline: 3px dashed #8b5cf6; animation: wf-pulse-purple 2s ease-in-out infinite; }
 
   /* Control bar */
-  .controlBar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 0.75rem 1.5rem; position: sticky; top: 0; z-index: 50; background: #13142b; border-bottom: 1px solid #2d2f4a; margin: 0 -1.5rem; }
+  .controlBar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: nowrap; padding: 0.75rem 1.5rem; position: sticky; top: 0; z-index: 50; background: #13142b; border-bottom: 1px solid #2d2f4a; margin: 0 -1.5rem; overflow-x: auto; }
+
+  /* Workflow Progress button pulse */
+  @keyframes wfBtnPulse { 0%,100%{box-shadow:0 0 0 0 rgba(74,222,128,0.5);} 50%{box-shadow:0 0 12px 4px rgba(74,222,128,0.3);} }
+  .wf-running { animation: wfBtnPulse 2s ease-in-out infinite !important; background: #166534 !important; color: #4ade80 !important; border-color: #22c55e !important; }
+
+  /* Offcanvas */
+  .offcanvas-backdrop { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 150; }
+  .offcanvas-backdrop.visible { display: block; }
+  .offcanvas { position: fixed; top: 0; right: 0; height: 100vh; width: 400px; background: #13142b; border-left: 1px solid #2d2f4a; z-index: 160; transform: translateX(100%); transition: transform 0.3s ease; display: flex; flex-direction: column; }
+  .offcanvas.visible { transform: translateX(0); }
+  .offcanvas-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid #2d2f4a; flex-shrink: 0; }
+  .offcanvas-header h3 { margin: 0; color: #8b9aff; font-size: 1.1rem; }
+  .offcanvas-close { background: none; border: none; color: #9da0c3; font-size: 1.4rem; cursor: pointer; padding: 0 0.25rem; }
+  .offcanvas-close:hover { color: #dfe3ff; }
+  .offcanvas-body { flex: 1; overflow-y: auto; padding: 1rem 1.25rem; }
+
+  /* Status badge */
+  .wf-badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; }
+  .wf-badge-idle { background: #2d2f4a; color: #9da0c3; }
+  .wf-badge-running { background: #166534; color: #4ade80; }
+  .wf-badge-completed { background: #1e3a5f; color: #60a5fa; }
+  .wf-badge-failed { background: #5c1818; color: #f87171; }
+  .wf-badge-paused { background: #4a3728; color: #fbbf24; }
+
+  /* Step timeline */
+  .step-timeline { list-style: none; padding: 0; margin: 1rem 0; position: relative; }
+  .step-timeline::before { content: ''; position: absolute; left: 11px; top: 8px; bottom: 8px; width: 2px; background: #2d2f4a; }
+  .step-timeline li { display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.5rem 0; position: relative; }
+  .step-dot { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; flex-shrink: 0; z-index: 1; border: 2px solid #2d2f4a; background: #13142b; }
+  .step-dot-idle { border-color: #3d3f5a; color: #9da0c3; }
+  .step-dot-running { border-color: #10b981; color: #10b981; background: rgba(16,185,129,0.1); }
+  .step-dot-done { border-color: #22c55e; background: #166534; color: #4ade80; }
+  .step-dot-error { border-color: #ef4444; background: #5c1818; color: #f87171; }
+  .step-dot-stuck { border-color: #f59e0b; background: #4a3728; color: #fbbf24; }
+  .step-dot-skipped { border-color: #3d3f5a; background: #2d2f4a; color: #6b7280; }
+  .step-info { flex: 1; }
+  .step-name { color: #dfe3ff; font-size: 0.9rem; font-weight: 500; }
+  .step-status-text { color: #9da0c3; font-size: 0.78rem; margin-top: 0.15rem; }
+  .step-elapsed { color: #6b7280; font-size: 0.75rem; }
+
+  /* Log area */
+  .wf-log-area { background: #0d0e1a; border: 1px solid #2d2f4a; border-radius: 8px; padding: 0.75rem; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.78rem; line-height: 1.5; color: #9da0c3; max-height: 300px; overflow-y: auto; }
+  .wf-log-entry { margin-bottom: 0.25rem; }
+  .wf-log-time { color: #6b7280; }
+  .wf-log-info { color: #60a5fa; }
+  .wf-log-success { color: #4ade80; }
+  .wf-log-error { color: #f87171; }
+  .wf-log-warning { color: #fbbf24; }
 
   /* Modals */
   .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; }
@@ -1585,6 +2143,60 @@ function buildDashboardHTML(sessionId) {
   .jobPagination button { background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 4px; color: #dfe3ff; padding: 0.3rem 0.6rem; cursor: pointer; }
   .jobPagination button.active { background: #6a7eff; border-color: #6a7eff; }
   .jobPagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ─── Workflow Editor Modal ─── */
+  .wfe-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.75); z-index: 200; }
+  .wfe-overlay.visible { display: flex; align-items: center; justify-content: center; }
+  .wfe-modal { background: #242640; border: 1px solid #2d2f4a; border-radius: 12px; padding: 1.5rem 2rem; max-width: 960px; width: 95%; max-height: 85vh; overflow-y: auto; }
+  .wfe-modal h3 { color: #8b9aff; margin: 0 0 1rem 0; display: flex; align-items: center; justify-content: space-between; }
+  .wfe-modal h3 .close-btn { background: none; border: none; color: #9da0c3; font-size: 1.5rem; cursor: pointer; }
+  .wfe-pipeline { display: flex; align-items: flex-start; gap: 0; justify-content: center; flex-wrap: wrap; }
+  .wfe-arrow { display: flex; align-items: center; padding-top: 2.5rem; color: #6a7eff; font-size: 1.5rem; font-weight: 700; margin: 0 0.3rem; }
+  .wfe-card { background: #1a1b2e; border: 1px solid #3d3f5a; border-radius: 10px; padding: 1rem; min-width: 240px; max-width: 280px; flex: 1; position: relative; transition: opacity 0.3s; }
+  .wfe-card.disabled { opacity: 0.35; pointer-events: none; }
+  .wfe-card.disabled .wfe-card-toggle { pointer-events: auto; opacity: 1; }
+  .wfe-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; border-bottom: 1px solid #2d2f4a; padding-bottom: 0.5rem; }
+  .wfe-card-header h4 { margin: 0; color: #dfe3ff; font-size: 0.95rem; }
+  .wfe-card-toggle { background: none; border: none; color: #ef4444; font-size: 1.2rem; cursor: pointer; padding: 0 4px; line-height: 1; }
+  .wfe-card-toggle:hover { color: #f87171; }
+  .wfe-card-toggle.off { color: #22c55e; }
+  .wfe-card-body { display: flex; flex-direction: column; gap: 0.6rem; }
+
+  /* Toggle switch */
+  .wfe-toggle-row { display: flex; align-items: center; justify-content: space-between; }
+  .wfe-toggle-row label { color: #9da0c3; font-size: 0.82rem; }
+  .wfe-switch { position: relative; width: 44px; height: 22px; flex-shrink: 0; }
+  .wfe-switch input { opacity: 0; width: 0; height: 0; }
+  .wfe-switch .slider { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #3d3f5a; border-radius: 11px; cursor: pointer; transition: background 0.2s; }
+  .wfe-switch .slider::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; bottom: 3px; background: #dfe3ff; border-radius: 50%; transition: transform 0.2s; }
+  .wfe-switch input:checked + .slider { background: #22c55e; }
+  .wfe-switch input:checked + .slider::before { transform: translateX(22px); }
+
+  /* Number inputs in cards */
+  .wfe-num-row { display: flex; align-items: center; justify-content: space-between; }
+  .wfe-num-row label { color: #9da0c3; font-size: 0.82rem; flex: 1; }
+  .wfe-num-row input { width: 60px; background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 4px; color: #dfe3ff; padding: 0.2rem 0.4rem; font-size: 0.85rem; text-align: center; }
+  .wfe-hint { display: block; font-size: 0.72rem; color: #666; font-weight: 400; margin-top: 1px; }
+  .gs-hint { font-size: 0.72rem; color: #666; margin: -0.2rem 0 0.3rem 0; }
+
+  /* Platform / Job checkboxes */
+  .wfe-list-title { color: #6a7eff; font-size: 0.78rem; font-weight: 600; margin-top: 0.3rem; text-transform: uppercase; }
+  .wfe-check-list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 140px; overflow-y: auto; }
+  .wfe-check-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: #dfe3ff; }
+  .wfe-check-item input[type="checkbox"] { accent-color: #6a7eff; }
+  .wfe-check-item.unavailable { opacity: 0.4; }
+  .wfe-check-item.unavailable input { pointer-events: none; }
+  .wfe-no-items { color: #666; font-size: 0.78rem; font-style: italic; }
+  .wfe-warning { color: #fbbf24; font-size: 0.78rem; margin-top: 0.3rem; }
+
+  /* Bottom buttons */
+  .wfe-actions { display: flex; gap: 0.75rem; justify-content: center; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #2d2f4a; }
+
+  @media (max-width: 700px) {
+    .wfe-pipeline { flex-direction: column; align-items: center; }
+    .wfe-arrow { transform: rotate(90deg); padding: 0.5rem 0; }
+    .wfe-card { max-width: 100%; min-width: auto; }
+  }
 </style>
 </head>
 <body>
@@ -1597,10 +2209,8 @@ function buildDashboardHTML(sessionId) {
   <button class="btn btn-success" id="wfBtnStart" onclick="wfStart()" data-i18n="startWorkflow">Start Workflow</button>
   <button class="btn btn-danger" id="wfBtnStop" onclick="wfStop()" style="display:none;" data-i18n="stop">Stop</button>
   <span id="wfStatusLabel" style="font-size:0.85rem;color:#9da0c3;">Idle</span>
-  <label style="margin-left:auto;font-size:0.82rem;color:#9da0c3;cursor:pointer;">
-    <input type="checkbox" id="asyncToggle"> Async steps
-  </label>
-  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openGlobalSettings()" data-i18n="settings">Settings</button>
+  <button class="btn btn-sm" style="margin-left:auto;background:#3d3f5a;color:#dfe3ff;" onclick="openGlobalSettings()" data-i18n="settings">Settings</button>
+  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" id="btnWorkflowProgress" onclick="toggleProgressOffcanvas()" data-i18n="workflowProgress">Workflow Progress</button>
   <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openAlertSettings()" data-i18n="alerts">Alerts</button>
   <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openAddWebsite()" data-i18n="addWebsite">+ Add Website</button>
   <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" id="langToggle" onclick="switchLang(_lang === 'en' ? 'zh-CN' : 'en'); this.textContent = _lang === 'en' ? '中文' : 'EN';">中文</button>
@@ -1614,14 +2224,6 @@ function buildDashboardHTML(sessionId) {
 <h2 data-i18n="profile">Profile</h2>
 <div class="card">
   <div class="grid-2" id="profile"></div>
-</div>
-
-<h2 data-i18n="workflowProgress">Workflow Progress</h2>
-<div class="card">
-  <table>
-    <thead><tr><th></th><th data-i18n="step">Step</th><th data-i18n="status">Status</th></tr></thead>
-    <tbody id="subtasks"></tbody>
-  </table>
 </div>
 
 <h2 data-i18n="workflowGrid">Workflow Grid</h2>
@@ -1708,23 +2310,48 @@ function buildDashboardHTML(sessionId) {
 <!-- Artifact modal -->
 <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
   <div class="modal">
-    <button class="close-btn" onclick="closeModal()">&times;</button>
-    <h3 id="modalTitle"></h3>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3 id="modalTitle" style="margin:0"></h3>
+      <div>
+        <button class="btn btn-sm" id="modalDownload" style="display:none;background:#10b981;color:#fff;margin-right:8px">Download</button>
+        <button class="close-btn" onclick="closeModal()" style="float:none">&times;</button>
+      </div>
+    </div>
     <div class="content" id="modalContent"></div>
   </div>
 </div>
 
 <!-- Global Settings modal -->
+<!-- Workflow Editor modal -->
+<div class="wfe-overlay" id="workflowEditorModal" onclick="closeWorkflowEditor(event)">
+  <div class="wfe-modal" onclick="event.stopPropagation()">
+    <h3>
+      <span data-i18n="workflowEditor">Workflow Editor</span>
+      <button class="close-btn" onclick="closeWorkflowEditor()">&times;</button>
+    </h3>
+    <div class="wfe-pipeline" id="wfePipeline">
+      <!-- Dynamically rendered by openWorkflowEditor() -->
+    </div>
+    <div class="wfe-actions">
+      <button class="btn btn-primary" onclick="confirmWorkflow()" data-i18n="confirm">Confirm</button>
+      <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="resetWorkflowEditor()" data-i18n="reset">Reset</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="globalSettingsModal" onclick="closeGlobalSettings(event)">
   <div class="modal" style="max-width:500px;">
     <button class="close-btn" onclick="closeGlobalSettings()">&times;</button>
     <h3 data-i18n="globalSettings">Global Settings</h3>
     <div class="modal-form">
       <label>Min Match Score (%)</label>
+      <div class="gs-hint" data-i18n="wfeMinScoreHint">Jobs scoring below this % are skipped</div>
       <input type="number" id="gsCfgMinScore" min="0" max="100" step="5" value="60">
       <label>Target Matches</label>
+      <div class="gs-hint" data-i18n="wfeTargetCountHint">Stop searching each platform after finding this many qualified jobs</div>
       <input type="number" id="gsCfgTargetCount" min="1" max="100" value="10">
       <label>Max Search Results</label>
+      <div class="gs-hint" data-i18n="wfeMaxResultsHint">Max jobs to fetch per platform before moving to next</div>
       <input type="number" id="gsCfgMaxResults" min="5" max="200" step="5" value="30">
       <button class="btn btn-primary" id="saveGlobalSettings" onclick="saveGlobalSettings()" data-i18n="save">Save Settings</button>
     </div>
@@ -1816,6 +2443,36 @@ function buildDashboardHTML(sessionId) {
 <!-- Toast notification container -->
 <div id="toastContainer" style="position:fixed;top:70px;right:20px;z-index:200;display:flex;flex-direction:column;gap:0.5rem;pointer-events:none;"></div>
 
+<!-- Workflow Progress Offcanvas -->
+<div class="offcanvas-backdrop" id="progressBackdrop" onclick="closeProgressOffcanvas()"></div>
+<div class="offcanvas" id="progressOffcanvas">
+  <div class="offcanvas-header">
+    <h3 data-i18n="workflowProgress">Workflow Progress</h3>
+    <button class="offcanvas-close" onclick="closeProgressOffcanvas()">&times;</button>
+  </div>
+  <div class="offcanvas-body">
+    <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;">
+      <span data-i18n="wfStatus" style="color:#9da0c3;font-size:0.85rem;">Status</span>
+      <span class="wf-badge wf-badge-idle" id="wfProgressBadge">IDLE</span>
+    </div>
+    <div id="wfStepTimeline">
+      <ul class="step-timeline" id="stepTimelineList"></ul>
+    </div>
+    <div style="margin-top:1rem;">
+      <h4 style="color:#8b9aff;font-size:0.9rem;margin:0 0 0.5rem 0;" data-i18n="wfLogs">Logs</h4>
+      <div class="wf-log-area" id="wfLogArea">
+        <div class="wf-log-entry" style="color:#6b7280;" data-i18n="noWorkflowData">No workflow running</div>
+      </div>
+    </div>
+    <div style="margin-top:1rem;">
+      <table style="width:100%;">
+        <thead><tr><th></th><th data-i18n="step" style="color:#9da0c3;font-size:0.8rem;">Step</th><th data-i18n="status" style="color:#9da0c3;font-size:0.8rem;">Status</th></tr></thead>
+        <tbody id="subtasks"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- Alert modal -->
 <div class="modal-overlay" id="alertModal" onclick="closeAlert(event)">
   <div class="modal" style="max-width:400px;">
@@ -1854,7 +2511,22 @@ var _i18n = {
         desktopNotification: 'Desktop Notification', webhookNotification: 'Webhook',
         throttleInterval: 'Throttle Interval (seconds)', testAlert: 'Test Alert',
         step: 'Step', status: 'Status', title: 'Title', company: 'Company',
-        location: 'Location', score: 'Score', applied: 'Applied'
+        location: 'Location', score: 'Score', applied: 'Applied',
+        wfStatus: 'Status', wfElapsed: 'Elapsed', wfLogs: 'Logs',
+        noWorkflowData: 'No workflow running',
+        launching: 'Launching...',
+        relogin: 'Re-login',
+        workflowEditor: 'Workflow Editor', reset: 'Reset',
+        wfeSearch: 'Search', wfeGenerate: 'Generate', wfeApply: 'Apply',
+        wfeMinScore: 'Min Match Score (%)', wfeTargetCount: 'Target Matches',
+        wfeMaxResults: 'Max Search Results', wfePlatforms: 'Platforms',
+        wfeTailorResume: 'Tailor Resume', wfeCoverLetter: 'Cover Letter',
+        wfeInterviewPrep: 'Interview Prep', wfeConfirmBeforeApply: 'Confirm Before Apply',
+        wfeJobs: 'Jobs', wfeNoReadyPlatform: 'No platform with ready tool',
+        wfeNoJobs: 'No eligible jobs',
+        wfeMinScoreHint: 'Jobs scoring below this % are skipped',
+        wfeTargetCountHint: 'Stop searching each platform after finding this many qualified jobs',
+        wfeMaxResultsHint: 'Max jobs to fetch per platform before moving to next'
     },
     'zh-CN': {
         direction: '求职方向', profile: '个人资料', workflowProgress: '工作流进度',
@@ -1876,7 +2548,22 @@ var _i18n = {
         desktopNotification: '桌面通知', webhookNotification: 'Webhook',
         throttleInterval: '节流间隔（秒）', testAlert: '测试告警',
         step: '步骤', status: '状态', title: '职位', company: '公司',
-        location: '地点', score: '匹配度', applied: '已申请'
+        location: '地点', score: '匹配度', applied: '已申请',
+        wfStatus: '状态', wfElapsed: '耗时', wfLogs: '日志',
+        noWorkflowData: '暂无工作流运行',
+        launching: '启动中...',
+        relogin: '重新登录',
+        workflowEditor: '工作流编辑器', reset: '重置',
+        wfeSearch: '搜索', wfeGenerate: '生成', wfeApply: '投递',
+        wfeMinScore: '最低匹配分数 (%)', wfeTargetCount: '目标匹配数',
+        wfeMaxResults: '最大搜索结果', wfePlatforms: '平台',
+        wfeTailorResume: '定制简历', wfeCoverLetter: '求职信',
+        wfeInterviewPrep: '面试准备', wfeConfirmBeforeApply: '投前确认',
+        wfeJobs: '职位', wfeNoReadyPlatform: '无可用平台工具',
+        wfeNoJobs: '无可选职位',
+        wfeMinScoreHint: '低于此分数的职位将被跳过',
+        wfeTargetCountHint: '每个平台找到此数量的合格职位后停止该平台搜索',
+        wfeMaxResultsHint: '每个平台最多抓取的职位数量'
     }
 };
 var _lang = (navigator.language || 'en').startsWith('zh') ? 'zh-CN' : 'en';
@@ -1939,7 +2626,7 @@ async function genResume(jobUrl) {
         });
         var data = await res.json();
         if (data.error) { alert('Error: ' + data.error); btn.disabled = false; btn.textContent = 'Resume'; return; }
-        showModal('Tailored Resume — ' + (data.job?.title || ''), data.markdown || 'No content generated');
+        showModal('Tailored Resume — ' + (data.job?.title || ''), data.markdown || 'No content generated', jobUrl, 'resume');
         btn.textContent = 'Done'; refresh();
     } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = 'Resume'; }
 }
@@ -1954,9 +2641,29 @@ async function genCoverLetter(jobUrl) {
         });
         var data = await res.json();
         if (data.error) { alert('Error: ' + data.error); btn.disabled = false; btn.textContent = 'Cover Letter'; return; }
-        showModal('Cover Letter — ' + (data.job?.title || ''), data.markdown || 'No content generated');
+        showModal('Cover Letter — ' + (data.job?.title || ''), data.markdown || 'No content generated', jobUrl, 'coverLetter');
         btn.textContent = 'Done'; refresh();
     } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = 'Cover Letter'; }
+}
+
+async function genInterviewPrep(jobUrl) {
+    var btn = event.target; btn.disabled = true; btn.textContent = '...';
+    try {
+        var res = await fetch(PIPE_URL + '/generate-interview-prep', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobUrl: jobUrl })
+        });
+        var data = await res.json();
+        if (data.error) { alert('Error: ' + data.error); btn.disabled = false; btn.textContent = 'Prep'; return; }
+        showModal('Interview Prep — ' + (data.job?.title || ''), data.markdown || 'No content generated', jobUrl, 'interviewPrep');
+        btn.textContent = 'Done'; refresh();
+    } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = 'Prep'; }
+}
+
+function downloadDoc(jobUrl, docType) {
+    var encodedUrl = encodeURIComponent(jobUrl);
+    window.open(PIPE_URL + '/download/' + encodedUrl + '/' + docType, '_blank');
 }
 
 async function markApplied(jobUrl) {
@@ -1977,9 +2684,18 @@ function openJob(url) {
 }
 
 // ─── Modal ───
-function showModal(title, content) {
+function showModal(title, content, jobUrl, docType) {
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalContent').textContent = content;
+    var dlBtn = document.getElementById('modalDownload');
+    if (dlBtn) {
+        if (jobUrl && docType) {
+            dlBtn.style.display = 'inline-block';
+            dlBtn.onclick = function() { downloadDoc(jobUrl, docType); };
+        } else {
+            dlBtn.style.display = 'none';
+        }
+    }
     document.getElementById('modalOverlay').classList.add('visible');
 }
 function closeModal(e) {
@@ -1994,17 +2710,25 @@ function renderJobRow(job) {
     var scVal = job.matchScore != null ? job.matchScore + '%' : '—';
     var statusCls = 'status-badge ' + (job.status || 'discovered');
     var url = esc(job.url || '');
+    var safeUrl = url.replace(/'/g, "\\\\'");
+    var arts = job.artifacts || {};
+    // Artifact badges
+    var badges = '';
+    if (arts.resume && arts.resume !== 'generated' && arts.resume.length > 10) badges += '<span class="artifact-badge" title="Resume generated" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'resume\\')">R</span>';
+    if (arts.coverLetter && arts.coverLetter !== 'generated' && arts.coverLetter.length > 10) badges += '<span class="artifact-badge" title="Cover Letter generated" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'coverLetter\\')">C</span>';
+    if (arts.interviewPrep && arts.interviewPrep !== 'generated' && arts.interviewPrep.length > 10) badges += '<span class="artifact-badge" title="Interview Prep generated" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'interviewPrep\\')">P</span>';
     return '<tr>' +
-        '<td class="title-cell"><a href="' + url + '" target="_blank">' + esc(job.title || 'Untitled') + '</a><span class="company">' + esc(job.company || '') + '</span></td>' +
+        '<td class="title-cell"><a href="' + url + '" target="_blank">' + esc(job.title || 'Untitled') + '</a><span class="company">' + esc(job.company || '') + '</span>' + (badges ? '<div class="artifact-badges">' + badges + '</div>' : '') + '</td>' +
         '<td>' + esc(job.location || '') + '</td>' +
         '<td>' + esc(job.salary || '—') + '</td>' +
         '<td class="' + scCls + '">' + scVal + '</td>' +
         '<td><span class="' + statusCls + '">' + esc(job.status || 'discovered') + '</span></td>' +
         '<td class="actions">' +
-            '<button class="btn btn-primary btn-sm" onclick="genResume(\\'' + url.replace(/'/g, "\\\\'") + '\\')">Resume</button>' +
-            '<button class="btn btn-warning btn-sm" onclick="genCoverLetter(\\'' + url.replace(/'/g, "\\\\'") + '\\')">Cover Letter</button>' +
-            '<button class="btn btn-success btn-sm" onclick="markApplied(\\'' + url.replace(/'/g, "\\\\'") + '\\')">Applied</button>' +
-            '<button class="btn btn-sm" style="background:#6366f1;color:#fff" onclick="openJob(\\'' + url.replace(/'/g, "\\\\'") + '\\')">Link</button>' +
+            '<button class="btn btn-primary btn-sm" onclick="genResume(\\'' + safeUrl + '\\')">Resume</button>' +
+            '<button class="btn btn-warning btn-sm" onclick="genCoverLetter(\\'' + safeUrl + '\\')">Cover Letter</button>' +
+            '<button class="btn btn-sm" style="background:#8b5cf6;color:#fff" onclick="genInterviewPrep(\\'' + safeUrl + '\\')">Prep</button>' +
+            '<button class="btn btn-success btn-sm" onclick="markApplied(\\'' + safeUrl + '\\')">Applied</button>' +
+            '<button class="btn btn-sm" style="background:#6366f1;color:#fff" onclick="openJob(\\'' + safeUrl + '\\')">Link</button>' +
         '</td>' +
     '</tr>';
 }
@@ -2129,8 +2853,8 @@ async function refresh() {
 var _wfSessionId = ${JSON.stringify(encodedSid)};
 var WF_URL = BASE_URL + '/api/workflow-status/' + _wfSessionId;
 
-var ACTION_LABELS = { login: 'Login', relogin: 'Re-login', build: 'Build', rebuild: 'Rebuild' };
-var CELL_ICONS = { idle: '○', ready: '✓', running: '⟳', building: '⟳', warning: '⚠', error: '✗', locked: '🔒' };
+var ACTION_LABELS = { login: 'Login', relogin: 'Re-login', confirm: 'Confirm', build: 'Build', rebuild: 'Rebuild' };
+var CELL_ICONS = { idle: '○', ready: '✓', running: '⟳', launching: '⟳', verifying: '⟳', building: '⟳', warning: '⚠', error: '✗', locked: '🔒' };
 
 function renderWfCell(cellType, info) {
     var label = cellType.charAt(0).toUpperCase() + cellType.slice(1);
@@ -2148,12 +2872,28 @@ function renderWfCell(cellType, info) {
 }
 
 function renderWfPlatform(p) {
+    var loginVis = (p.cells && p.cells.login) ? p.cells.login.visual : 'idle';
     var html = '<div class="wf-platform" data-pid="' + esc(p.id) + '">';
     html += '<div class="wf-platform__header">' + esc(p.icon) + ' ' + esc(p.name) + '</div>';
     html += '<div class="wf-platform__env"><select class="wf-env-select" id="env_' + esc(p.id) + '" onchange="bindEnv(\\''+esc(p.id)+'\\')"></select></div>';
     html += '<div class="wf-platform__actions">';
-    html += '<button class="btn btn-sm" onclick="platformLogin(\\''+esc(p.id)+'\\')">'+t('login')+'</button>';
-    html += '<button class="btn btn-sm" onclick="confirmLogin(\\''+esc(p.id)+'\\')">'+t('confirm')+'</button>';
+    if (loginVis === 'launching') {
+        // Browser launching — both buttons locked
+        html += '<button class="btn btn-sm wf-btn-loading" disabled><span class="wf-spinner"></span> ' + t('launching') + '</button>';
+        html += '<button class="btn btn-sm" disabled>' + t('confirm') + '</button>';
+    } else if (loginVis === 'verifying') {
+        // Browser opened, waiting for user to log in — Login locked, Confirm enabled
+        html += '<button class="btn btn-sm wf-btn-loading" disabled><span class="wf-spinner"></span> ' + t('launching') + '</button>';
+        html += '<button class="btn btn-sm btn-confirm-active" onclick="confirmLogin(\\''+esc(p.id)+'\\')">✓ '+t('confirm')+'</button>';
+    } else if (loginVis === 'ready') {
+        // Logged in — show Re-login option
+        html += '<button class="btn btn-sm" onclick="platformLogin(\\''+esc(p.id)+'\\')">'+t('relogin')+'</button>';
+        html += '<button class="btn btn-sm" disabled>'+t('confirm')+'</button>';
+    } else {
+        // idle / error / warning — normal Login + Confirm
+        html += '<button class="btn btn-sm" onclick="platformLogin(\\''+esc(p.id)+'\\')">'+t('login')+'</button>';
+        html += '<button class="btn btn-sm" onclick="confirmLogin(\\''+esc(p.id)+'\\')">'+t('confirm')+'</button>';
+    }
     html += '</div>';
     html += '<div class="wf-platform__cells">';
     html += renderWfCell('login', p.cells.login);
@@ -2187,6 +2927,10 @@ async function refreshWorkflowStatus() {
 }
 
 async function wfCellAction(platformId, cellType, action) {
+    // Route build/rebuild actions to the actual build API
+    if (action === 'build' || action === 'rebuild') {
+        return buildSearchTool(platformId);
+    }
     try {
         await fetch(WF_URL + '/' + encodeURIComponent(platformId) + '/update', {
             method: 'POST',
@@ -2194,21 +2938,313 @@ async function wfCellAction(platformId, cellType, action) {
             body: JSON.stringify({ cell: cellType, action: action })
         });
         refreshWorkflowStatus();
-    } catch (e) { alert('Action failed: ' + e.message); }
+    } catch (e) { showAlert('Error', e.message); }
+}
+
+async function buildSearchTool(platformId) {
+    // Disable the Build button and show building state
+    var cell = document.querySelector('.wf-platform[data-pid="'+platformId+'"] .wf-cell__action[data-cell="search"]');
+    if (cell) { cell.disabled = true; cell.textContent = '⟳ Building...'; }
+    try {
+        var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId + '/' + encodeURIComponent(platformId) + '/tools/search/build', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+        });
+        var data = await res.json();
+        if (!data.success) { showAlert('Build Failed', data.error || 'Build failed'); }
+        refreshWorkflowStatus();
+    } catch (e) {
+        showAlert('Build Error', e.message);
+        refreshWorkflowStatus();
+    }
 }
 
 // ─── Workflow Control Bar ───
 var WF_API = BASE_URL + '/api/workflow/' + _wfSessionId;
 
+// wfStart now opens the Workflow Editor instead of directly starting
 async function wfStart() {
+    openWorkflowEditor();
+}
+
+// ─── Workflow Editor ───
+var _wfeConfig = null;   // current editor config snapshot
+var _wfePlatforms = [];  // platform list with tool statuses
+var _wfeJobs = [];       // job list for generate/apply selection
+
+function openWorkflowEditor() {
+    document.getElementById('workflowEditorModal').classList.add('visible');
+    // Fetch config, platforms, and jobs in parallel
+    Promise.all([
+        fetch(WF_API + '/config').then(r => r.json()),
+        fetch(BASE_URL + '/api/platforms/' + _wfSessionId).then(r => r.json()),
+        fetch(BASE_URL + '/api/dashboard/' + _wfSessionId).then(r => r.json()).catch(() => ({ jobs: [] }))
+    ]).then(function(results) {
+        _wfeConfig = results[0];
+        _wfePlatforms = results[1].platforms || results[1] || [];
+        var rawJobs = results[2].jobs;
+        _wfeJobs = Array.isArray(rawJobs) ? rawJobs : [];
+        renderWorkflowEditor();
+    }).catch(function(e) {
+        console.error('[wfe] load error:', e);
+        document.getElementById('wfePipeline').innerHTML = '<p style="color:#f87171;">Failed to load config</p>';
+    });
+}
+
+function closeWorkflowEditor(e) {
+    if (e && e.target !== document.getElementById('workflowEditorModal')) return;
+    document.getElementById('workflowEditorModal').classList.remove('visible');
+}
+
+function renderWorkflowEditor() {
+    var cfg = _wfeConfig;
+    if (!cfg || !cfg.steps) return;
+    var t = _i18n[_lang] || _i18n.en;
+    var steps = cfg.steps.filter(function(s) { return s.name !== 'customizeProfile'; });
+    var html = '';
+
+    steps.forEach(function(step, idx) {
+        if (idx > 0) html += '<div class="wfe-arrow">⇒</div>';
+        html += renderWfeCard(step, cfg, t);
+    });
+
+    document.getElementById('wfePipeline').innerHTML = html;
+}
+
+function renderWfeCard(step, cfg, t) {
+    var disabled = !step.enabled;
+    var cls = 'wfe-card' + (disabled ? ' disabled' : '');
+    var nameMap = { search: t.wfeSearch, generate: t.wfeGenerate, apply: t.wfeApply };
+    var toggleIcon = disabled ? '+' : '✕';
+    var toggleCls = 'wfe-card-toggle' + (disabled ? ' off' : '');
+
+    var h = '<div class="' + cls + '" id="wfeCard_' + step.name + '">';
+    h += '<div class="wfe-card-header"><h4>' + (nameMap[step.name] || step.name) + '</h4>';
+    h += '<button class="' + toggleCls + '" onclick="toggleWfStep(&quot;' + step.name + '&quot;)">' + toggleIcon + '</button></div>';
+    h += '<div class="wfe-card-body">';
+
+    if (step.name === 'search') {
+        h += wfeNumRow('wfe_minScore', t.wfeMinScore, cfg.search ? cfg.search.minScore : 60, 0, 100, 5, t.wfeMinScoreHint);
+        h += wfeNumRow('wfe_targetCount', t.wfeTargetCount, cfg.search ? cfg.search.targetCount : 10, 1, 100, 1, t.wfeTargetCountHint);
+        h += wfeNumRow('wfe_maxResults', t.wfeMaxResults, cfg.search ? cfg.search.maxResults : 30, 5, 200, 5, t.wfeMaxResultsHint);
+        h += wfePlatformList(step, 'search', t);
+    }
+
+    if (step.name === 'generate') {
+        h += wfeToggle('wfe_tailorResume', t.wfeTailorResume, step.tailorResume !== false);
+        h += wfeToggle('wfe_coverLetter', t.wfeCoverLetter, step.coverLetter !== false);
+        h += wfeToggle('wfe_interviewPrep', t.wfeInterviewPrep, step.interviewPrep !== false);
+        h += wfeJobList(step, 'generate', t);
+    }
+
+    if (step.name === 'apply') {
+        h += wfeToggle('wfe_confirmBeforeApply', t.wfeConfirmBeforeApply, step.confirmBeforeApply !== false);
+        h += wfeJobList(step, 'apply', t);
+        h += wfePlatformList(step, 'apply', t);
+    }
+
+    h += '</div></div>';
+    return h;
+}
+
+function wfeToggle(id, label, checked) {
+    return '<div class="wfe-toggle-row"><label>' + label + '</label>' +
+        '<label class="wfe-switch"><input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '>' +
+        '<span class="slider"></span></label></div>';
+}
+
+function wfeNumRow(id, label, value, min, max, step, hint) {
+    var h = '<div class="wfe-num-row"><label>' + label;
+    if (hint) h += '<span class="wfe-hint">' + hint + '</span>';
+    h += '</label><input type="number" id="' + id + '" value="' + value + '" min="' + min + '" max="' + max + '" step="' + step + '"></div>';
+    return h;
+}
+
+function wfePlatformList(step, toolType, t) {
+    var h = '<div class="wfe-list-title">' + t.wfePlatforms + '</div>';
+    var selectedIds = step.platforms || [];
+    var hasReady = false;
+
+    if (_wfePlatforms.length === 0) {
+        return h + '<div class="wfe-no-items">' + t.wfeNoReadyPlatform + '</div>';
+    }
+
+    h += '<div class="wfe-check-list">';
+    _wfePlatforms.forEach(function(p) {
+        var toolReady = p.tools && p.tools[toolType] && p.tools[toolType].status === 'ready';
+        var itemCls = 'wfe-check-item' + (toolReady ? '' : ' unavailable');
+        var checked = toolReady && (selectedIds.length === 0 || selectedIds.indexOf(p.id) >= 0);
+        if (toolReady) hasReady = true;
+        h += '<label class="' + itemCls + '">';
+        h += '<input type="checkbox" data-wfe-platform="' + step.name + '" value="' + p.id + '"' +
+            (checked ? ' checked' : '') + (toolReady ? '' : ' disabled') + '>';
+        h += (p.icon || '') + ' ' + p.name;
+        if (!toolReady) h += ' <span style="font-size:0.7rem;color:#666;">(no tool)</span>';
+        h += '</label>';
+    });
+    h += '</div>';
+
+    if (!hasReady) {
+        h += '<div class="wfe-warning">⚠ ' + t.wfeNoReadyPlatform + '</div>';
+    }
+    return h;
+}
+
+function wfeJobList(step, forStep, t) {
+    // Filter jobs by pipeline status:
+    // generate: jobs with status matched (searched but not generated)
+    // apply: jobs with status tailored or reviewed (generated but not applied)
+    var eligible = [];
+    if (forStep === 'generate') {
+        eligible = _wfeJobs.filter(function(j) { return j.pipelineStatus === 'matched'; });
+    } else if (forStep === 'apply') {
+        eligible = _wfeJobs.filter(function(j) {
+            return j.pipelineStatus === 'tailored' || j.pipelineStatus === 'reviewed';
+        });
+    }
+
+    var h = '<div class="wfe-list-title">' + t.wfeJobs + '</div>';
+    if (eligible.length === 0) {
+        return h + '<div class="wfe-no-items">' + t.wfeNoJobs + '</div>';
+    }
+
+    var selectedIds = step.jobIds || [];
+    h += '<div class="wfe-check-list">';
+    eligible.forEach(function(j) {
+        var checked = selectedIds.length === 0 || selectedIds.indexOf(j.id) >= 0;
+        h += '<label class="wfe-check-item">';
+        h += '<input type="checkbox" data-wfe-job="' + step.name + '" value="' + j.id + '"' + (checked ? ' checked' : '') + '>';
+        h += (j.title || 'Untitled') + (j.company ? ' @ ' + j.company : '');
+        h += '</label>';
+    });
+    h += '</div>';
+    return h;
+}
+
+function toggleWfStep(name) {
+    if (!_wfeConfig || !_wfeConfig.steps) return;
+    var step = _wfeConfig.steps.find(function(s) { return s.name === name; });
+    if (!step) return;
+
+    // Count enabled (non-customizeProfile) steps
+    var enabledCount = _wfeConfig.steps.filter(function(s) {
+        return s.name !== 'customizeProfile' && s.enabled;
+    }).length;
+
+    if (step.enabled && enabledCount <= 1) {
+        alert('At least one step must be enabled');
+        return;
+    }
+    step.enabled = !step.enabled;
+    renderWorkflowEditor();
+}
+
+async function confirmWorkflow() {
+    if (!_wfeConfig) return;
+    // Collect values from UI
+    var searchStep = _wfeConfig.steps.find(function(s) { return s.name === 'search'; });
+    var genStep = _wfeConfig.steps.find(function(s) { return s.name === 'generate'; });
+    var applyStep = _wfeConfig.steps.find(function(s) { return s.name === 'apply'; });
+
+    // Search params
+    var patch = { search: {}, steps: {} };
+    var el;
+    el = document.getElementById('wfe_minScore'); if (el) patch.search.minScore = parseInt(el.value) || 60;
+    el = document.getElementById('wfe_targetCount'); if (el) patch.search.targetCount = parseInt(el.value) || 10;
+    el = document.getElementById('wfe_maxResults'); if (el) patch.search.maxResults = parseInt(el.value) || 30;
+
+    // Search platforms
+    if (searchStep) {
+        var sp = []; document.querySelectorAll('[data-wfe-platform="search"]:checked').forEach(function(cb) { sp.push(cb.value); });
+        patch.steps.search = { enabled: searchStep.enabled, platforms: sp };
+    }
+
+    // Generate toggles + jobs
+    if (genStep) {
+        el = document.getElementById('wfe_tailorResume');
+        var tr = el ? el.checked : true;
+        el = document.getElementById('wfe_coverLetter');
+        var cl = el ? el.checked : true;
+        el = document.getElementById('wfe_interviewPrep');
+        var ip = el ? el.checked : true;
+        var gj = []; document.querySelectorAll('[data-wfe-job="generate"]:checked').forEach(function(cb) { gj.push(cb.value); });
+        patch.steps.generate = { enabled: genStep.enabled, tailorResume: tr, coverLetter: cl, interviewPrep: ip, jobIds: gj };
+    }
+
+    // Apply toggles + platforms + jobs
+    if (applyStep) {
+        el = document.getElementById('wfe_confirmBeforeApply');
+        var cba = el ? el.checked : true;
+        var ap = []; document.querySelectorAll('[data-wfe-platform="apply"]:checked').forEach(function(cb) { ap.push(cb.value); });
+        var aj = []; document.querySelectorAll('[data-wfe-job="apply"]:checked').forEach(function(cb) { aj.push(cb.value); });
+        patch.steps.apply = { enabled: applyStep.enabled, confirmBeforeApply: cba, platforms: ap, jobIds: aj };
+    }
+
     try {
-        var res = await fetch(WF_API + '/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-        var data = await res.json();
-        if (data.success) {
+        // Save config
+        var cfgRes = await fetch(WF_API + '/config', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch)
+        });
+        if (!cfgRes.ok) { var d = await cfgRes.json(); alert(d.errors ? d.errors.join(', ') : 'Save failed'); return; }
+
+        // Collect direction & profile from the rendered dashboard as fallback
+        var dirItems = document.querySelectorAll('#direction .item');
+        var profItems = document.querySelectorAll('#profile .item');
+        function _valOf(container, idx) {
+            var items = container;
+            if (idx < items.length) { var v = items[idx].querySelector('.val'); return v ? v.textContent.trim() : ''; }
+            return '';
+        }
+        var ctxPayload = {
+            direction: {
+                q_job_title: _valOf(dirItems, 0),
+                q_location: _valOf(dirItems, 1),
+                q_work_mode: _valOf(dirItems, 2),
+                q_salary: _valOf(dirItems, 3).replace(/K$/i, '')
+            },
+            profile: {
+                basic: _valOf(profItems, 0),
+                skills: _valOf(profItems, 1),
+                experience: _valOf(profItems, 2),
+                education: _valOf(profItems, 3)
+            }
+        };
+
+        // Start workflow
+        var startRes = await fetch(WF_API + '/start', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ context: ctxPayload })
+        });
+        var startData = await startRes.json();
+        if (startData.success) {
+            closeWorkflowEditor();
             document.getElementById('wfBtnStart').style.display = 'none';
             document.getElementById('wfBtnStop').style.display = 'inline-block';
-        } else { alert(data.error || 'Start failed'); }
+        } else {
+            alert(startData.error || 'Start failed');
+        }
     } catch (e) { alert(e.message); }
+}
+
+function resetWorkflowEditor() {
+    // Reload default config from server and re-render
+    fetch(WF_API + '/config').then(function(r) { return r.json(); }).then(function(cfg) {
+        // Reset step enables and sub-options to defaults
+        cfg.steps.forEach(function(s) {
+            if (s.name !== 'customizeProfile') {
+                s.enabled = true;
+                s.platforms = [];
+                s.jobIds = [];
+            }
+            if (s.name === 'generate') { s.tailorResume = true; s.coverLetter = true; s.interviewPrep = true; }
+            if (s.name === 'apply') { s.confirmBeforeApply = true; }
+        });
+        cfg.search = { minScore: 60, targetCount: 10, maxResults: 30 };
+        _wfeConfig = cfg;
+        renderWorkflowEditor();
+    }).catch(function() {});
 }
 
 async function wfStop() {
@@ -2227,15 +3263,132 @@ async function pollWfStatus() {
     } catch {}
 }
 
+// ─── Workflow Progress Offcanvas ───
+var _wfLogs = [];
+var MAX_WF_LOGS = 200;
+
+function toggleProgressOffcanvas() {
+    var oc = document.getElementById('progressOffcanvas');
+    var bd = document.getElementById('progressBackdrop');
+    var isOpen = oc.classList.contains('visible');
+    if (isOpen) { closeProgressOffcanvas(); } else { openProgressOffcanvas(); }
+}
+function openProgressOffcanvas() {
+    document.getElementById('progressOffcanvas').classList.add('visible');
+    document.getElementById('progressBackdrop').classList.add('visible');
+}
+function closeProgressOffcanvas() {
+    document.getElementById('progressOffcanvas').classList.remove('visible');
+    document.getElementById('progressBackdrop').classList.remove('visible');
+}
+
+function addWfLog(message, level) {
+    level = level || 'info';
+    var now = new Date();
+    var ts = now.toLocaleTimeString();
+    _wfLogs.push({ time: ts, message: message, level: level });
+    if (_wfLogs.length > MAX_WF_LOGS) _wfLogs.splice(0, _wfLogs.length - MAX_WF_LOGS);
+    renderWfLogs();
+}
+
+function renderWfLogs() {
+    var el = document.getElementById('wfLogArea');
+    if (!el) return;
+    if (_wfLogs.length === 0) {
+        el.innerHTML = '<div class="wf-log-entry" style="color:#6b7280;">' + t('noWorkflowData') + '</div>';
+        return;
+    }
+    el.innerHTML = _wfLogs.map(function(l) {
+        var cls = 'wf-log-' + l.level;
+        return '<div class="wf-log-entry"><span class="wf-log-time">[' + esc(l.time) + ']</span> <span class="' + cls + '">' + esc(l.message) + '</span></div>';
+    }).join('');
+    el.scrollTop = el.scrollHeight;
+}
+
+function renderStepTimeline(steps) {
+    var list = document.getElementById('stepTimelineList');
+    if (!list) return;
+    if (!steps || steps.length === 0) {
+        list.innerHTML = '<li style="color:#6b7280;font-size:0.85rem;">' + t('noWorkflowData') + '</li>';
+        return;
+    }
+    list.innerHTML = steps.map(function(s) {
+        var dotClass = 'step-dot step-dot-' + (s.status || 'idle');
+        var icon = statusIcon(s.status);
+        var elapsed = '';
+        if (s.startedAt) {
+            var start = new Date(s.startedAt).getTime();
+            var end = s.completedAt ? new Date(s.completedAt).getTime() : Date.now();
+            var secs = Math.round((end - start) / 1000);
+            if (secs >= 60) { elapsed = Math.floor(secs / 60) + 'm ' + (secs % 60) + 's'; }
+            else { elapsed = secs + 's'; }
+        }
+        return '<li>' +
+            '<div class="' + dotClass + '">' + icon + '</div>' +
+            '<div class="step-info">' +
+                '<div class="step-name">' + esc(s.name) + '</div>' +
+                '<div class="step-status-text">' + esc(s.status || 'idle') +
+                    (elapsed ? ' <span class="step-elapsed">(' + elapsed + ')</span>' : '') +
+                '</div>' +
+            '</div>' +
+        '</li>';
+    }).join('');
+}
+
+var _prevWfStatus = 'idle';
+
 function updateWfUI(data) {
     var label = document.getElementById('wfStatusLabel');
-    if (label) label.textContent = (data.status || 'idle').toUpperCase();
-    if (data.status === 'running') {
+    var status = data.status || 'idle';
+    if (label) label.textContent = status.toUpperCase();
+
+    // Button visibility
+    if (status === 'running') {
         document.getElementById('wfBtnStart').style.display = 'none';
         document.getElementById('wfBtnStop').style.display = 'inline-block';
     } else {
         document.getElementById('wfBtnStart').style.display = 'inline-block';
         document.getElementById('wfBtnStop').style.display = 'none';
+    }
+
+    // Progress button pulse effect
+    var progressBtn = document.getElementById('btnWorkflowProgress');
+    if (progressBtn) {
+        if (status === 'running') { progressBtn.classList.add('wf-running'); }
+        else { progressBtn.classList.remove('wf-running'); }
+    }
+
+    // Status badge
+    var badge = document.getElementById('wfProgressBadge');
+    if (badge) {
+        badge.textContent = status.toUpperCase();
+        badge.className = 'wf-badge wf-badge-' + status;
+    }
+
+    // Step timeline
+    renderStepTimeline(data.steps || []);
+
+    // Log status transitions
+    if (status !== _prevWfStatus) {
+        if (status === 'running') addWfLog('Workflow started', 'success');
+        else if (status === 'completed') addWfLog('Workflow completed', 'success');
+        else if (status === 'failed') addWfLog('Workflow failed', 'error');
+        else if (status === 'paused') addWfLog('Workflow paused', 'warning');
+        _prevWfStatus = status;
+    }
+
+    // Log step changes
+    if (data.steps) {
+        data.steps.forEach(function(s) {
+            var key = '_step_' + s.name;
+            if (window[key] !== s.status) {
+                if (s.status === 'running') addWfLog('Step "' + s.name + '" started', 'info');
+                else if (s.status === 'done') addWfLog('Step "' + s.name + '" completed', 'success');
+                else if (s.status === 'error') addWfLog('Step "' + s.name + '" failed: ' + (s.error || ''), 'error');
+                else if (s.status === 'stuck') addWfLog('Step "' + s.name + '" is stuck', 'warning');
+                window[key] = s.status;
+            }
+        });
     }
 }
 
@@ -2392,15 +3545,28 @@ function showToast(message, type) {
 
 // ─── Platform Login Functions ───
 async function platformLogin(platformId) {
+    // Disable login button — state will be restored by SSE platformUpdate callback
+    var loginBtn = document.querySelector('.wf-platform[data-pid="'+platformId+'"] .btn:first-child');
+    var confirmBtn = document.querySelector('.wf-platform[data-pid="'+platformId+'"] .btn:nth-child(2)');
+    if (loginBtn) { loginBtn.disabled = true; loginBtn.textContent = '⟳ ' + t('launching'); loginBtn.style.opacity = '0.6'; }
+    if (confirmBtn) { confirmBtn.disabled = true; }
     try {
         var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId + '/' + encodeURIComponent(platformId) + '/login', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
         });
         var data = await res.json();
         if (data.method === 'url') { window.open(data.url, '_blank'); }
-        else if (!data.success) { showAlert('Login', data.error || 'Login failed'); }
-        refreshWorkflowStatus();
-    } catch (e) { showAlert('Error', e.message); }
+        else if (!data.success) {
+            showAlert('Login', data.error || 'Login failed');
+            refreshWorkflowStatus(); // Only refresh on error to restore button state
+        }
+        // On success: do NOT call refreshWorkflowStatus() here.
+        // The server broadcasts SSE 'platformUpdate' after browser opens,
+        // which triggers refreshWorkflowStatus() via the SSE handler.
+    } catch (e) {
+        showAlert('Error', e.message);
+        refreshWorkflowStatus(); // Restore button state on network error
+    }
 }
 
 async function confirmLogin(platformId) {
@@ -2582,6 +3748,15 @@ connectSSE();
 </html>`;
 }
 
+/**
+ * Broadcast pipeline progress update via SSE.
+ * @param {string} sessionId
+ * @param {object} update - { phase, message, round }
+ */
+function updatePipelineProgress(sessionId, update) {
+    _broadcastSSE(sessionId, 'pipelineProgress', update);
+}
+
 function getDashboardURL(sessionId) {
     return `http://127.0.0.1:${_port}/dashboard/${encodeURIComponent(sessionId)}`;
 }
@@ -2591,5 +3766,7 @@ module.exports = {
     // Job workflow
     upsertJobCard, updateJobStatus, getJobCards, getJobStats,
     // Platform workflow status
-    updatePlatformCell, getWorkflowStatus, computeCellVisual
+    updatePlatformCell, getWorkflowStatus, computeCellVisual,
+    // Pipeline progress
+    updatePipelineProgress
 };
