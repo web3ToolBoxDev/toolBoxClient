@@ -1147,6 +1147,10 @@ function start(getState, port) {
             const sid = decodeURIComponent(platDeleteMatch[1]);
             const pid = decodeURIComponent(platDeleteMatch[2]);
             const result = getPlatformStore().removePlatform(sid, pid);
+            if (result.success) {
+                removePlatformStatus(sid, pid);
+                _broadcastSSE(sid, 'platformUpdate', { removed: pid });
+            }
             res.writeHead(200, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify(result));
         }
@@ -1786,6 +1790,21 @@ function _getPlatformStatuses(sessionId) {
 }
 
 /**
+ * Clear all platform statuses for a session (used on restart/rebuild).
+ */
+function clearPlatformStatuses(sessionId) {
+    _platformStatus.delete(sessionId);
+}
+
+/**
+ * Remove a single platform from the status map.
+ */
+function removePlatformStatus(sessionId, platformId) {
+    const statuses = _getPlatformStatuses(sessionId);
+    statuses.delete(platformId);
+}
+
+/**
  * Compute visual state for a single cell.
  * @param {'login'|'search'|'apply'} cellType
  * @param {object} platform - platform status object
@@ -2125,7 +2144,9 @@ function buildDashboardHTML(sessionId) {
   /* Workflow Status Grid */
   .wf-status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
   .wf-platform { background: #242640; border: 1px solid #2d2f4a; border-radius: 10px; padding: 1rem; }
-  .wf-platform__header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; font-weight: 600; font-size: 0.95rem; }
+  .wf-platform__header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; font-weight: 600; font-size: 0.95rem; position: relative; }
+  .wf-platform__delete { margin-left: auto; background: none; border: none; color: #9da0c3; font-size: 1.2rem; cursor: pointer; padding: 0 0.3rem; line-height: 1; opacity: 0.5; transition: opacity 0.2s, color 0.2s; }
+  .wf-platform__delete:hover { opacity: 1; color: #ff6b6b; }
   .wf-platform__cells { display: flex; flex-direction: column; gap: 0.5rem; }
   .wf-cell { background: #2d2f4a; border-radius: 8px; padding: 0.65rem 0.75rem; position: relative; transition: all 0.3s; }
   .wf-cell__label { font-size: 0.72rem; color: #9da0c3; margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -2964,7 +2985,9 @@ function renderWfCell(cellType, info) {
 function renderWfPlatform(p) {
     var loginVis = (p.cells && p.cells.login) ? p.cells.login.visual : 'idle';
     var html = '<div class="wf-platform" data-pid="' + esc(p.id) + '">';
-    html += '<div class="wf-platform__header">' + esc(p.icon) + ' ' + esc(p.name) + '</div>';
+    html += '<div class="wf-platform__header">' + esc(p.icon) + ' ' + esc(p.name);
+    html += '<button class="wf-platform__delete" onclick="deletePlatform(\\'' + esc(p.id) + '\\',\\'' + esc(p.name) + '\\')" title="Remove">&times;</button>';
+    html += '</div>';
     html += '<div class="wf-platform__env"><select class="wf-env-select" id="env_' + esc(p.id) + '" onchange="bindEnv(\\''+esc(p.id)+'\\')"></select></div>';
     html += '<div class="wf-platform__actions">';
     if (loginVis === 'launching') {
@@ -3659,6 +3682,18 @@ async function platformLogin(platformId) {
     }
 }
 
+async function deletePlatform(platformId, platformName) {
+    if (!confirm((_lang === 'zh-CN' ? '确认删除平台 ' : 'Remove platform ') + platformName + '?')) return;
+    try {
+        var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId + '/' + encodeURIComponent(platformId), {
+            method: 'DELETE'
+        });
+        var data = await res.json();
+        if (data.success) { refreshWorkflowStatus(); }
+        else { showAlert('Delete', data.error || 'Delete failed'); }
+    } catch (e) { showAlert('Error', e.message); }
+}
+
 async function confirmLogin(platformId) {
     try {
         var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId + '/' + encodeURIComponent(platformId) + '/confirm-login', {
@@ -3857,6 +3892,7 @@ module.exports = {
     upsertJobCard, updateJobStatus, getJobCards, getJobStats,
     // Platform workflow status
     updatePlatformCell, getWorkflowStatus, computeCellVisual,
+    clearPlatformStatuses, removePlatformStatus,
     // Pipeline progress
     updatePipelineProgress,
     // SSE broadcaster (for apply step + external modules)

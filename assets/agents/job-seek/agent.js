@@ -934,6 +934,7 @@ async function handleSubtaskAction(payload = {}) {
         // On restart, clear existing platforms so initWithPresets re-seeds fresh
         if (isRestart) {
             platformStore.clearSession(sessionId);
+            dashboardServer.clearPlatformStatuses(sessionId);
         }
 
         const platforms = platformStore.initWithPresets(sessionId, location);
