@@ -3024,7 +3024,7 @@ function renderWfPlatform(p) {
     html += '<div class="wf-platform__header">' + esc(p.icon) + ' ' + esc(p.name);
     html += '<button class="wf-platform__delete" onclick="deletePlatform(\\'' + esc(p.id) + '\\',\\'' + esc(p.name) + '\\')" title="Remove">&times;</button>';
     html += '</div>';
-    html += '<div class="wf-platform__env"><select class="wf-env-select" id="env_' + esc(p.id) + '" onchange="bindEnv(\\''+esc(p.id)+'\\')"></select></div>';
+    // Env binding is now global via AI Panel — per-platform select removed
     html += '<div class="wf-platform__actions">';
     if (loginVis === 'launching') {
         // Browser launching — both buttons locked
