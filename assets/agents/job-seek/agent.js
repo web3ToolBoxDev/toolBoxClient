@@ -185,7 +185,7 @@ function restoreState() {
             state.prompts[sid] = _buildPresetPrompt(state.selectedAnswers[sid] || {});
         }
         // Migrate subtasks: remove deprecated keys (match, resume, coverLetter)
-        const VALID_SUBTASK_KEYS = new Set(['onboarding', 'profile', 'search']);
+        const VALID_SUBTASK_KEYS = new Set(['onboarding', 'profile', 'dashboard', 'search']);
         if (Array.isArray(state.subtasks[sid])) {
             const before = state.subtasks[sid].length;
             state.subtasks[sid] = state.subtasks[sid].filter((t) => VALID_SUBTASK_KEYS.has(t.key));
@@ -414,8 +414,8 @@ async function seedProfileFromKnowledge(sessionId) {
                 pr.status = 'done';
                 pr.updatedAt = now();
             }
-            // Set search to running so _buildDashboardAndFinishSearch can find & finish it
-            const sr = list.find(t => t.key === 'search');
+            // Set dashboard to running so _buildDashboardAndFinish can find & finish it
+            const sr = list.find(t => t.key === 'dashboard');
             if (sr && sr.status === 'pending') {
                 sr.status = 'running';
                 sr.updatedAt = now();
@@ -430,7 +430,7 @@ async function seedProfileFromKnowledge(sessionId) {
         appendRuntimeLog(sessionId, `profile_seeded -> ${seededCount} sections (${daysAgo}d ago)`, { source: 'knowledge' });
 
         // Build dashboard + seed platforms + auto-finish search subtask
-        _buildDashboardAndFinishSearch(sessionId);
+        _buildDashboardAndFinish(sessionId);
         return true;
     } catch (err) {
         console.error('[agent:seed] profile seeding failed:', err.message);
@@ -812,13 +812,13 @@ function moveSubTaskForward(sessionId) {
 // --------------- Build Dashboard helper (shared by profile-finish & search-start) ---------------
 
 /**
- * Seed platforms, build dashboard artifact, and auto-finish the 'search' subtask.
- * Called when profile finishes OR when user explicitly starts/restarts the search subtask.
+ * Seed platforms, build dashboard artifact, and auto-finish the 'dashboard' subtask.
+ * Called when profile finishes OR when user explicitly starts/restarts the dashboard subtask.
  * @param {string} sessionId
  * @param {object} [opts]
  * @param {boolean} [opts.clearFirst=false] - Clear existing platforms before re-seeding (restart)
  */
-function _buildDashboardAndFinishSearch(sessionId, opts = {}) {
+function _buildDashboardAndFinish(sessionId, opts = {}) {
     const { clearFirst = false } = opts;
     try { buildIntentFile(sessionId); } catch (e) {
         console.error('[agent] buildIntentFile on dashboard build failed:', e.message);
@@ -863,27 +863,23 @@ function _buildDashboardAndFinishSearch(sessionId, opts = {}) {
         openUrl: true
     });
 
-    // Auto-finish: dashboard build is instant, mark search done and unlock next subtask
+    // Auto-finish: dashboard build is instant, mark done
     updateSubTasks(sessionId, (list) => {
-        const idx = list.findIndex(i => i.key === 'search');
+        const idx = list.findIndex(i => i.key === 'dashboard');
         if (idx >= 0) {
             list[idx].status = 'done';
             list[idx].updatedAt = now();
-            if (list[idx + 1] && list[idx + 1].status === 'pending') {
-                list[idx + 1].status = 'running';
-                list[idx + 1].updatedAt = now();
-            }
         }
         return list;
     });
 
-    appendSubtaskLog(sessionId, 'search',
+    appendSubtaskLog(sessionId, 'dashboard',
         isZh() ? '仪表盘已构建，平台已添加' : 'Dashboard built, platforms seeded',
         { level: 'info' }
     );
     appendConversation(sessionId, 'assistant', isZh()
-        ? `仪表盘已构建完成，已根据目标地区（${location}）自动添加 ${platforms.length} 个平台：${platforms.map(p => p.name).join('、')}。`
-        : `Dashboard built successfully. ${platforms.length} platforms seeded for "${location}": ${platforms.map(p => p.name).join(', ')}.`);
+        ? `仪表盘已构建完成，已根据目标地区（${location}）自动添加 ${platforms.length} 个平台：${platforms.map(p => p.name).join('、')}。\n搜索、生成简历、投递等功能请在仪表盘内操作。`
+        : `Dashboard built successfully. ${platforms.length} platforms seeded for "${location}": ${platforms.map(p => p.name).join(', ')}.\nSearch, resume generation, and apply are available in the dashboard.`);
 }
 
 // --------------- subtask actions (start / restart) ---------------
@@ -949,7 +945,7 @@ async function handleSubtaskAction(payload = {}) {
                 }
             }
             // Build dashboard + seed platforms + auto-finish search subtask
-            _buildDashboardAndFinishSearch(sessionId);
+            _buildDashboardAndFinish(sessionId);
             // Story 4.2: sync profile milestone to mem0
             syncProfileToMem0(sessionId);
         }
@@ -983,8 +979,8 @@ async function handleSubtaskAction(payload = {}) {
     }
 
     // When (re)starting the search subtask, seed platforms + build dashboard + auto-finish
-    if (subtaskKey === 'search') {
-        _buildDashboardAndFinishSearch(sessionId, { clearFirst: isRestart });
+    if (subtaskKey === 'dashboard') {
+        _buildDashboardAndFinish(sessionId, { clearFirst: isRestart });
         sendSnapshot();
         scheduleSave();
         return;  // early return — skip generic start/restart messages below

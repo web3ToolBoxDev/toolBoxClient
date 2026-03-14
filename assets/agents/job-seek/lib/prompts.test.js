@@ -90,16 +90,16 @@ describe('prompts.js', () => {
             expect(tasks[0].key).toBe('onboarding');
             expect(tasks[0].status).toBe('pending');
             expect(tasks[1].key).toBe('profile');
-            expect(tasks[2].key).toBe('search');
+            expect(tasks[2].key).toBe('dashboard');
         });
 
         it('includes actionLabel on action subtasks', () => {
             const tasks = defaultSubTasks(Date.now());
             const profile = tasks.find((t) => t.key === 'profile');
             expect(profile.actionLabel).toBe('Collect Profile');
-            const search = tasks.find((t) => t.key === 'search');
-            expect(search.actionLabel).toBe('Build Dashboard');
-            expect(search.actionLabelZh).toBe('构建仪表盘');
+            const dashboard = tasks.find((t) => t.key === 'dashboard');
+            expect(dashboard.actionLabel).toBe('Build Dashboard');
+            expect(dashboard.actionLabelZh).toBe('构建仪表盘');
         });
     });
 

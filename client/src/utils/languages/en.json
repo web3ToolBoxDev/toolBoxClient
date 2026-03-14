@@ -105,7 +105,7 @@
     "taskLog.ai.artifactsTitle": "Generated Artifacts",
     "taskLog.ai.subTask.onboarding": "Onboarding",
     "taskLog.ai.subTask.profile": "Profile Collection",
-    "taskLog.ai.subTask.search": "Build Dashboard",
+    "taskLog.ai.subTask.dashboard": "Build Dashboard",
     "taskLog.ai.subtaskLogsHint": "Showing logs for this subtask",
     "taskLog.ai.subtaskStart": "Start",
     "taskLog.ai.subtaskRestart": "Restart",
