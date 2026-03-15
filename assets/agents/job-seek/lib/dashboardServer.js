@@ -748,6 +748,10 @@ function start(getState, port) {
                     const answers = state.selectedAnswers?.[sid] || {};
                     const sections = state.profileSections?.[sid] || {};
                     const ctx = context || { direction: answers, profile: sections };
+                    // Attach AI-generated skill taxonomy if available
+                    if (!ctx.skillTaxonomy && state.skillTaxonomy?.[sid]) {
+                        ctx.skillTaxonomy = state.skillTaxonomy[sid];
+                    }
                     const result = await getWorkflowEngine().start(sid, wfConfig, ctx);
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(result));

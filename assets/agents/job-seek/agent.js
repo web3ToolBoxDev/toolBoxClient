@@ -435,7 +435,7 @@ async function seedProfileFromKnowledge(sessionId) {
         appendRuntimeLog(sessionId, `profile_seeded -> ${seededCount} sections`, { source: 'knowledge' });
 
         // Build dashboard + seed platforms + auto-finish search subtask
-        _buildDashboardAndFinish(sessionId);
+        await _buildDashboardAndFinish(sessionId);
         return true;
     } catch (err) {
         console.error('[agent:seed] profile seeding failed:', err.message);
@@ -823,7 +823,7 @@ function moveSubTaskForward(sessionId) {
  * @param {object} [opts]
  * @param {boolean} [opts.clearFirst=false] - Clear existing platforms before re-seeding (restart)
  */
-function _buildDashboardAndFinish(sessionId, opts = {}) {
+async function _buildDashboardAndFinish(sessionId, opts = {}) {
     const { clearFirst = false } = opts;
     try { buildIntentFile(sessionId); } catch (e) {
         console.error('[agent] buildIntentFile on dashboard build failed:', e.message);
@@ -885,6 +885,57 @@ function _buildDashboardAndFinish(sessionId, opts = {}) {
     appendConversation(sessionId, 'assistant', isZh()
         ? `仪表盘已构建完成，已根据目标地区（${location}）自动添加 ${platforms.length} 个平台：${platforms.map(p => p.name).join('、')}。\n搜索、生成简历、投递等功能请在仪表盘内操作。`
         : `Dashboard built successfully. ${platforms.length} platforms seeded for "${location}": ${platforms.map(p => p.name).join(', ')}.\nSearch, resume generation, and apply are available in the dashboard.`);
+
+    // ── AI-generated skill taxonomy (async, non-blocking) ──
+    // Generate personalized taxonomy based on user profile + direction for smarter job matching.
+    // Stored in state.skillTaxonomy[sessionId], used by matchProfile during workflow search.
+    try {
+        const { provider: activeProvider } = resolveProvider();
+        if (activeProvider === 'api-key') {
+            const { buildTaxonomyPrompt, parseTaxonomyResponse } = require('./lib/tools/skillTaxonomy');
+            const profile = state.profileSections[sessionId] || {};
+            const direction = state.selectedAnswers[sessionId] || {};
+            const prompt = buildTaxonomyPrompt(profile, direction);
+            const subProvider = state.currentSubProvider || 'openai';
+            const apiKey = getRawApiKey();
+            if (apiKey) {
+                const result = await callAPI({
+                    subProvider,
+                    apiKey,
+                    model: state.currentModel,
+                    conversationHistory: [{ role: 'user', text: prompt }]
+                });
+                const responseText = result.text || result.content || (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) || '';
+                const taxonomy = parseTaxonomyResponse(responseText);
+                if (taxonomy) {
+                    if (!state.skillTaxonomy) state.skillTaxonomy = {};
+                    state.skillTaxonomy[sessionId] = taxonomy;
+                    console.log(`[agent] AI skill taxonomy generated: ${Object.keys(taxonomy.taxonomy || {}).length} categories, ${Object.keys(taxonomy.aliases || {}).length} aliases`);
+                } else {
+                    console.log('[agent] AI taxonomy response could not be parsed — will use fallback');
+                }
+            }
+        } else if (activeProvider === 'claude-code' || activeProvider === 'codex-cli') {
+            // CLI mode: use spawn to generate taxonomy
+            const { buildTaxonomyPrompt, parseTaxonomyResponse } = require('./lib/tools/skillTaxonomy');
+            const profile = state.profileSections[sessionId] || {};
+            const direction = state.selectedAnswers[sessionId] || {};
+            const prompt = buildTaxonomyPrompt(profile, direction);
+            try {
+                const cliResult = await invokeCliAsync(activeProvider, prompt, '', state.currentModel);
+                const taxonomy = parseTaxonomyResponse(cliResult || '');
+                if (taxonomy) {
+                    if (!state.skillTaxonomy) state.skillTaxonomy = {};
+                    state.skillTaxonomy[sessionId] = taxonomy;
+                    console.log(`[agent] AI skill taxonomy generated (CLI): ${Object.keys(taxonomy.taxonomy || {}).length} categories`);
+                }
+            } catch (cliErr) {
+                console.log('[agent] CLI taxonomy generation failed:', cliErr.message);
+            }
+        }
+    } catch (err) {
+        console.log('[agent] AI taxonomy generation failed (will use fallback):', err.message);
+    }
 }
 
 // --------------- subtask actions (start / restart) ---------------
@@ -950,7 +1001,7 @@ async function handleSubtaskAction(payload = {}) {
                 }
             }
             // Build dashboard + seed platforms + auto-finish search subtask
-            _buildDashboardAndFinish(sessionId);
+            await _buildDashboardAndFinish(sessionId);
             // Story 4.2: sync profile milestone to mem0
             syncProfileToMem0(sessionId);
         }
@@ -985,7 +1036,7 @@ async function handleSubtaskAction(payload = {}) {
 
     // When (re)starting the search subtask, seed platforms + build dashboard + auto-finish
     if (subtaskKey === 'dashboard') {
-        _buildDashboardAndFinish(sessionId, { clearFirst: isRestart });
+        await _buildDashboardAndFinish(sessionId, { clearFirst: isRestart });
         sendSnapshot();
         scheduleSave();
         return;  // early return — skip generic start/restart messages below

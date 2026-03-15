@@ -41,9 +41,22 @@ function extractRequirements(fetchResult) {
             education: extractSection(text, ['education', 'degree', 'bachelor', 'master', 'phd', '学历', '学位']),
             soft_skills: extractSection(text, ['communication', 'team', 'leadership', 'collaboration', '沟通', '团队', '领导力']),
             responsibilities: extractSection(text, ['responsibilities', 'duties', 'role', 'what you', '职责', '负责']),
-            benefits: extractSection(text, ['benefits', 'perks', 'offer', 'we provide', '福利', '待遇'])
+            benefits: extractSection(text, ['benefits', 'perks', 'offer', 'we provide', '福利', '待遇']),
+            niceToHave: extractNiceToHave(text)
         }
     };
+
+    // Remove nice-to-have skills from technical to avoid double-counting
+    if (requirements.sections.niceToHave && requirements.sections.technical) {
+        const nthLower = requirements.sections.niceToHave.toLowerCase();
+        if (nthLower) {
+            // Filter out sentences that appear in niceToHave from technical
+            const nthSentences = new Set(nthLower.split(/[.。]+/).map(s => s.trim()).filter(Boolean));
+            const techSentences = requirements.sections.technical.split(/\.\s*/);
+            const filtered = techSentences.filter(s => !nthSentences.has(s.trim().toLowerCase()));
+            requirements.sections.technical = filtered.join('. ').trim();
+        }
+    }
 
     // Extract salary mentions
     const salaryMatch = text.match(/\$[\d,]+(?:\s*[-–]\s*\$[\d,]+)?(?:\s*(?:per|\/)\s*(?:year|yr|hour|hr|month|annum))?/i)
@@ -53,6 +66,46 @@ function extractRequirements(fetchResult) {
     }
 
     return requirements;
+}
+
+/**
+ * Extract "Nice to Have" / "Bonus" / "Preferred" skills from text.
+ * Looks for headed sections AND inline markers like "X is a plus".
+ * @param {string} text
+ * @returns {string}
+ */
+function extractNiceToHave(text) {
+    if (!text) return '';
+
+    const results = [];
+
+    // Strategy 1: Find headed sections (e.g. "Nice to Have:", "Bonus:", "Preferred Qualifications:")
+    const headingPattern = /(?:nice\s*(?:to\s*)?have|bonus|preferred|preferred\s+qualifications?|a?\s*plus|加分项|优先|额外)[:\s]*\n?([\s\S]*?)(?=\n\s*(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s*:|$))/gi;
+    let headMatch;
+    while ((headMatch = headingPattern.exec(text)) !== null) {
+        const body = headMatch[1].trim();
+        if (body.length > 5 && body.length < 2000) {
+            results.push(body);
+        }
+    }
+
+    // Strategy 2: Find inline markers ("X is a plus", "X preferred", "bonus: X")
+    const sentences = text.split(/[.!?。！？\n]+/).filter(s => s.trim().length > 10);
+    const inlinePatterns = [
+        /(?:is\s+a\s+plus|is\s+a\s+bonus|nice\s+to\s+have|preferred|would\s+be\s+a\s+(?:plus|bonus)|advantageous|desirable|a\s+plus)/i,
+        /(?:加分|优先|额外|更好)/
+    ];
+    for (const s of sentences) {
+        if (inlinePatterns.some(p => p.test(s))) {
+            const trimmed = s.trim();
+            // Avoid duplicates with headed sections
+            if (!results.some(r => r.includes(trimmed))) {
+                results.push(trimmed);
+            }
+        }
+    }
+
+    return results.join('. ').slice(0, 1000) || '';
 }
 
 /**
@@ -130,4 +183,4 @@ async function handler({ url, useBrowser = false }) {
     return requirements;
 }
 
-module.exports = { TOOL_DEF, handler, extractRequirements, extractSection };
+module.exports = { TOOL_DEF, handler, extractRequirements, extractSection, extractNiceToHave };

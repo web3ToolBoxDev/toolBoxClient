@@ -27,7 +27,8 @@ async function execute({ sessionId, config, context }) {
         maxResults: config.search?.maxResults || 30,
         maxSearchRounds: config.search?.maxSearchRounds || 3,
         envId: context.envId || null,
-        platforms: searchStep?.platforms || []
+        platforms: searchStep?.platforms || [],
+        skillTaxonomy: context.skillTaxonomy || null  // AI-generated taxonomy for smart matching
     };
 
     // Start pipeline

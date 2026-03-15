@@ -283,7 +283,8 @@ function startPipeline(sessionId, config, direction, profile) {
             envId: config.envId || null,
             platforms: config.platforms || [],   // platform IDs from workflow editor
             maxSearchRounds: config.maxSearchRounds || 3,
-            aiExpander: config.aiExpander || null  // injected AI callback for query expansion
+            aiExpander: config.aiExpander || null,  // injected AI callback for query expansion
+            skillTaxonomy: config.skillTaxonomy || null  // AI-generated skill taxonomy for smart matching
         },
         direction,
         profile,
@@ -613,7 +614,7 @@ async function _runPipeline(sessionId) {
                 }
             }
 
-            // Match against profile
+            // Match against profile (with AI taxonomy if available)
             const matchResult = matchProfileHandler({
                 profile,
                 requirements: requirements || {
@@ -625,7 +626,8 @@ async function _runPipeline(sessionId) {
                         soft_skills: ''
                     }
                 },
-                jobTitle: listing.title
+                jobTitle: listing.title,
+                skillTaxonomy: config.skillTaxonomy
             });
 
             const score = matchResult.overallScore || 0;
@@ -745,7 +747,8 @@ async function _runPipeline(sessionId) {
                                 title: listing.title || '',
                                 sections: { technical: '', experience: '', education: '', soft_skills: '' }
                             },
-                            jobTitle: listing.title
+                            jobTitle: listing.title,
+                            skillTaxonomy: config.skillTaxonomy
                         });
 
                         const score = matchResult.overallScore || 0;
