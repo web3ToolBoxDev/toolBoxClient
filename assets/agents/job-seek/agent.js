@@ -1304,9 +1304,13 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default',
         child.on('close', (code) => {
             if (code === 0) {
                 resolve(stdout.trim());
+            } else if (code === null && stdout.trim().length > 50) {
+                // Process killed by signal (e.g. timeout SIGTERM) but produced valid output
+                console.log(`[agent:cli] ${bin} exited with signal (code=null) but stdout has ${stdout.trim().length} chars — treating as success`);
+                resolve(stdout.trim());
             } else {
                 const cliName = provider === 'codex-cli' ? 'codex' : 'claude';
-                reject(new Error(`${cliName} exited with code ${code}: ${stderr.trim()}`));
+                reject(new Error(`${cliName} exited with code ${code}: ${stderr.trim().slice(0, 500)}`));
             }
         });
         child.on('error', (err) => {

@@ -63,7 +63,9 @@ jest.mock('./platformStore', () => ({
             ...(extra || {})
         };
         return { success: true };
-    })
+    }),
+    getFixRules: jest.fn(() => []),
+    addFixRule: jest.fn()
 }));
 
 const scriptBuilder = require('./scriptBuilder');
@@ -255,6 +257,7 @@ describe('buildTool', () => {
         const aiInvoke = jest.fn()
             .mockResolvedValueOnce('```javascript\nconst bad = "broken";\n```')   // attempt 1: generate
             .mockResolvedValueOnce('NO the page shows an error')                   // attempt 1: verify fails
+            .mockResolvedValueOnce('Use longer timeout for waitForSelector')        // attempt 1: analyzeFailure
             .mockResolvedValueOnce('```javascript\nreturn { success: true, jobs: [{title:"Eng", company:"Co", url:"https://x.com/1"}] };\n```')     // attempt 2: generate
             .mockResolvedValueOnce('YES results visible');                          // attempt 2: verify passes
 
@@ -264,8 +267,8 @@ describe('buildTool', () => {
         });
 
         expect(result.success).toBe(true);
-        // 2 generate + 2 verify = 4 AI calls (JD extraction verify doesn't use aiInvoke)
-        expect(aiInvoke).toHaveBeenCalledTimes(4);
+        // 2 generate + 2 verify + 1 analyzeFailure = 5 AI calls
+        expect(aiInvoke).toHaveBeenCalledTimes(5);
     });
 });
 

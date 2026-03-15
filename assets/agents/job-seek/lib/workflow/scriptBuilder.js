@@ -384,6 +384,24 @@ async function buildTool(sessionId, platformId, toolType, options = {}) {
             }
 
             lastError = verifyResult.message;
+
+            // AI failure research: analyze the failure and auto-generate a fix rule
+            if (aiInvoke) {
+                try {
+                    const currentPrompt = buildGeneratePrompt(platform, toolType, '(DOM omitted)', null);
+                    const analysis = await analyzeFailure(platform.name, platform.url, toolType, {
+                        error: verifyResult.message,
+                        script: generatedScript,
+                        screenshot: verifyResult.screenshotUrl || null,
+                        promptRules: currentPrompt
+                    }, { aiInvoke });
+                    if (analysis.rule) {
+                        getPlatformStore().addFixRule(platform.url, toolType, analysis.rule);
+                        buildLog.push(logEntry(4, `AI fix rule: ${analysis.rule}`, 'info'));
+                        console.log(`[dashboard:build] AI generated fix rule: ${analysis.rule}`);
+                    }
+                } catch (_) { /* non-critical */ }
+            }
         }
 
         // Clean up: only close browser if we launched a fresh one (don't kill the shared login browser)
@@ -524,7 +542,9 @@ IMPORTANT — Available page methods (ONLY use these):
 Return ONLY a JavaScript code block (no imports, no browser creation). The code must:
 1. Use \`page\` and \`params\` (do NOT require/import anything).
 2. Use page.waitForSelector() with 5-10s timeouts before interacting with elements.
-3. For search: fill the search form with params.keywords, submit, wait for results, extract job cards using page.$$eval(), return the results array.
+3. For search: navigate to the search results page (prefer URL-based approach — see Rule 10), wait for results,
+   extract job cards using page.$$eval(), return the results array. Only fill the search form manually if URL-based
+   navigation is not possible for this platform.
 4. For apply: navigate to the job URL, fill form fields, submit.
 5. Wrap everything in try/catch and return { success: true, jobs: [...] } or { success: false, error: '...' }.
 6. Use page.evaluate() or page.$$eval() to extract data from the DOM — do NOT use page_extract directly.
@@ -546,7 +566,64 @@ Return ONLY a JavaScript code block (no imports, no browser creation). The code 
    - After each scroll, wait 1.5-2.5s, then check if new cards appeared (compare card count before/after).
    - Stop scrolling when no new cards load or when card count reaches params.maxResults (default 30).
    - The params.maxResults value tells you how many results the pipeline wants — respect it.
-10. PHASE 2 — JD Detail Extraction (search scripts ONLY):
+10. SEARCH NAVIGATION — URL-FIRST APPROACH + PAGINATION:
+   PREFERRED: Build the full search URL with keywords, location, and pagination as query parameters,
+   then use page.goto(searchUrl) to navigate directly. This is more reliable than filling forms.
+   IMPORTANT: ALWAYS include &location= in the URL, even if params.location is empty — pass an empty
+   string (&location=). This overrides stale cookie-based locations. Without this, the site may silently
+   filter by a previously-used city.
+   Example: /jobs/search/?keywords=Fullstack&location=Toronto&start=25
+   Example (no location): /jobs/search/?keywords=Fullstack&location=&start=0
+   Do NOT also type into the search form after URL-based navigation — the URL already carries the search intent.
+
+   params.pageOffset (integer, 0 = first page) tells the script which page of results to start from.
+   If pageOffset > 0:
+
+   Strategy A (URL-based — PREFERRED): Build the search URL with pagination offset appended
+   (e.g. Indeed &start=10, LinkedIn &start=25, Job Bank &page=2).
+   offset = pageOffset * resultsPerPage (typically 10-25 depending on site).
+
+   Strategy B (Click-based — fallback): If the platform does NOT support URL-based search:
+   - Fill the search form, submit, wait for results
+   - Then click the "Next page" button pageOffset times
+   - Add randomDelay(1500, 3000) between each page navigation
+   - Wait for new results to load before proceeding to extraction
+
+   If pageOffset is 0 (default), start from the first page as normal.
+
+11. ZERO RESULTS DETECTION & LOCATION RECOVERY:
+   CRITICAL: After navigating to the search URL, do NOT blindly waitForSelector on job cards.
+   Instead, wait for EITHER job cards OR "no results" indicators (whichever comes first):
+   a. Use Promise.race or a polling loop to detect EITHER:
+      - Job card selectors (e.g. a[href*="/jobs/view/"], .job-card-container)
+      - "No results" indicators (text containing "No results", "0 results", "No matching jobs",
+        or an empty state illustration/container)
+   b. If "no results" or 0 results detected:
+      1. Take a screenshot
+      2. Check for stale location filter pills (e.g. "Sudbury, ON", a city name with an X button,
+         or a location dropdown showing an unexpected value)
+      3. If a stale location pill/filter is found: click the "X" or clear the location input using
+         page.humanType(locationSelector, params.location || ''), then press Enter to re-search
+      4. Wait for results again (repeat step a)
+      5. If still no results after clearing location, return { success: true, jobs: [] } — NOT an error
+   c. If results ARE found (job cards visible): proceed to extraction normally.
+   d. NEVER let the script timeout waiting for job cards that will never appear. Always handle
+      the "0 results" case gracefully.
+
+12. LOCATION FIELD — ALWAYS INCLUDE IN URL:
+   Job sites (especially LinkedIn) remember the last search location from previous sessions via cookies.
+   This can silently limit results to an unintended city (e.g. a small town with few jobs).
+   PRIMARY defense: Always include location in the URL (see Rule 10).
+   SECONDARY defense: After results load, if the displayed location filter/pill shows a different
+   location than expected, clear it and re-search (see Rule 11b).
+   When using form-based navigation (Rule 10, Strategy B):
+   a. If params.location is provided: find the location input, CLEAR it completely using
+      page.humanType(locationSelector, params.location), then wait for the autocomplete dropdown
+      and select the first suggestion (or press Enter).
+   b. If params.location is empty/blank: find the location input and CLEAR it completely.
+      Some sites have a "Remote" or "Anywhere" option — prefer that if available.
+
+13. PHASE 2 — JD Detail Extraction (search scripts ONLY):
    After extracting the job cards list (Phase 1), add a Phase 2 loop that iterates each job:
    a. IMPORTANT: Check params._verifyMode at the top of Phase 2. If truthy, SKIP the entire Phase 2 loop
       (just set each job.fullText = '' and continue). This makes verification fast.
@@ -566,6 +643,15 @@ ${domSummary}
 
     if (previousError) {
         prompt += `\n\nPREVIOUS ATTEMPT FAILED with: ${previousError}\nPlease fix the issues and generate a corrected script.\n`;
+    }
+
+    // Inject platform-specific fix rules learned from past failures via AI analysis
+    const fixRules = getPlatformStore().getFixRules(platform.url, toolType);
+    if (fixRules && fixRules.length > 0) {
+        prompt += '\n\nPLATFORM-SPECIFIC FIX RULES (learned from previous failures — MUST follow):\n';
+        fixRules.forEach((rule, i) => {
+            prompt += `${i + 1}. ${rule}\n`;
+        });
     }
 
     return prompt;
@@ -809,6 +895,7 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
             location: searchParams.location || '',
             jobType: searchParams.jobType || '',
             minSalary: searchParams.minSalary || '',
+            pageOffset: searchParams.pageOffset || 0,
             maxResults: options.maxResults || 30
         };
 
@@ -821,13 +908,24 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
             new Promise((_, reject) => setTimeout(() => reject(new Error(`Search script execution timed out after ${EXEC_TIMEOUT / 1000}s`)), EXEC_TIMEOUT))
         ]);
 
+        if (result && result.success === false) {
+            // Capture failure screenshot before closing browser (for AI failure analysis)
+            let failScreenshot = null;
+            try {
+                const ssRes = await toolCall('page_screenshot', { browserId, pageIndex });
+                failScreenshot = ssRes.base64 || ssRes.screenshot || null;
+            } catch (_) { /* best-effort */ }
+
+            // Only close browser if we launched a fresh one
+            if (!reusedBrowser) {
+                try { await toolCall('browser_close', { browserId }); } catch (_) { /* ignore */ }
+            }
+            return { success: false, jobs: [], error: result.error || 'Script execution failed', failScreenshot };
+        }
+
         // Only close browser if we launched a fresh one
         if (!reusedBrowser) {
             try { await toolCall('browser_close', { browserId }); } catch (_) { /* ignore */ }
-        }
-
-        if (result && result.success === false) {
-            return { success: false, jobs: [], error: result.error || 'Script execution failed' };
         }
 
         let jobs = [];
@@ -844,10 +942,19 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
 
         return { success: true, jobs };
     } catch (err) {
+        // Capture failure screenshot before closing browser
+        let failScreenshot = null;
+        try {
+            if (browserId) {
+                const ssRes = await toolCall('page_screenshot', { browserId, pageIndex });
+                failScreenshot = ssRes.base64 || ssRes.screenshot || null;
+            }
+        } catch (_) { /* best-effort */ }
+
         if (browserId && !reusedBrowser) {
             try { await toolCall('browser_close', { browserId }); } catch (_) { /* ignore */ }
         }
-        return { success: false, jobs: [], error: err.message };
+        return { success: false, jobs: [], error: err.message, failScreenshot };
     }
 }
 
@@ -1194,11 +1301,17 @@ async function healScript(sessionId, platformId, toolType, errorContext, options
         return { success: false, error: 'No existing script to heal' };
     }
 
+    // Include platform-specific fix rules learned from past failures
+    const fixRules = store.getFixRules(platform.url, toolType);
+    const fixRulesBlock = fixRules.length > 0
+        ? `\nPLATFORM-SPECIFIC FIX RULES (learned from previous failures — MUST follow):\n${fixRules.map((r, i) => `${i + 1}. ${r}`).join('\n')}\n`
+        : '';
+
     const prompt = `You are an expert Puppeteer script fixer.
 
 The following script for ${platform.name} (${platform.url}) failed with this error:
 ${errorContext.error}
-
+${fixRulesBlock}
 Current script:
 \`\`\`javascript
 ${currentScript}
@@ -1230,6 +1343,77 @@ Keep the same function signature (receives \`page\` and \`params\`).
 }
 
 // ---------------------------------------------------------------------------
+// Failure analysis — AI-driven fix rule generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Analyze a script failure and generate a prompt fix rule via AI.
+ *
+ * Called after build-verify failures or pipeline runtime failures.
+ * The AI sees the error, failed script, current prompt rules, and a screenshot,
+ * then outputs ONE concise rule to prevent the same failure in future scripts.
+ *
+ * @param {string} platformName - Display name of the platform
+ * @param {string} platformUrl - URL of the platform
+ * @param {string} toolType - 'search' or 'apply'
+ * @param {object} errorContext - { error, script, screenshot?, promptRules? }
+ * @param {object} options - { aiInvoke: function }
+ * @returns {{ rule: string|null }}
+ */
+async function analyzeFailure(platformName, platformUrl, toolType, errorContext, options = {}) {
+    const { aiInvoke } = options;
+    if (typeof aiInvoke !== 'function') return { rule: null };
+
+    // Gather existing fix rules to avoid duplicates
+    const existingFixRules = getPlatformStore().getFixRules(platformUrl, toolType);
+    const existingRulesBlock = existingFixRules.length > 0
+        ? `\nExisting platform-specific fix rules (do NOT duplicate these):\n${existingFixRules.map((r, i) => `${i + 1}. ${r}`).join('\n')}\n`
+        : '';
+
+    const prompt = `You are a Puppeteer automation expert analyzing a script failure.
+
+Platform: ${platformName} (${platformUrl})
+Error: ${errorContext.error}
+
+Failed script (first 800 chars):
+\`\`\`
+${(errorContext.script || '').slice(0, 800)}
+\`\`\`
+
+Current generation prompt rules (abbreviated):
+${(errorContext.promptRules || '').slice(0, 2000)}
+${existingRulesBlock}
+The screenshot shows the page state when the error occurred.
+
+Based on this failure, write ONE concise rule (1-2 sentences) that the script generator
+should follow to prevent this failure in future scripts. Focus on the ROOT CAUSE, not the
+symptom. Write the rule as an imperative instruction.
+Do NOT repeat rules that already exist in the current prompt or fix rules above.
+
+Examples of good rules:
+- "ALWAYS include &location= parameter in search URL to override stale cookie-based locations."
+- "After navigation, check for 'No results' text BEFORE waiting for job card selectors."
+- "Use page.waitForSelector with a 15s timeout for slow-loading job detail panels."
+
+Return ONLY the rule text, nothing else.`;
+
+    try {
+        console.log(`[analyzeFailure] Analyzing failure for ${platformName}/${toolType}: ${(errorContext.error || '').slice(0, 100)}`);
+        const response = await aiInvoke(prompt, errorContext.screenshot || null);
+        const rule = (response || '').trim().replace(/^["']|["']$/g, '').replace(/^Rule:\s*/i, '');
+        if (rule && rule.length > 10 && rule.length < 500) {
+            console.log(`[analyzeFailure] Generated fix rule: ${rule.slice(0, 100)}`);
+            return { rule };
+        }
+        console.log(`[analyzeFailure] AI response not usable (len=${(rule || '').length})`);
+        return { rule: null };
+    } catch (err) {
+        console.log(`[analyzeFailure] AI analysis failed: ${err.message}`);
+        return { rule: null };
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -1237,6 +1421,7 @@ module.exports = {
     buildTool,
     executeSearchScript,
     healScript,
+    analyzeFailure,
     // Exported for testing
     _extractCodeBlock: extractCodeBlock,
     _buildDomSummary: buildDomSummary,

@@ -38,7 +38,8 @@ const PERSIST_KEYS = [
     'intentFiles',
     'masterProfile',
     'activeUserId',
-    'resumeHashes'
+    'resumeHashes',
+    'searchHistory'
 ];
 
 /**

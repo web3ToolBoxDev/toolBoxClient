@@ -1,7 +1,7 @@
 'use strict';
 
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const path = require('path');
 
 const DASHBOARD_PORT = 30003;
@@ -86,6 +86,46 @@ let _port = DASHBOARD_PORT;
 let _server = null;
 let _stateGetter = null; // function that returns current agent state
 
+// ─── CLI auto-detection (mirrors agent.js resolveProvider logic) ───
+const _cliCache = {};
+function _isCliAvailable(cmd) {
+    if (_cliCache[cmd] !== undefined) return _cliCache[cmd];
+    try {
+        const check = process.platform === 'win32' ? `where ${cmd}` : `which ${cmd}`;
+        execSync(check, { stdio: 'ignore', timeout: 5000 });
+        _cliCache[cmd] = true;
+    } catch (_) {
+        _cliCache[cmd] = false;
+    }
+    return _cliCache[cmd];
+}
+
+/**
+ * Resolve the effective AI provider from state, with CLI auto-detection fallback.
+ * Returns { provider, apiKey, isCliProvider } or null if nothing available.
+ */
+function _resolveAiProvider(state) {
+    const provider = state.currentProvider || '';
+    const apiKey = state.runtimeApiKey || '';
+    const isCliProvider = provider === 'claude-code' || provider === 'codex-cli';
+
+    // If explicitly configured, use that
+    if (apiKey || isCliProvider) {
+        return { provider, apiKey, isCliProvider };
+    }
+
+    // Auto-detect: codex-cli > claude-code (fallback only if user didn't select a provider)
+    if (_isCliAvailable('codex')) {
+        return { provider: 'codex-cli', apiKey: '', isCliProvider: true };
+    }
+    if (_isCliAvailable('claude')) {
+        return { provider: 'claude-code', apiKey: '', isCliProvider: true };
+    }
+
+    console.log(`[_resolveAiProvider] No AI provider found (state.currentProvider='${provider}', runtimeApiKey=${apiKey ? 'SET' : 'EMPTY'}, codex=${_cliCache['codex']}, claude=${_cliCache['claude']})`);
+    return null; // No AI backend available
+}
+
 /**
  * Build provider-keyed imageContent for aiClient.callAPI.
  * @param {string} base64png - base64-encoded PNG screenshot
@@ -121,10 +161,13 @@ function _buildImageContent(base64png, textPrompt) {
 function _buildAiExpander() {
     return async ({ jobTitle, location, profileSummary, previousQueries, gap }) => {
         const state = _stateGetter ? _stateGetter() : {};
-        const subProvider = state.currentSubProvider || '';
-        const apiKey = state.runtimeApiKey || '';
-        const model = state.currentModel || 'default';
-        if (!apiKey) return []; // no AI credentials → skip
+        const resolved = _resolveAiProvider(state);
+        if (!resolved) return []; // no AI credentials → skip
+
+        // Override state with resolved provider for _createAiInvoke
+        if (resolved.isCliProvider && !state.currentProvider) {
+            state.currentProvider = resolved.provider;
+        }
 
         const prompt = `You are a job search optimization assistant.
 
@@ -149,25 +192,74 @@ Return ONLY a JSON array of strings, each being a search phrase. No explanation.
 Example: ["Staff Nurse ICU", "RN Critical Care", "Registered Nurse Hospital"]`;
 
         try {
-            const aiClient = require('./aiClient');
-            const result = await aiClient.callAPI({
-                subProvider,
-                apiKey,
-                model: model !== 'default' ? model : undefined,
-                conversationHistory: [{ role: 'user', content: prompt }],
-                systemPrompt: 'You output only valid JSON arrays. No markdown, no explanation.'
-            });
-            const text = (result?.content || '').trim();
+            const aiInvoke = _createAiInvoke(state);
+            const systemPrefix = 'You output only valid JSON arrays. No markdown, no explanation.\n\n';
+            const rawText = await aiInvoke(systemPrefix + prompt);
+            const text = (typeof rawText === 'string' ? rawText : (rawText?.content || '')).trim();
             const match = text.match(/\[[\s\S]*\]/);
             if (match) {
                 const parsed = JSON.parse(match[0]);
-                console.log(`[aiExpander] AI generated ${parsed.length} query suggestions`);
+                console.log(`[aiExpander] AI generated ${parsed.length} query suggestions (via ${resolved.isCliProvider ? 'CLI' : 'API'})`);
                 return Array.isArray(parsed) ? parsed.filter(s => typeof s === 'string') : [];
             }
             return [];
         } catch (err) {
             console.log('[aiExpander] AI call failed, falling back to deterministic expansion:', err.message);
             return [];
+        }
+    };
+}
+
+/**
+ * Build an AI matcher callback for full-JD profile matching.
+ * Sends profile + entire JD text to AI for structured scoring.
+ * Falls back to null (caller uses algorithmic matching) if AI unavailable.
+ *
+ * @returns {Function} async (profile, listing, taxonomy) => matchResult|null
+ */
+function _buildAiMatcher() {
+    return async (profile, listing, taxonomy) => {
+        const state = _stateGetter ? _stateGetter() : {};
+        console.log(`[aiMatcher] state.currentProvider='${state.currentProvider || ''}', state.runtimeApiKey=${state.runtimeApiKey ? 'SET' : 'EMPTY'}`);
+        const resolved = _resolveAiProvider(state);
+        if (!resolved) {
+            console.log('[aiMatcher] No API key and no CLI provider — skipping AI match');
+            return null;
+        }
+
+        // Override state with resolved provider for _createAiInvoke
+        if (resolved.isCliProvider && !state.currentProvider) {
+            state.currentProvider = resolved.provider;
+        }
+
+        const { buildMatchPrompt, parseMatchResponse } = require('./tools/matchProfile');
+        const { mergeTaxonomy, BASE_TAXONOMY, BASE_ALIASES } = require('./tools/skillTaxonomy');
+
+        // Merge AI-generated taxonomy with base
+        const merged = taxonomy
+            ? mergeTaxonomy({ taxonomy: BASE_TAXONOMY, aliases: BASE_ALIASES }, taxonomy)
+            : { taxonomy: BASE_TAXONOMY, aliases: BASE_ALIASES };
+
+        const jdText = listing.fullText || listing.description || '';
+        const prompt = buildMatchPrompt(profile, jdText, listing.title || '', merged);
+
+        try {
+            // Use _createAiInvoke to support both CLI (claude-code) and API providers
+            const aiInvoke = _createAiInvoke(state);
+            const systemPrefix = 'You are a job matching expert. Output only valid JSON, no markdown fences, no explanation.\n\n';
+            const text = await aiInvoke(systemPrefix + prompt);
+            const matchResult = parseMatchResponse(typeof text === 'string' ? text : (text?.content || ''));
+            if (matchResult) {
+                matchResult.matchedAt = new Date().toISOString();
+                matchResult.aiMatched = true;
+                console.log(`[aiMatcher] AI match score: ${matchResult.overallScore}% (via ${resolved.isCliProvider ? 'CLI' : 'API'})`);
+            } else {
+                console.log('[aiMatcher] AI returned unparseable response, falling back to algorithm');
+            }
+            return matchResult;
+        } catch (err) {
+            console.log('[aiMatcher] AI call failed:', err.message);
+            return null;
         }
     };
 }
@@ -232,8 +324,15 @@ function _createAiInvoke(state) {
                 child.on('close', (code) => {
                     // Cleanup temp screenshot
                     if (imgPath) { try { require('fs').unlinkSync(imgPath); } catch (_) {} }
-                    if (code === 0) resolve(stdout.trim());
-                    else reject(new Error(`${bin} exited with code ${code}: ${stderr.trim()}`));
+                    if (code === 0) {
+                        resolve(stdout.trim());
+                    } else if (code === null && stdout.trim().length > 50) {
+                        // Process killed by signal (e.g. timeout SIGTERM) but produced valid output
+                        console.log(`[aiInvoke] ${bin} exited with signal (code=null) but stdout has ${stdout.trim().length} chars — treating as success`);
+                        resolve(stdout.trim());
+                    } else {
+                        reject(new Error(`${bin} exited with code ${code}: ${stderr.trim().slice(0, 500)}`));
+                    }
                 });
                 child.on('error', (err) => {
                     if (imgPath) { try { require('fs').unlinkSync(imgPath); } catch (_) {} }
@@ -378,12 +477,25 @@ function start(getState, port) {
                     const answers = state.selectedAnswers?.[sessionId] || {};
                     const sections = state.profileSections?.[sessionId] || {};
 
-                    // Build AI expander callback for adaptive search query expansion
+                    // Build AI callbacks for pipeline
                     const aiExpander = _buildAiExpander();
+                    const aiMatcher = _buildAiMatcher();
+
+                    // Load search history for dedup + smart pagination
+                    const searchHistory = state.searchHistory?.[sessionId] || {};
+                    const onHistorySave = (history) => {
+                        const st = _stateGetter ? _stateGetter() : {};
+                        if (!st.searchHistory) st.searchHistory = {};
+                        st.searchHistory[sessionId] = history;
+                    };
+
+                    // Build AI invoke for failure analysis (fix rule generation)
+                    console.log(`[pipeline:start] state.currentProvider='${state.currentProvider || ''}', state.runtimeApiKey=${state.runtimeApiKey ? 'SET' : 'EMPTY'}`);
+                    const aiInvoke = _createAiInvoke(state);
 
                     const result = getSearchPipeline().startPipeline(
                         sessionId,
-                        { minScore, targetCount, maxResults, envId: envId || null, platforms: platforms || [], maxSearchRounds, aiExpander },
+                        { minScore, targetCount, maxResults, envId: envId || null, platforms: platforms || [], maxSearchRounds, aiExpander, aiMatcher, aiInvoke, searchHistory, onHistorySave },
                         answers,
                         sections
                     );

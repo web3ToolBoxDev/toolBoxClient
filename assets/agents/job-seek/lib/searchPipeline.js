@@ -228,6 +228,7 @@ function buildSearchQueries(direction, profile, options = {}) {
     const location = direction.q_location || direction.location || '';
     const rawSkills = profile.skills || '';
     const skills = (Array.isArray(rawSkills) ? rawSkills : rawSkills.split(/[,，\n]/)).map(s => String(s).trim()).filter(Boolean).slice(0, 3);
+    const pageOffsets = options.pageOffsets || {};
 
     if (!jobTitle) return queries;
 
@@ -256,6 +257,12 @@ function buildSearchQueries(direction, profile, options = {}) {
         queries.push({ ...base, query: jobTitle, location: '', source: sources[2] });
     }
 
+    // Attach pageOffset from history for each query
+    for (const q of queries) {
+        const key = `${q.source}|${q.query}|${q.location}`;
+        q.pageOffset = pageOffsets[key] || 0;
+    }
+
     return queries;
 }
 
@@ -272,6 +279,9 @@ function startPipeline(sessionId, config, direction, profile) {
         return { error: 'Pipeline already running', running: true };
     }
 
+    // ── Restore search history from previous runs (if any) ──
+    const history = config.searchHistory || {};
+
     const pipeline = {
         sessionId,
         running: true,
@@ -284,7 +294,10 @@ function startPipeline(sessionId, config, direction, profile) {
             platforms: config.platforms || [],   // platform IDs from workflow editor
             maxSearchRounds: config.maxSearchRounds || 3,
             aiExpander: config.aiExpander || null,  // injected AI callback for query expansion
-            skillTaxonomy: config.skillTaxonomy || null  // AI-generated skill taxonomy for smart matching
+            aiMatcher: config.aiMatcher || null,    // injected AI callback for full-JD matching
+            skillTaxonomy: config.skillTaxonomy || null,  // AI-generated skill taxonomy for smart matching
+            onHistorySave: config.onHistorySave || null,  // callback to persist search history
+            _prevTotalRuns: config.searchHistory?.totalRuns || 0
         },
         direction,
         profile,
@@ -301,11 +314,19 @@ function startPipeline(sessionId, config, direction, profile) {
         },
         // Adaptive search tracking
         _searchRound: 1,
-        _allQueries: [],        // all queries tried across rounds (for dedup)
+        _allQueries: (history.queries || []).slice(),   // restore previous keywords
+        _pageOffsets: { ...(history.pageOffsets || {}) }, // restore page offsets per query key
         _sourceQualified: {},   // source → number of qualified jobs (persisted across rounds)
         _sourceResultCount: {}, // source → number of results fetched (persisted across rounds)
         stoppedAt: null
     };
+
+    // Restore previously seen URLs so we skip already-processed jobs
+    if (history.seenUrls?.length) {
+        const seen = _getSeenJobs(sessionId);
+        for (const url of history.seenUrls) seen.add(url);
+        console.log(`[searchPipeline] Restored ${history.seenUrls.length} seen URLs + ${pipeline._allQueries.length} previous keywords + ${Object.keys(pipeline._pageOffsets).length} page offsets`);
+    }
 
     _pipelines.set(sessionId, pipeline);
 
@@ -331,8 +352,8 @@ async function _runPipeline(sessionId) {
     if (!pipeline) return;
 
     const { config, direction, profile } = pipeline;
-    const initialQueries = buildSearchQueries(direction, profile, { envId: config.envId });
-    pipeline._allQueries = initialQueries.slice(); // track for adaptive dedup
+    const initialQueries = buildSearchQueries(direction, profile, { envId: config.envId, pageOffsets: pipeline._pageOffsets });
+    pipeline._allQueries.push(...initialQueries); // track for adaptive dedup (append to restored history)
     const _log = (msg, meta) => {
         const entry = { time: new Date().toISOString(), msg, ...(meta || {}) };
         pipeline.progress.logs.push(entry);
@@ -514,7 +535,7 @@ async function _runPipeline(sessionId) {
                     const scriptResult = await getScriptBuilder().executeSearchScript(
                         sessionId,
                         platformTool.id,
-                        { keywords: q.query, location: q.location },
+                        { keywords: q.query, location: q.location, pageOffset: q.pageOffset || 0 },
                         { envId: q.envId || config.envId, maxResults: Math.min(remaining, config.maxResults) }
                     );
                     if (scriptResult.success && scriptResult.jobs) {
@@ -537,15 +558,51 @@ async function _runPipeline(sessionId) {
                             message: 'Search failed: ' + errMsg
                         });
                         pipeline.progress.errors.push(`[${q.source}] Search tool failed: ${errMsg}`);
+
+                        // AI failure research — analyze and generate fix rule for future rebuilds
+                        if (config.aiInvoke) {
+                            try {
+                                const fullPlatform = getPlatformStore().getPlatform(sessionId, platformTool.id);
+                                const currentScript = fullPlatform?.tools?.search?.script || '';
+                                const analysis = await getScriptBuilder().analyzeFailure(
+                                    platformTool.name, platformTool.url, 'search',
+                                    {
+                                        error: errMsg,
+                                        script: currentScript,
+                                        screenshot: scriptResult.failScreenshot || null,
+                                        promptRules: ''  // analyzeFailure reads existing fixRules internally
+                                    },
+                                    { aiInvoke: config.aiInvoke }
+                                );
+                                if (analysis.rule) {
+                                    getPlatformStore().addFixRule(platformTool.url, 'search', analysis.rule);
+                                    _log(`AI fix rule generated: ${analysis.rule}`);
+                                }
+                            } catch (_) { /* non-critical */ }
+                        }
                     }
                 } else {
                     _log(`[${q.source}] No platform tool available — skipped`);
                     continue;
                 }
 
-                const newCount = listings.filter(l => l.url && !seenUrls.has(l.url)).length;
-                _log(`[${q.source}] Found ${listings.length} results (${newCount} new)`);
+                // ── Overlap rate detection: determine how many results are already seen ──
+                const totalResults = listings.filter(l => l.url).length;
+                const seenCount = listings.filter(l => l.url && seenUrls.has(l.url)).length;
+                const overlapRate = totalResults > 0 ? seenCount / totalResults : 0;
+                const newCount = totalResults - seenCount;
 
+                if (overlapRate >= 0.8 && totalResults > 0) {
+                    // Almost all results are old → advance pageOffset for next run
+                    const offsetKey = `${q.source}|${q.query}|${q.location}`;
+                    pipeline._pageOffsets[offsetKey] = (pipeline._pageOffsets[offsetKey] || 0) + 1;
+                    _log(`⚡ [${q.source}] High overlap (${Math.round(overlapRate * 100)}%) for "${q.query}" — will use page ${pipeline._pageOffsets[offsetKey]} next time`);
+                } else if (overlapRate >= 0.5) {
+                    _log(`[${q.source}] Moderate overlap (${Math.round(overlapRate * 100)}%) — filtering old results`);
+                }
+                _log(`[${q.source}] Found ${totalResults} results (${newCount} new, overlap: ${Math.round(overlapRate * 100)}%)`);
+
+                // Filter: only add new (unseen) listings
                 for (const listing of listings) {
                     if (listing.url && !seenUrls.has(listing.url)) {
                         seenUrls.add(listing.url);
@@ -614,21 +671,27 @@ async function _runPipeline(sessionId) {
                 }
             }
 
-            // Match against profile (with AI taxonomy if available)
-            const matchResult = matchProfileHandler({
-                profile,
-                requirements: requirements || {
-                    title: listing.title || '',
-                    sections: {
-                        technical: '',
-                        experience: '',
-                        education: '',
-                        soft_skills: ''
-                    }
-                },
-                jobTitle: listing.title,
-                skillTaxonomy: config.skillTaxonomy
-            });
+            // Match against profile — prefer AI full-JD matching, fallback to algorithm
+            let matchResult;
+            if (config.aiMatcher && listing.fullText) {
+                try {
+                    matchResult = await config.aiMatcher(profile, listing, config.skillTaxonomy);
+                    if (matchResult) _log(`  AI match: ${matchResult.overallScore}%`);
+                } catch (err) {
+                    _log(`  AI match failed: ${err.message}, fallback to algorithm`);
+                }
+            }
+            if (!matchResult) {
+                matchResult = matchProfileHandler({
+                    profile,
+                    requirements: requirements || {
+                        title: listing.title || '',
+                        sections: { technical: '', experience: '', education: '', soft_skills: '' }
+                    },
+                    jobTitle: listing.title,
+                    skillTaxonomy: config.skillTaxonomy
+                });
+            }
 
             const score = matchResult.overallScore || 0;
             pipeline.progress.matched++;
@@ -741,15 +804,27 @@ async function _runPipeline(sessionId) {
                             dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
                         }
 
-                        const matchResult = matchProfileHandler({
-                            profile,
-                            requirements: requirements || {
-                                title: listing.title || '',
-                                sections: { technical: '', experience: '', education: '', soft_skills: '' }
-                            },
-                            jobTitle: listing.title,
-                            skillTaxonomy: config.skillTaxonomy
-                        });
+                        // Match — prefer AI full-JD matching, fallback to algorithm
+                        let matchResult;
+                        if (config.aiMatcher && listing.fullText) {
+                            try {
+                                matchResult = await config.aiMatcher(profile, listing, config.skillTaxonomy);
+                                if (matchResult) _log(`  AI match: ${matchResult.overallScore}%`);
+                            } catch (err) {
+                                _log(`  AI match failed: ${err.message}, fallback to algorithm`);
+                            }
+                        }
+                        if (!matchResult) {
+                            matchResult = matchProfileHandler({
+                                profile,
+                                requirements: requirements || {
+                                    title: listing.title || '',
+                                    sections: { technical: '', experience: '', education: '', soft_skills: '' }
+                                },
+                                jobTitle: listing.title,
+                                skillTaxonomy: config.skillTaxonomy
+                            });
+                        }
 
                         const score = matchResult.overallScore || 0;
                         pipeline.progress.matched++;
@@ -809,6 +884,23 @@ function _finishPipeline(sessionId, reason) {
     pipeline.running = false;
     pipeline.progress.phase = reason;
     pipeline.stoppedAt = new Date().toISOString();
+
+    // ── Persist search history for next run ──
+    if (typeof pipeline.config.onHistorySave === 'function') {
+        try {
+            const seenSet = _getSeenJobs(sessionId);
+            pipeline.config.onHistorySave({
+                queries: [...new Set(pipeline._allQueries.map(q => typeof q === 'string' ? q : q.query))],
+                seenUrls: [...seenSet],
+                pageOffsets: pipeline._pageOffsets || {},
+                lastRunAt: new Date().toISOString(),
+                totalRuns: (pipeline.config._prevTotalRuns || 0) + 1
+            });
+            console.log(`[searchPipeline] Saved search history: ${seenSet.size} seen URLs, ${Object.keys(pipeline._pageOffsets || {}).length} page offsets`);
+        } catch (err) {
+            console.error('[searchPipeline] Failed to save search history:', err.message);
+        }
+    }
 }
 
 /**

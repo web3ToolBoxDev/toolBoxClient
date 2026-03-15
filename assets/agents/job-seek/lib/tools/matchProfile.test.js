@@ -2,7 +2,8 @@
 
 const {
     TOOL_DEF, handler, extractSkillTokens, calculateSkillMatch,
-    calculateSmartSkillMatch, calculateExperienceMatch, normalizeSkill, isCoreSkill
+    calculateSmartSkillMatch, calculateExperienceMatch, normalizeSkill, isCoreSkill,
+    buildMatchPrompt, parseMatchResponse
 } = require('./matchProfile');
 const { BASE_TAXONOMY, BASE_ALIASES, mergeTaxonomy } = require('./skillTaxonomy');
 
@@ -342,6 +343,119 @@ describe('match_profile tool', () => {
                 }
             });
             expect(result.breakdown.skills.missing.length).toBeGreaterThan(0);
+        });
+    });
+
+    describe('buildMatchPrompt', () => {
+        test('includes profile skills, JD text, job title', () => {
+            const prompt = buildMatchPrompt(
+                { skills: 'React, Node.js', experience: '5 years full-stack', education: 'BS in CS' },
+                'We need a developer with React and TypeScript experience. 3+ years required.',
+                'Senior Frontend Engineer',
+                { taxonomy: { 'frontend-framework': ['react', 'vue'] }, aliases: {} }
+            );
+            expect(prompt).toContain('React, Node.js');
+            expect(prompt).toContain('Senior Frontend Engineer');
+            expect(prompt).toContain('React and TypeScript');
+            expect(prompt).toContain('frontend-framework');
+            expect(prompt).toContain('overallScore');
+        });
+
+        test('handles array skills', () => {
+            const prompt = buildMatchPrompt(
+                { skills: ['React', 'Node.js'] },
+                'Job description text',
+                'Dev'
+            );
+            expect(prompt).toContain('React, Node.js');
+        });
+
+        test('truncates long JD text', () => {
+            const longJD = 'x'.repeat(10000);
+            const prompt = buildMatchPrompt({ skills: 'React' }, longJD, 'Dev');
+            expect(prompt.length).toBeLessThan(6000);
+        });
+
+        test('works without taxonomy', () => {
+            const prompt = buildMatchPrompt(
+                { skills: 'React' },
+                'Job description',
+                'Dev'
+            );
+            expect(prompt).toContain('React');
+            expect(prompt).not.toContain('Skill Taxonomy');
+        });
+    });
+
+    describe('parseMatchResponse', () => {
+        test('parses valid JSON response', () => {
+            const response = JSON.stringify({
+                overallScore: 75,
+                breakdown: {
+                    skills: { score: 80, matched: ['react'], similar: [], missing: ['vue'], niceToHave: { matched: [], similar: [], missing: [] } },
+                    experience: { score: 70, detail: 'Close match' },
+                    education: { score: 100, detail: 'Degree matches' }
+                },
+                interviewPrep: ['Learn Vue']
+            });
+            const result = parseMatchResponse(response);
+            expect(result).not.toBeNull();
+            expect(result.overallScore).toBe(75);
+            expect(result.breakdown.skills.matched).toContain('react');
+            expect(result.interviewPrep).toEqual(['Learn Vue']);
+        });
+
+        test('handles markdown-fenced JSON', () => {
+            const response = '```json\n{"overallScore":60,"breakdown":{"skills":{"score":60,"matched":[],"similar":[],"missing":[]},"experience":{"score":50,"detail":""},"education":{"score":50,"detail":""}}}\n```';
+            const result = parseMatchResponse(response);
+            expect(result).not.toBeNull();
+            expect(result.overallScore).toBe(60);
+        });
+
+        test('handles extra text around JSON', () => {
+            const response = 'Here is the result:\n{"overallScore":85,"breakdown":{"skills":{"score":90,"matched":["react"],"similar":[],"missing":[]},"experience":{"score":80,"detail":"good"},"education":{"score":80,"detail":"ok"}}}\nDone!';
+            const result = parseMatchResponse(response);
+            expect(result).not.toBeNull();
+            expect(result.overallScore).toBe(85);
+        });
+
+        test('fills missing niceToHave with defaults', () => {
+            const response = JSON.stringify({
+                overallScore: 70,
+                breakdown: {
+                    skills: { score: 70, matched: [], similar: [], missing: [] },
+                    experience: { score: 50, detail: '' },
+                    education: { score: 50, detail: '' }
+                }
+            });
+            const result = parseMatchResponse(response);
+            expect(result.breakdown.skills.niceToHave).toEqual({ matched: [], similar: [], missing: [] });
+            expect(result.interviewPrep).toEqual([]);
+        });
+
+        test('clamps score to 0-100', () => {
+            const response = JSON.stringify({
+                overallScore: 150,
+                breakdown: { skills: { score: 90 }, experience: { score: 80 }, education: { score: 70 } }
+            });
+            const result = parseMatchResponse(response);
+            expect(result.overallScore).toBe(100);
+        });
+
+        test('returns null for invalid inputs', () => {
+            expect(parseMatchResponse('')).toBeNull();
+            expect(parseMatchResponse(null)).toBeNull();
+            expect(parseMatchResponse('not json')).toBeNull();
+        });
+
+        test('returns null if overallScore missing', () => {
+            const response = JSON.stringify({ breakdown: { skills: {} } });
+            expect(parseMatchResponse(response)).toBeNull();
+        });
+
+        test('returns null if breakdown missing', () => {
+            const response = JSON.stringify({ overallScore: 50 });
+            expect(parseMatchResponse(response)).toBeNull();
         });
     });
 });

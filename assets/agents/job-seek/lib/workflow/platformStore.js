@@ -84,6 +84,84 @@ function _saveToolScript(platformUrl, toolType, script, version, jdVerified) {
 }
 
 /**
+ * Add an AI-generated fix rule for a platform tool (learned from failure analysis).
+ * Rules are persisted across rebuilds — they represent permanent lessons.
+ * @param {string} platformUrl - Platform URL key
+ * @param {string} toolType - 'search' or 'apply'
+ * @param {string} rule - One-sentence imperative rule
+ */
+function addFixRule(platformUrl, toolType, rule) {
+    try {
+        const dir = _dataDir();
+        fs.mkdirSync(dir, { recursive: true });
+        const filePath = path.join(dir, TOOLS_FILE);
+
+        let data = {};
+        try {
+            if (fs.existsSync(filePath)) {
+                data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {};
+            }
+        } catch (_) { /* start fresh */ }
+
+        if (!data[platformUrl]) data[platformUrl] = {};
+        if (!data[platformUrl][toolType]) data[platformUrl][toolType] = {};
+        const toolData = data[platformUrl][toolType];
+        if (!Array.isArray(toolData.fixRules)) toolData.fixRules = [];
+
+        // Dedup: skip if a very similar rule already exists (>60% word overlap)
+        const ruleWords = new Set(rule.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+        const isDuplicate = toolData.fixRules.some(existing => {
+            const existWords = new Set(existing.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+            const overlap = [...ruleWords].filter(w => existWords.has(w)).length;
+            return ruleWords.size > 0 && overlap / ruleWords.size > 0.6;
+        });
+        if (isDuplicate) {
+            console.log(`[platformStore] Fix rule skipped (duplicate): ${rule.slice(0, 80)}...`);
+            return;
+        }
+
+        toolData.fixRules.push(rule);
+
+        // Rolling cap: keep max 5 rules
+        while (toolData.fixRules.length > 5) {
+            toolData.fixRules.shift();
+        }
+
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+        console.log(`[platformStore] Added fix rule for ${platformUrl}/${toolType}: ${rule.slice(0, 80)}...`);
+    } catch (err) {
+        console.error('[platformStore] Failed to add fix rule:', err.message);
+    }
+}
+
+/**
+ * Get AI-generated fix rules for a platform tool.
+ * @param {string} platformUrl - Platform URL key
+ * @param {string} toolType - 'search' or 'apply'
+ * @returns {string[]} Array of rule strings
+ */
+function getFixRules(platformUrl, toolType) {
+    const cache = _loadToolCache();
+
+    let entry = cache[platformUrl];
+    // Fuzzy match by domain (same as _restoreTools)
+    if (!entry) {
+        try {
+            const platHost = new URL(platformUrl).hostname;
+            const platBase = platHost.split('.').slice(-2).join('.');
+            for (const [cachedUrl, cachedData] of Object.entries(cache)) {
+                const cachedHost = new URL(cachedUrl).hostname;
+                const cachedBase = cachedHost.split('.').slice(-2).join('.');
+                if (cachedBase === platBase) { entry = cachedData; break; }
+            }
+        } catch (_) {}
+    }
+
+    if (!entry || !entry[toolType]) return [];
+    return Array.isArray(entry[toolType].fixRules) ? entry[toolType].fixRules : [];
+}
+
+/**
  * Restore saved tool scripts onto a platform object.
  * Matches by exact URL first, then falls back to domain-based matching
  * (e.g. ca.indeed.com matches saved script for www.indeed.com).
@@ -439,5 +517,7 @@ module.exports = {
     saveLoginStatus,
     clearLoginStatus,
     getLoginStatus,
+    addFixRule,
+    getFixRules,
     REGION_PRESETS
 };

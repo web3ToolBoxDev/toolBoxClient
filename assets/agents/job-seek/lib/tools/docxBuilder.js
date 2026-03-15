@@ -9,11 +9,12 @@
  * Output: { buffer: Buffer, filename: string }
  */
 
-const {
-    Document, Packer, Paragraph, TextRun,
-    HeadingLevel, AlignmentType, BorderStyle,
-    TabStopPosition, TabStopType
-} = require('docx');
+let Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, TabStopPosition, TabStopType;
+try {
+    ({ Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, TabStopPosition, TabStopType } = require('docx'));
+} catch (err) {
+    console.warn('[docxBuilder] "docx" module not installed. Run: npm install docx --save --legacy-peer-deps');
+}
 
 // ─── Style constants ───
 const FONT = 'Calibri';
@@ -62,6 +63,9 @@ function parseBoldRuns(text, baseStyle = {}) {
  * @returns {Promise<{ buffer: Buffer, filename: string }>}
  */
 async function markdownToDocx(markdown, meta = {}) {
+    if (!Document) {
+        throw new Error('docx module not installed. Run: npm install docx --save --legacy-peer-deps');
+    }
     if (!markdown || !markdown.trim()) {
         // Minimal empty doc
         const emptyDoc = new Document({

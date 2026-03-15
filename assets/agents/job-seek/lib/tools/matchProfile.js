@@ -362,6 +362,97 @@ function handler({ profile, requirements, jobTitle, jobUrl, skillTaxonomy }) {
     };
 }
 
+/**
+ * Build AI matching prompt — sends profile + full JD to AI for structured scoring.
+ * @param {object} profile - { skills, experience, education }
+ * @param {string} jdFullText - Full job description text
+ * @param {string} jobTitle - Job title
+ * @param {object} [taxonomy] - Merged taxonomy { taxonomy: {...}, aliases: {...} }
+ * @returns {string} Prompt text
+ */
+function buildMatchPrompt(profile, jdFullText, jobTitle, taxonomy) {
+    const skills = Array.isArray(profile.skills) ? profile.skills.join(', ') : (profile.skills || '');
+    const experience = Array.isArray(profile.experience) ? profile.experience.join('\n') : (profile.experience || '');
+    const education = Array.isArray(profile.education) ? profile.education.join('\n') : (profile.education || '');
+
+    // Build concise taxonomy summary (top categories only, keep prompt short)
+    let taxonomySummary = '';
+    if (taxonomy && taxonomy.taxonomy) {
+        const cats = Object.entries(taxonomy.taxonomy).slice(0, 20);
+        taxonomySummary = cats.map(([cat, skills]) =>
+            `${cat}: ${skills.slice(0, 8).join(', ')}`
+        ).join('\n');
+    }
+
+    return `Compare this candidate's profile against a job description and score the match.
+
+## Candidate Profile
+Skills: ${skills}
+Experience: ${experience.slice(0, 500)}
+Education: ${education.slice(0, 300)}
+
+## Job Description
+Title: ${jobTitle || 'Unknown'}
+${jdFullText.slice(0, 4000)}
+
+${taxonomySummary ? `## Skill Taxonomy (skills in same category are similar/substitutable)\n${taxonomySummary}` : ''}
+
+## Scoring Rules
+- Overall = skills × 50% + experience × 30% + education × 20%
+- Exact skill match = full credit
+- Same-category skill (from taxonomy above) = 60% credit → record in "similar" with category name
+- Skills mentioned in job title = core skills, weight × 1.5
+- "Nice to have" / "preferred" / "bonus" / "a plus" skills = weight × 0.5, track separately in niceToHave
+- Experience: 100 if meets/exceeds requirement, 70 if close (within 1 year), 40 if under, 50 if unspecified
+- Education: 100 if matches, 40-50 if partial match, 50 if unspecified
+
+## Output
+Return ONLY valid JSON (no markdown fences, no explanation):
+{"overallScore":0,"breakdown":{"skills":{"score":0,"matched":[],"similar":[{"req":"","have":"","category":""}],"missing":[],"niceToHave":{"matched":[],"similar":[],"missing":[]}},"experience":{"score":0,"detail":""},"education":{"score":0,"detail":""}},"interviewPrep":[]}`;
+}
+
+/**
+ * Parse AI matching response — extract structured JSON from AI text.
+ * @param {string} aiText - Raw AI response
+ * @returns {object|null} Parsed match result or null
+ */
+function parseMatchResponse(aiText) {
+    if (!aiText || typeof aiText !== 'string') return null;
+
+    let text = aiText.trim();
+
+    // Strip markdown fences
+    const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) text = fenceMatch[1].trim();
+
+    // Try to find JSON object
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    try {
+        const parsed = JSON.parse(jsonMatch[0]);
+
+        // Validate required fields
+        if (typeof parsed.overallScore !== 'number') return null;
+        if (!parsed.breakdown) return null;
+
+        // Ensure structure completeness with defaults
+        const b = parsed.breakdown;
+        if (!b.skills) b.skills = { score: 0, matched: [], similar: [], missing: [], niceToHave: { matched: [], similar: [], missing: [] } };
+        if (!b.skills.niceToHave) b.skills.niceToHave = { matched: [], similar: [], missing: [] };
+        if (!b.experience) b.experience = { score: 50, detail: '' };
+        if (!b.education) b.education = { score: 50, detail: '' };
+        if (!parsed.interviewPrep) parsed.interviewPrep = [];
+
+        // Clamp score
+        parsed.overallScore = Math.max(0, Math.min(100, Math.round(parsed.overallScore)));
+
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
 module.exports = {
     TOOL_DEF,
     handler,
@@ -370,5 +461,7 @@ module.exports = {
     calculateSmartSkillMatch,
     calculateExperienceMatch,
     normalizeSkill,
-    isCoreSkill
+    isCoreSkill,
+    buildMatchPrompt,
+    parseMatchResponse
 };
