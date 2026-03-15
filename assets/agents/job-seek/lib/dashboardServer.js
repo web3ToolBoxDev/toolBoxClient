@@ -723,8 +723,9 @@ function start(getState, port) {
             // Attach pipeline logs so the dashboard can show job URLs + scores
             try {
                 const pipeStatus = getSearchPipeline().getPipelineStatus(sid);
-                if (pipeStatus && pipeStatus.logs && pipeStatus.logs.length > 0) {
-                    status.pipelineLogs = pipeStatus.logs;
+                const pipeLogs = pipeStatus && pipeStatus.progress && pipeStatus.progress.logs;
+                if (pipeLogs && pipeLogs.length > 0) {
+                    status.pipelineLogs = pipeLogs;
                 }
             } catch (_) {}
             res.writeHead(200, { 'Content-Type': 'application/json' });
