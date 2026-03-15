@@ -332,8 +332,8 @@ async function _runPipeline(sessionId) {
     const { config, direction, profile } = pipeline;
     const initialQueries = buildSearchQueries(direction, profile, { envId: config.envId });
     pipeline._allQueries = initialQueries.slice(); // track for adaptive dedup
-    const _log = (msg) => {
-        const entry = { time: new Date().toISOString(), msg };
+    const _log = (msg, meta) => {
+        const entry = { time: new Date().toISOString(), msg, ...(meta || {}) };
         pipeline.progress.logs.push(entry);
         console.log(`[pipeline:${sessionId.slice(0, 8)}] ${msg}`);
     };
@@ -632,7 +632,9 @@ async function _runPipeline(sessionId) {
             pipeline.progress.matched++;
 
             const qualified = score >= config.minScore;
-            _log(`${qualified ? '✓' : '✗'} "${listing.title}" @ ${listing.company || '?'} → score: ${score}%${qualified ? ' QUALIFIED' : ''}`);
+            _log(`${qualified ? '✓' : '✗'} "${listing.title}" @ ${listing.company || '?'} → score: ${score}%${qualified ? ' QUALIFIED' : ''}`, {
+                url: listing.url, score, title: listing.title, company: listing.company || '?'
+            });
 
             // Only store qualified jobs (score >= minScore)
             if (qualified) {
@@ -749,7 +751,9 @@ async function _runPipeline(sessionId) {
                         const score = matchResult.overallScore || 0;
                         pipeline.progress.matched++;
                         const qualified = score >= config.minScore;
-                        _log(`${qualified ? '✓' : '✗'} "${listing.title}" @ ${listing.company || '?'} → score: ${score}%${qualified ? ' QUALIFIED' : ''}`);
+                        _log(`${qualified ? '✓' : '✗'} "${listing.title}" @ ${listing.company || '?'} → score: ${score}%${qualified ? ' QUALIFIED' : ''}`, {
+                            url: listing.url, score, title: listing.title, company: listing.company || '?'
+                        });
 
                         if (qualified) {
                             dashboardServer.upsertJobCard(sessionId, {

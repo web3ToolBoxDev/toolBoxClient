@@ -715,11 +715,18 @@ function start(getState, port) {
 
         // ─── Workflow Engine API routes ───
 
-        // GET /api/workflow/:sid/status — get workflow status
+        // GET /api/workflow/:sid/status — get workflow status (+ pipeline logs)
         const wfEngStatusMatch = url.match(/^\/api\/workflow\/([^/]+)\/status$/);
         if (wfEngStatusMatch && req.method === 'GET') {
             const sid = decodeURIComponent(wfEngStatusMatch[1]);
             const status = getWorkflowEngine().getStatus(sid);
+            // Attach pipeline logs so the dashboard can show job URLs + scores
+            try {
+                const pipeStatus = getSearchPipeline().getPipelineStatus(sid);
+                if (pipeStatus && pipeStatus.logs && pipeStatus.logs.length > 0) {
+                    status.pipelineLogs = pipeStatus.logs;
+                }
+            } catch (_) {}
             res.writeHead(200, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify(status));
         }
@@ -1111,6 +1118,16 @@ function start(getState, port) {
                 const state = _stateGetter ? _stateGetter() : {};
                 const location = state.selectedAnswers?.[sid]?.q_location || '';
                 platforms = pStore.initWithPresets(sid, location);
+            }
+            // Ensure workflow grid is synced when platforms exist
+            const wfMap = _getPlatformStatuses(sid);
+            if (wfMap.size === 0 && platforms.length > 0) {
+                for (const plat of platforms) {
+                    updatePlatformCell(sid, plat.id, {
+                        name: plat.name, icon: plat.icon, url: plat.url
+                    });
+                }
+                console.log(`[dashboard] Synced ${platforms.length} platforms to workflow grid for ${sid}`);
             }
             res.writeHead(200, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify(platforms));
@@ -1804,7 +1821,44 @@ function _getPlatformStatuses(sessionId) {
     if (!_platformStatus.has(sessionId)) {
         _platformStatus.set(sessionId, new Map());
     }
-    return _platformStatus.get(sessionId);
+    const map = _platformStatus.get(sessionId);
+    // Auto-sync missing platforms from platformStore
+    // (happens when agent process restarts or dashboard server restarts)
+    try {
+        const store = getPlatformStore();
+        let platforms = store.getPlatforms(sessionId);
+        // If store is also empty, auto-init from presets using session location
+        if ((!platforms || platforms.length === 0) && _stateGetter) {
+            const st = _stateGetter();
+            const location = st.selectedAnswers?.[sessionId]?.q_location || '';
+            if (location) {
+                platforms = store.initWithPresets(sessionId, location);
+            }
+        }
+        if (platforms && platforms.length > 0) {
+            let added = 0;
+            for (const plat of platforms) {
+                if (!map.has(plat.id)) {
+                    const searchStatus = (plat.tools && plat.tools.search && plat.tools.search.status === 'ready') ? 'ready' : 'idle';
+                    map.set(plat.id, {
+                        name: plat.name || plat.id,
+                        icon: plat.icon || '🔗',
+                        url: plat.url || '',
+                        login: { status: 'idle' },
+                        search: { status: searchStatus },
+                        apply: { status: 'idle' }
+                    });
+                    added++;
+                }
+            }
+            if (added > 0) {
+                console.log(`[dashboard] Auto-synced ${added} missing platforms from store for session ${sessionId}`);
+            }
+        }
+    } catch (e) {
+        console.error('[dashboard] Auto-sync platforms failed:', e.message);
+    }
+    return map;
 }
 
 /**
@@ -2272,6 +2326,12 @@ function buildDashboardHTML(sessionId) {
   .wf-log-success { color: #4ade80; }
   .wf-log-error { color: #f87171; }
   .wf-log-warning { color: #fbbf24; }
+  .wf-log-score { font-weight: 700; margin-left: 0.25rem; }
+  .wf-log-score-high { color: #4ade80; }
+  .wf-log-score-mid { color: #fbbf24; }
+  .wf-log-score-low { color: #6b7280; }
+  .wf-log-link { color: #60a5fa; text-decoration: none; margin-left: 0.35rem; font-size: 0.85rem; }
+  .wf-log-link:hover { text-decoration: underline; color: #93bbfc; }
 
   /* Modals */
   .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; }
@@ -2948,7 +3008,11 @@ function render(data) {
     document.getElementById('profile').innerHTML = profileHtml;
 
     var subtasksEl = document.getElementById('subtasks');
-    subtasksEl.innerHTML = (data.subtasks || []).map(function(t) {
+    // Only show workflow-related subtasks (hide onboarding/profile/dashboard)
+    var _hiddenSubtasks = { onboarding: 1, profile: 1, dashboard: 1 };
+    subtasksEl.innerHTML = (data.subtasks || []).filter(function(t) {
+        return !_hiddenSubtasks[t.key];
+    }).map(function(t) {
         return '<tr><td>' + statusIcon(t.status) + '</td><td>' + esc(t.key) + '</td><td>' + esc(t.status) + '</td></tr>';
     }).join('');
 
@@ -3131,6 +3195,12 @@ async function buildSearchTool(platformId) {
     }
 }
 
+// ─── Polling pause flag ───
+// Chrome has a 6-connection-per-host limit for HTTP/1.1.
+// SSE (1) + polling (4-5) saturate the pool, starving any new fetch.
+// Pause polling while a modal (e.g. Workflow Editor) is doing its own fetches.
+var _pausePolling = false;
+
 // ─── Workflow Control Bar ───
 var WF_API = BASE_URL + '/api/workflow/' + _wfSessionId;
 
@@ -3145,34 +3215,43 @@ var _wfePlatforms = [];  // platform list with tool statuses
 var _wfeJobs = [];       // job list for generate/apply selection
 
 function openWorkflowEditor() {
+    _pausePolling = true;  // free up HTTP connections for the 3 editor fetches
     document.getElementById('workflowEditorModal').classList.add('visible');
+    document.getElementById('wfePipeline').innerHTML = '<p style="color:#9da0c3;text-align:center;">Loading...</p>';
     // Fetch config, platforms, and jobs in parallel
     Promise.all([
-        fetch(WF_API + '/config').then(r => r.json()),
-        fetch(BASE_URL + '/api/platforms/' + _wfSessionId).then(r => r.json()),
-        fetch(BASE_URL + '/api/dashboard/' + _wfSessionId).then(r => r.json()).catch(() => ({ jobs: [] }))
+        fetch(WF_API + '/config').then(function(r) { console.log('[wfe] config status:', r.status); return r.json(); }),
+        fetch(BASE_URL + '/api/platforms/' + _wfSessionId).then(function(r) { console.log('[wfe] platforms status:', r.status); return r.json(); }),
+        fetch(BASE_URL + '/api/dashboard/' + _wfSessionId).then(function(r) { return r.json(); }).catch(function() { return { jobs: [] }; })
     ]).then(function(results) {
         _wfeConfig = results[0];
         _wfePlatforms = results[1].platforms || results[1] || [];
         var rawJobs = results[2].jobs;
         _wfeJobs = Array.isArray(rawJobs) ? rawJobs : [];
+        console.log('[wfe] config steps:', (_wfeConfig.steps || []).length, 'platforms:', _wfePlatforms.length);
         renderWorkflowEditor();
     }).catch(function(e) {
         console.error('[wfe] load error:', e);
-        document.getElementById('wfePipeline').innerHTML = '<p style="color:#f87171;">Failed to load config</p>';
+        document.getElementById('wfePipeline').innerHTML = '<p style="color:#f87171;">Failed to load: ' + e.message + '</p>';
     });
 }
 
 function closeWorkflowEditor(e) {
     if (e && e.target !== document.getElementById('workflowEditorModal')) return;
     document.getElementById('workflowEditorModal').classList.remove('visible');
+    _pausePolling = false;  // resume background polling
 }
 
 function renderWorkflowEditor() {
     var cfg = _wfeConfig;
-    if (!cfg || !cfg.steps) return;
+    if (!cfg || !cfg.steps) {
+        console.error('[wfe] renderWorkflowEditor: no config or no steps', cfg);
+        document.getElementById('wfePipeline').innerHTML = '<p style="color:#f87171;">No workflow config available</p>';
+        return;
+    }
     var t = _i18n[_lang] || _i18n.en;
     var steps = cfg.steps.filter(function(s) { return s.name !== 'customizeProfile'; });
+    console.log('[wfe] rendering', steps.length, 'steps:', steps.map(function(s){return s.name;}).join(','));
     var html = '';
 
     steps.forEach(function(step, idx) {
@@ -3437,6 +3516,7 @@ async function pollWfStatus() {
 // ─── Workflow Progress Offcanvas ───
 var _wfLogs = [];
 var MAX_WF_LOGS = 200;
+var _lastPipelineLogIdx = 0;  // tracks how many pipeline logs we already synced
 
 function toggleProgressOffcanvas() {
     var oc = document.getElementById('progressOffcanvas');
@@ -3453,11 +3533,13 @@ function closeProgressOffcanvas() {
     document.getElementById('progressBackdrop').classList.remove('visible');
 }
 
-function addWfLog(message, level) {
+function addWfLog(message, level, meta) {
     level = level || 'info';
     var now = new Date();
     var ts = now.toLocaleTimeString();
-    _wfLogs.push({ time: ts, message: message, level: level });
+    var entry = { time: ts, message: message, level: level };
+    if (meta) { if (meta.url) entry.url = meta.url; if (meta.score != null) entry.score = meta.score; }
+    _wfLogs.push(entry);
     if (_wfLogs.length > MAX_WF_LOGS) _wfLogs.splice(0, _wfLogs.length - MAX_WF_LOGS);
     renderWfLogs();
 }
@@ -3471,7 +3553,17 @@ function renderWfLogs() {
     }
     el.innerHTML = _wfLogs.map(function(l) {
         var cls = 'wf-log-' + l.level;
-        return '<div class="wf-log-entry"><span class="wf-log-time">[' + esc(l.time) + ']</span> <span class="' + cls + '">' + esc(l.message) + '</span></div>';
+        var html = '<div class="wf-log-entry"><span class="wf-log-time">[' + esc(l.time) + ']</span> ';
+        html += '<span class="' + cls + '">' + esc(l.message) + '</span>';
+        if (l.score != null) {
+            var scoreCls = l.score >= 80 ? 'high' : l.score >= 60 ? 'mid' : 'low';
+            html += ' <span class="wf-log-score wf-log-score-' + scoreCls + '">' + l.score + '%</span>';
+        }
+        if (l.url) {
+            html += ' <a href="' + esc(l.url) + '" target="_blank" rel="noopener" class="wf-log-link" title="' + esc(l.url) + '">🔗</a>';
+        }
+        html += '</div>';
+        return html;
     }).join('');
     el.scrollTop = el.scrollHeight;
 }
@@ -3560,6 +3652,21 @@ function updateWfUI(data) {
                 window[key] = s.status;
             }
         });
+    }
+
+    // Sync pipeline logs (job search results with URL + score)
+    if (data.pipelineLogs && data.pipelineLogs.length > _lastPipelineLogIdx) {
+        var newLogs = data.pipelineLogs.slice(_lastPipelineLogIdx);
+        newLogs.forEach(function(l) {
+            var level = l.url ? (l.score >= 60 ? 'success' : 'info') : 'info';
+            addWfLog(l.msg, level, { url: l.url, score: l.score });
+        });
+        _lastPipelineLogIdx = data.pipelineLogs.length;
+    }
+
+    // Reset pipeline log index when workflow stops (so next run starts fresh)
+    if (status === 'idle' || status === 'completed' || status === 'failed') {
+        _lastPipelineLogIdx = 0;
     }
 }
 
@@ -3884,7 +3991,7 @@ function goJobPage(p) {
 
 refresh();
 pollWfStatus();
-setInterval(function() { refresh(); refreshWorkflowStatus(); pollWfStatus(); refreshStats(); switchLang(_lang); }, 5000);
+setInterval(function() { if (_pausePolling) return; refresh(); refreshWorkflowStatus(); pollWfStatus(); refreshStats(); switchLang(_lang); }, 5000);
 // Periodic stuck check with alerts (every 30s)
 setInterval(function() { fetch(ALERT_API + '/check', { method: 'POST' }).catch(function(){}); }, 30000);
 // Initial load
@@ -3926,6 +4033,21 @@ function connectSSE() {
     };
 }
 connectSSE();
+
+// ─── Visibility-based connection management ───
+// Chrome limits 6 connections per host (HTTP/1.1).
+// When tab is hidden, close SSE and pause polling to free connections
+// for other tabs on the same host.
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        _pausePolling = true;
+        if (_evtSource) { _evtSource.close(); _evtSource = null; }
+    } else {
+        _pausePolling = false;
+        if (!_evtSource) connectSSE();
+        refresh(); refreshWorkflowStatus(); pollWfStatus(); refreshStats();
+    }
+});
 </script>
 </body>
 </html>`;
