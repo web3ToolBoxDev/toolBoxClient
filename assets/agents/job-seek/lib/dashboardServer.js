@@ -3604,6 +3604,7 @@ var _prevWfStatus = 'idle';
 function updateWfUI(data) {
     var label = document.getElementById('wfStatusLabel');
     var status = data.status || 'idle';
+    var prevStatus = _prevWfStatus;  // capture before it gets updated
     if (label) label.textContent = status.toUpperCase();
 
     // Button visibility
@@ -3656,7 +3657,9 @@ function updateWfUI(data) {
     }
 
     // Sync pipeline logs (job search results with URL + score)
-    if (data.pipelineLogs && data.pipelineLogs.length > _lastPipelineLogIdx) {
+    // _lastPipelineLogIdx === -1 means "locked" — all logs already synced, workflow ended.
+    // Only sync new logs incrementally while not locked.
+    if (_lastPipelineLogIdx >= 0 && data.pipelineLogs && data.pipelineLogs.length > _lastPipelineLogIdx) {
         var newLogs = data.pipelineLogs.slice(_lastPipelineLogIdx);
         newLogs.forEach(function(l) {
             var level = l.url ? (l.score >= 60 ? 'success' : 'info') : 'info';
@@ -3665,8 +3668,12 @@ function updateWfUI(data) {
         _lastPipelineLogIdx = data.pipelineLogs.length;
     }
 
-    // Reset pipeline log index when workflow stops (so next run starts fresh)
-    if (status === 'idle' || status === 'completed' || status === 'failed') {
+    // When workflow finishes, lock pipeline log index to prevent re-sync of stale logs
+    if (status !== 'running' && prevStatus === 'running') {
+        _lastPipelineLogIdx = -1;  // locked
+    }
+    // When workflow starts fresh, unlock pipeline log index
+    if (status === 'running' && prevStatus !== 'running') {
         _lastPipelineLogIdx = 0;
     }
 }
