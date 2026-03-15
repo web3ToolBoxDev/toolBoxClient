@@ -1174,20 +1174,29 @@ function start(getState, port) {
                     if (!body.sessionEnvId) {
                         const state = _stateGetter ? _stateGetter() : {};
                         const runtimeCtx = state.runtimeContexts?.[sid] || {};
-                        const boundEnvIds = Array.isArray(runtimeCtx.envIds) ? runtimeCtx.envIds : [];
+                        // Try envIds first, then fall back to extracting IDs from envs array
+                        let boundEnvIds = Array.isArray(runtimeCtx.envIds) ? runtimeCtx.envIds.filter(Boolean) : [];
+                        if (boundEnvIds.length === 0 && Array.isArray(runtimeCtx.envs)) {
+                            boundEnvIds = runtimeCtx.envs.map(e => e.id || e._id || e.name).filter(Boolean);
+                        }
+                        console.log(`[dashboard:login] sid=${sid} pid=${pid} envIds=${JSON.stringify(boundEnvIds)} keys=${Object.keys(runtimeCtx).join(',')}`);
                         if (boundEnvIds.length > 0) {
                             body.sessionEnvId = boundEnvIds[0];
                         }
                     }
+                    console.log(`[dashboard:login] sessionEnvId=${body.sessionEnvId || 'NONE'} → calling launchLogin`);
                     // Set launching state before async browser launch
                     updatePlatformCell(sid, pid, { cell: 'login', status: 'running', message: 'Launching browser...' });
                     const result = await getPlatformService().launchLogin(sid, pid, body);
-                    // On success: platformService._syncToDashboard() already broadcast
-                    // SSE 'platformUpdate' with status='verifying' after browser opened.
-                    // On failure: update cell to error so SSE notifies frontend.
-                    if (!result.success) {
+                    if (result.method === 'url') {
+                        // No fingerprint env — URL opened in plain browser; reset cell
+                        updatePlatformCell(sid, pid, { cell: 'login', status: 'idle', message: '' });
+                    } else if (!result.success) {
+                        // On failure: update cell to error so SSE notifies frontend.
                         updatePlatformCell(sid, pid, { cell: 'login', status: 'error', message: result.error || 'Login failed' });
                     }
+                    // On fingerprint success: platformService._syncToDashboard() already broadcast
+                    // SSE 'platformUpdate' with status='verifying' after browser opened.
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(result));
                 } catch (e) {
@@ -2047,8 +2056,12 @@ function getDashboardData(sessionId) {
 
     // Environment binding info
     const runtimeCtx = state.runtimeContexts?.[sessionId] || {};
-    const boundEnvIds = Array.isArray(runtimeCtx.envIds) ? runtimeCtx.envIds : [];
+    let boundEnvIds = Array.isArray(runtimeCtx.envIds) ? runtimeCtx.envIds.filter(Boolean) : [];
     const boundEnvs = Array.isArray(runtimeCtx.envs) ? runtimeCtx.envs : [];
+    // Fallback: extract IDs from envs array if envIds is empty
+    if (boundEnvIds.length === 0 && boundEnvs.length > 0) {
+        boundEnvIds = boundEnvs.map(e => e.id || e._id || e.name).filter(Boolean);
+    }
     const envNames = boundEnvs.map(e => e.name || e.id || e._id).filter(Boolean);
 
     return {
@@ -3713,14 +3726,14 @@ async function platformLogin(platformId) {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
         });
         var data = await res.json();
-        if (data.method === 'url') { window.open(data.url, '_blank'); }
-        else if (!data.success) {
+        if (data.method === 'url') {
+            window.open(data.url, '_blank');
+        } else if (!data.success) {
             showAlert('Login', data.error || 'Login failed');
-            refreshWorkflowStatus(); // Only refresh on error to restore button state
         }
-        // On success: do NOT call refreshWorkflowStatus() here.
-        // The server broadcasts SSE 'platformUpdate' after browser opens,
-        // which triggers refreshWorkflowStatus() via the SSE handler.
+        // Always refresh to restore button state.
+        // For fingerprint success: SSE will also trigger refresh, but an extra refresh is harmless.
+        refreshWorkflowStatus();
     } catch (e) {
         showAlert('Error', e.message);
         refreshWorkflowStatus(); // Restore button state on network error
