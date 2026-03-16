@@ -209,6 +209,16 @@ async function runTask() {
         }
     }
     console.log('useProxy', taskData.env.useProxy);
+
+    // 将新格式 audio: {seed: N} 转为 Chromium 补丁期望的浮点数噪声值
+    // 用 seed 做确定性伪随机，保证同一 env 每次生成相同噪声
+    let audioNoise = taskData.env.audio;
+    if (audioNoise && typeof audioNoise === 'object' && audioNoise.seed !== undefined) {
+        // 简单确定性哈希：seed → [0.00001, 0.01) 范围的噪声值
+        const s = audioNoise.seed;
+        audioNoise = ((((s * 1103515245 + 12345) & 0x7fffffff) % 10000) + 1) / 1000000;
+    }
+
     let fingerprints = '';
     let args = [
         '--disable-infobars',
@@ -217,7 +227,7 @@ async function runTask() {
     ];
     if (taskData.env.useProxy) {
         fingerprints = JSON.stringify({
-            audio: taskData.env.audio,
+            audio: audioNoise,
             clientRect: taskData.env.clientRect,
             webgl: taskData.env.webgl,
             canvas: taskData.env.canvas,
@@ -238,7 +248,7 @@ async function runTask() {
 
     } else {
         fingerprints = JSON.stringify({
-            audio: taskData.env.audio,
+            audio: audioNoise,
             clientRect: taskData.env.clientRect,
             webgl: taskData.env.webgl,
             canvas: taskData.env.canvas,
