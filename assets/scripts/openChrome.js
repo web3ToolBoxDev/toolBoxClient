@@ -236,10 +236,14 @@ async function runTask() {
         fpPayload.webrtc_public = taskData.env.webrtc_public;
     }
     let args = [
+        '--disable-infobars',
+        `--user-agent=${taskData.env.user_agent}`,
+        `--lang=${taskData.env.language_js}`,
         `--toolbox=${JSON.stringify(fpPayload)}`
     ];
     if (taskData.env.useProxy) {
         args.push(`--proxy-server=${taskData.env.proxyUrl}`);
+        args.push('--disable-ipv6');
     }
     console.log('Fingerprint payload:', JSON.stringify(fpPayload));
     const browser = await puppeteer.launch({
