@@ -64,6 +64,20 @@ function isFingerPrintDbAvailable() {
             const updateAsync = util.promisify(db.update).bind(db);
             for (const fp of fingerprints) {
                 const migrated = migrateFingerprint(fp);
+                // 清理脏数据：proxy 已删除但残留运行时代理字段
+                const orphanFields = ['proxyUrl', 'useProxy', 'country', 'position', 'webrtc_public', 'timeZone'];
+                const hasOrphans = !fp.proxy && orphanFields.some(f => fp[f] !== undefined);
+                if (hasOrphans) {
+                    const fieldsToUnset = {};
+                    for (const f of orphanFields) {
+                        if (fp[f] !== undefined) {
+                            fieldsToUnset[f] = true;
+                            delete fp[f];
+                        }
+                    }
+                    try { await updateAsync({ id: fp.id }, { $unset: fieldsToUnset }, {}); } catch (_) {}
+                    console.log(`[envData] Cleaned orphan proxy fields for env ${fp.name || fp.id}`);
+                }
                 envData[fp.id || fp._id] = fp;
                 if (migrated) {
                     try { await updateAsync({ id: fp.id }, { $set: { audio: fp.audio, canvas: fp.canvas } }, {}); } catch (_) {}
