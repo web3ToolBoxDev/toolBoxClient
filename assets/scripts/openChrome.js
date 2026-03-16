@@ -219,54 +219,29 @@ async function runTask() {
         audioNoise = ((((s * 1103515245 + 12345) & 0x7fffffff) % 10000) + 1) / 1000000;
     }
 
-    let fingerprints = '';
+    const fpPayload = {
+        audio: audioNoise,
+        clientRect: taskData.env.clientRect,
+        webgl: taskData.env.webgl,
+        canvas: taskData.env.canvas,
+        hardware: taskData.env.hardware,
+        screen: taskData.env.screen,
+        clientHint: taskData.env.clientHint,
+        languages_js: taskData.env.language_js,
+        languages_http: taskData.env.language_http
+    };
+    if (taskData.env.useProxy) {
+        fpPayload.position = taskData.env.position;
+        fpPayload.timeZone = taskData.env.timeZone;
+        fpPayload.webrtc_public = taskData.env.webrtc_public;
+    }
     let args = [
-        '--disable-infobars',
-        `--user-agent=${taskData.env.user_agent}`,
-        `--lang=${taskData.env.language_js}`
+        `--toolbox=${JSON.stringify(fpPayload)}`
     ];
     if (taskData.env.useProxy) {
-        fingerprints = JSON.stringify({
-            audio: audioNoise,
-            clientRect: taskData.env.clientRect,
-            webgl: taskData.env.webgl,
-            canvas: taskData.env.canvas,
-            hardware: taskData.env.hardware,
-            screen: taskData.env.screen,
-            clientHint: taskData.env.clientHint,
-            languages_js: taskData.env.language_js,
-            languages_http: taskData.env.language_http,
-
-            position: taskData.env.position,
-            timeZone: taskData.env.timeZone,
-            webrtc_public: taskData.env.webrtc_public,
-        });
         args.push(`--proxy-server=${taskData.env.proxyUrl}`);
-        args.push('--disable-ipv6');
-
-
-
-    } else {
-        fingerprints = JSON.stringify({
-            audio: audioNoise,
-            clientRect: taskData.env.clientRect,
-            webgl: taskData.env.webgl,
-            canvas: taskData.env.canvas,
-            hardware: taskData.env.hardware,
-            screen: taskData.env.screen,
-            clientHint: taskData.env.clientHint,
-            languages_js: taskData.env.language_js,
-            languages_http: taskData.env.language_http
-        });
     }
-
-    args.push(`--toolbox=${fingerprints}`);
-    console.log('toolbox args:', `--toolbox=${fingerprints}`);
-
-
-
-
-    console.log('Fingerprint payload:', fingerprints);
+    console.log('Fingerprint payload:', JSON.stringify(fpPayload));
     const browser = await puppeteer.launch({
         headless: false,
         executablePath: taskData.chromePath,
