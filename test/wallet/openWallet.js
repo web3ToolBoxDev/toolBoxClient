@@ -232,7 +232,7 @@ async function runTask() {
             hardware: currentTaskData.env.hardware,
             screen: currentTaskData.env.screen,
             clientHint: currentTaskData.env.clientHint,
-            languages_js: currentTaskData.env.language_js,
+            languages_js: currentTaskData.env.language_http,
             languages_http: currentTaskData.env.language_http,
             fonts_remove: currentTaskData.env.fonts_remove,
             position: currentTaskData.env.position,
@@ -249,7 +249,7 @@ async function runTask() {
             hardware: currentTaskData.env.hardware,
             screen: currentTaskData.env.screen,
             clientHint: currentTaskData.env.clientHint,
-            languages_js: currentTaskData.env.language_js,
+            languages_js: currentTaskData.env.language_http,
             languages_http: currentTaskData.env.language_http,
             fonts_remove: currentTaskData.env.fonts_remove
         });

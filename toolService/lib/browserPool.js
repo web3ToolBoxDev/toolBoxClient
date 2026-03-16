@@ -47,7 +47,7 @@ function buildChromeArgs(env, options = {}) {
         hardware: env.hardware,
         screen: env.screen,
         clientHint: env.clientHint,
-        languages_js: env.language_js,
+        languages_js: env.language_http,
         languages_http: env.language_http
     };
     if (env.useProxy) {

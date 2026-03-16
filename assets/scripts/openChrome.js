@@ -227,7 +227,7 @@ async function runTask() {
         hardware: taskData.env.hardware,
         screen: taskData.env.screen,
         clientHint: taskData.env.clientHint,
-        languages_js: taskData.env.language_js,
+        languages_js: taskData.env.language_http,
         languages_http: taskData.env.language_http
     };
     if (taskData.env.useProxy) {
