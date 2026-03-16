@@ -78,6 +78,13 @@ function isFingerPrintDbAvailable() {
                     try { await updateAsync({ id: fp.id }, { $unset: fieldsToUnset }, {}); } catch (_) {}
                     console.log(`[envData] Cleaned orphan proxy fields for env ${fp.name || fp.id}`);
                 }
+                // 修复 language_js: 应该是简单 locale (如 "en-CA")，不能含 q-values 或多语言
+                if (fp.language_js && (fp.language_js.includes(';q=') || fp.language_js.includes(','))) {
+                    const simpleLang = fp.language_js.split(',')[0].split(';')[0].trim();
+                    fp.language_js = simpleLang;
+                    try { await updateAsync({ id: fp.id }, { $set: { language_js: simpleLang } }, {}); } catch (_) {}
+                    console.log(`[envData] Fixed language_js for env ${fp.name || fp.id}: → ${simpleLang}`);
+                }
                 envData[fp.id || fp._id] = fp;
                 if (migrated) {
                     try { await updateAsync({ id: fp.id }, { $set: { audio: fp.audio, canvas: fp.canvas } }, {}); } catch (_) {}
