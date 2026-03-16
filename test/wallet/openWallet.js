@@ -216,8 +216,6 @@ async function runTask() {
     let fingerprints = '';
     let args = [
         '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
         '--disable-infobars',
         `--user-agent=${currentTaskData.env.user_agent}`,
         `--lang=${currentTaskData.env.language_js}`,

@@ -39,6 +39,8 @@ const ChromeManager = () => {
     const savePath = usePathStore(state => state.savePath);
     const chromePath = usePathStore(state => state.chromePath);
     const fetchPaths = usePathStore(state => state.fetchPaths);
+    const [installStatus, setInstallStatus] = useState('idle'); // idle | installing | success | error
+    const [installError, setInstallError] = useState('');
     const [modalProps, setModalProps] = useState({
         show: false,
         title: '',
@@ -109,17 +111,22 @@ const ChromeManager = () => {
         syncDataFromSavePath(savePath);
     }, [savePath, syncDataFromSavePath]);
 
-    const setChromePathHandler = async () => {
-        if (!window.electronAPI) {
-            alert(t('runInElectron'));
-            return;
-        }
-        const res = await window.electronAPI.openFile();
-        if (res) {
-            window.localStorage.setItem('chromePath', res);
-            await api.setChromePath(res);
-            fetchPaths();
-            alert(t('setSuccess'));
+    const installBrowserHandler = async () => {
+        setInstallStatus('installing');
+        setInstallError('');
+        try {
+            const res = await api.runInstaller();
+            if (res && res.success) {
+                setInstallStatus('success');
+                fetchPaths();
+            } else {
+                setInstallStatus('error');
+                setInstallError(res?.message || t('browserInstall.installFailed'));
+            }
+        } catch (error) {
+            console.error('Install error:', error);
+            setInstallStatus('error');
+            setInstallError(error.message || t('browserInstall.installFailed'));
         }
     };
 
@@ -272,17 +279,7 @@ const ChromeManager = () => {
                         inputType: 'number',
                         colWidth: 3,
                         style: { marginLeft: 'auto', marginRight: '1rem', },
-                        inputProps: { min: 1, step: 1, inputMode: 'numeric', pattern: '[0-9]*' },
-                        onChange: (e, _value, valueObj) => {
-                            const value = e.target.value;
-                            if (value === '') {
-                                return '';
-                            }
-                            if (/^\d+$/.test(value)) {
-                                return value;
-                            }
-                            return valueObj?.generateCount ?? '';
-                        }
+                        inputProps: { min: 1, step: 1 },
                     },
                     {
                         type: 'button',
@@ -330,65 +327,64 @@ const ChromeManager = () => {
         );
     };
 
+    const fmtJson = (val) => {
+        if (!val || (typeof val === 'object' && Object.keys(val).length === 0)) return '-';
+        if (typeof val === 'object') return JSON.stringify(val);
+        return String(val);
+    };
     const checkEnvDetail = (fp) => {
         setModalProps({
             show: true,
             title: t('envDetail'),
+            className: 'detail-modal',
             handleClose: () => {
-                setModalProps({
-                    show: false
-                });
+                setModalProps({ show: false });
             },
             rowList: [
                 [
-                    { type: 'label', text: t('envName'), colWidth: 3 },
-                    { type: 'text', key: 'envName', text: fp.name || '', colWidth: 9 }
+                    { type: 'label', text: t('envName'), colWidth: 4 },
+                    { type: 'text', key: 'envName', text: fp.name || '-', colWidth: 8 }
                 ],
                 [
-                    { type: 'label', text: t('userAgent'), colWidth: 3 },
-                    { type: 'text', key: 'userAgent', text: fp.user_agent || '', colWidth: 9 }
+                    { type: 'label', text: t('userAgent'), colWidth: 4 },
+                    { type: 'text', key: 'userAgent', text: fp.user_agent || '-', colWidth: 8 }
                 ],
                 [
-                    { type: 'label', text: t('webgl'), colWidth: 3 },
-                    { type: 'text', key: 'webgl', text: fp.webgl ? JSON.stringify(fp.webgl) : '', colWidth: 9 }
+                    { type: 'label', text: t('webgl'), colWidth: 4 },
+                    { type: 'text', key: 'webgl', text: fmtJson(fp.webgl), colWidth: 8 }
                 ],
                 [
-                    { type: 'label', text: t('languageJs'), colWidth: 3 },
-                    { type: 'text', key: 'languageJs', text: fp.language_js || '', colWidth: 9 }
+                    { type: 'label', text: t('languageJs'), colWidth: 4 },
+                    { type: 'text', key: 'languageJs', text: fp.language_js || '-', colWidth: 8 }
                 ],
                 [
-                    { type: 'label', text: t('languageHttp'), colWidth: 3 },
-                    { type: 'text', key: 'languageHttp', text: fp.language_http || '', colWidth: 9 }
+                    { type: 'label', text: t('languageHttp'), colWidth: 4 },
+                    { type: 'text', key: 'languageHttp', text: fp.language_http || '-', colWidth: 8 }
                 ],
                 [
-                    { type: 'label', text: t('screen'), colWidth: 3 },
-                    { type: 'text', key: 'screen', text: fp.screen ? JSON.stringify(fp.screen) : '', colWidth: 9 }
+                    { type: 'label', text: t('screen'), colWidth: 4 },
+                    { type: 'text', key: 'screen', text: fmtJson(fp.screen), colWidth: 8 }
                 ],
                 [
-                    { type: 'label', text: t('canvas'), colWidth: 3 },
-                    { type: 'text', key: 'canvas', text: fp.canvas ? JSON.stringify(fp.canvas) : '', colWidth: 9 }
+                    { type: 'label', text: t('canvas'), colWidth: 4 },
+                    { type: 'text', key: 'canvas', text: fmtJson(fp.canvas), colWidth: 8 }
                 ],
                 [
-                    { type: 'label', text: t('hardware'), colWidth: 3 },
-                    { type: 'text', key: 'hardware', text: fp.hardware ? JSON.stringify(fp.hardware) : '', colWidth: 9 }
+                    { type: 'label', text: t('hardware'), colWidth: 4 },
+                    { type: 'text', key: 'hardware', text: fmtJson(fp.hardware), colWidth: 8 }
                 ],
                 [
-                    { type: 'label', text: t('fontsRemove'), colWidth: 3 },
-                    { type: 'text', key: 'fontsRemove', text: fp.fonts_remove || '', colWidth: 9 }
+                    { type: 'label', text: t('position'), colWidth: 4 },
+                    { type: 'text', key: 'position', text: fmtJson(fp.position), colWidth: 8 }
                 ],
                 [
-                    { type: 'label', text: t('position'), colWidth: 3 },
-                    { type: 'text', key: 'position', text: fp.position ? JSON.stringify(fp.position) : '', colWidth: 9 }
+                    { type: 'label', text: t('timeZone'), colWidth: 4 },
+                    { type: 'text', key: 'timeZone', text: fp.timeZone || '-', colWidth: 8 }
                 ],
                 [
-                    { type: 'label', text: t('timeZone'), colWidth: 3 },
-                    { type: 'text', key: 'timeZone', text: fp.timeZone || '', colWidth: 9 }
-                ],
-                [
-                    { type: 'label', text: t('webrtc_public'), colWidth: 3 },
-                    { type: 'text', key: 'webrtc_public', text: fp.webrtc_public || '', colWidth: 9 }
+                    { type: 'label', text: t('webrtc_public'), colWidth: 4 },
+                    { type: 'text', key: 'webrtc_public', text: fp.webrtc_public || '-', colWidth: 8 }
                 ]
-
             ]
         });
     }
@@ -517,16 +513,9 @@ const ChromeManager = () => {
     }
 
     // 设置IP代理
-    const setIpConfig = async (id) => {
-        let fp = fingerPrintsObj[id];
-        try {
-            const latest = await api.getFingerPrints();
-            if (latest && latest.success && latest.data && latest.data[id]) {
-                fp = latest.data[id];
-            }
-        } catch (error) {
-            console.error('Failed to fetch latest fingerprint:', error);
-        }
+    const setIpConfig = (id) => {
+        const fp = fingerPrintsObj[id];
+        if (!fp) return;
         console.log('setIpConfig fp:', fp.name);
         const hasProxy = Boolean(fp?.proxy?.ipHost && fp?.proxy?.ipPort);
         const ipTypeDefault = hasProxy ? (fp?.proxy?.ipType || fp?.proxy_type || 'http') : 'http';
@@ -573,7 +562,7 @@ const ChromeManager = () => {
                 ],
                 [
                     { type: 'label', text: '', colWidth: 2 },
-                    { type: 'button', text: t('testProxy'), colWidth: 3, 
+                    { type: 'button', text: t('testProxy'), key: 'proxyTest', colWidth: 3,
                         click: () => {
                             const ipType = modalRef.current.getValue('ipType') || 'http';
                             const ipHost = modalRef.current.getValue('ipHost');
@@ -584,8 +573,10 @@ const ChromeManager = () => {
                                 alert(t('2019'));
                                 return;
                             }
+                            modalRef.current.updateValueObj('proxyTest_loading', t('testingProxy'));
                             console.log('Testing proxy:', ipType, ipHost, ipPort, ipUsername, ipPassword);
                             api.checkProxy({ipType, ipHost, ipPort, ipUsername, ipPassword}).then((data) => {
+                                modalRef.current.updateValueObj('proxyTest_loading', false);
                                 if (data && data.success) {
                                     alert(t('0'));
                                     console.log('Proxy test result:', data);
@@ -593,6 +584,7 @@ const ChromeManager = () => {
                                     alert(t(data.code) + ': ' + (data.message || t('unknownError')));
                                 }
                             }).catch((error) => {
+                                modalRef.current.updateValueObj('proxyTest_loading', false);
                                 console.error(t('4006'), error);
                                 alert(t('4006'));
                             });
@@ -633,8 +625,9 @@ const ChromeManager = () => {
                         }).then((data) => {
                             if (data && data.success) {
                                 alert(t('updateSuccess'));
-                                // 更新本地状态
-                                const newFingerPrints = { ...fingerPrintsObj, [id]: { ...fp, proxy: data.data?.proxy || fp?.proxy } };
+                                // 更新本地状态（后端返回完整 fingerprint，含 position/webrtc_public/timeZone）
+                                const updated = data.data || fp;
+                                const newFingerPrints = { ...fingerPrintsObj, [id]: { ...fp, ...updated } };
                                 setFingerPrints(newFingerPrints);
                                 setModalProps({ show: false });
                             } else {
@@ -665,34 +658,50 @@ const ChromeManager = () => {
             <h1>{t('chromeManage')}</h1>
             <Card className="control-panel mb-4">
                 <Card.Body>
+                    {/* Browser Installation Section */}
+                    <div className="browser-install-section mb-3">
+                        <div className="install-header">
+                            <div className="install-info">
+                                <span className="install-icon">{chromePath ? '\u2705' : '\ud83d\udce6'}</span>
+                                <div className="install-text">
+                                    <span className="install-title">{t('browserInstall.version')}</span>
+                                    <span className={`install-status ${chromePath ? 'status-installed' : 'status-not-installed'}`}>
+                                        {chromePath ? t('browserInstall.installed') : t('browserInstall.notInstalled')}
+                                    </span>
+                                </div>
+                            </div>
+                            <Button
+                                className="btn-install-browser"
+                                onClick={installBrowserHandler}
+                                disabled={installStatus === 'installing'}
+                            >
+                                {installStatus === 'installing'
+                                    ? <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('browserInstall.installing')}</>
+                                    : t('browserInstall.installBtn')
+                                }
+                            </Button>
+                        </div>
+                        {chromePath && (
+                            <div className="install-path-row">
+                                <span className="path-label">{t('browserInstall.chromePath')}:</span>
+                                <span className="path-value" title={chromePath}>{chromePath}</span>
+                            </div>
+                        )}
+                        {installStatus === 'success' && (
+                            <div className="install-msg install-msg-success">{t('browserInstall.installSuccess')}</div>
+                        )}
+                        {installStatus === 'error' && (
+                            <div className="install-msg install-msg-error">{installError || t('browserInstall.installFailed')}</div>
+                        )}
+                    </div>
+
+                    <hr className="section-divider" />
+
+                    {/* Save Path Section */}
                     <div className="panel-labels mb-3">
                         <Row className="align-items-center mb-2">
                             <Col className="d-flex align-items-center" style={{ minWidth: 0 }}>
-                                <span className="label-title">{t('currentChromePath')}：</span>
-                                <span
-                                    className="label-value"
-                                    style={{
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap',
-                                        maxWidth: 220
-                                    }}
-                                >
-                                    {chromePath
-                                        ? chromePath
-                                        : <span className="text-warning">{t('notConfigured')}</span>
-                                    }
-                                </span>
-                            </Col>
-                            <Col xs="auto" className="text-end ms-auto">
-                                <Button className="btn-chrome-path" onClick={setChromePathHandler}>
-                                    {chromePath ? t('change') : t('setChromePath')}
-                                </Button>
-                            </Col>
-                        </Row>
-                        <Row className="align-items-center mb-2">
-                            <Col className="d-flex align-items-center" style={{ minWidth: 0 }}>
-                                <span className="label-title">{t('currentSavePath')}：</span>
+                                <span className="label-title">{t('currentSavePath')}:</span>
                                 <span
                                     className="label-value"
                                     style={{

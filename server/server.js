@@ -3,6 +3,16 @@ if (process.env.IS_BUILD === 'false') {
   try { require('../scripts/dev-log'); } catch (e) { /* ignore */ }
 }
 
+// Prevent NeDB persistence errors (ENOENT on rename) from crashing the process
+process.on('uncaughtException', (err) => {
+  if (err && err.code === 'ENOENT' && err.syscall === 'rename' && /\.db~/.test(err.path)) {
+    console.error('[NeDB] Persistence write error (non-fatal):', err.message);
+    return; // swallow — NeDB will retry on next compaction
+  }
+  console.error('[FATAL] Uncaught exception:', err);
+  process.exit(1);
+});
+
 const express = require('express');
 const cors = require('cors');
 const router = require('./router');

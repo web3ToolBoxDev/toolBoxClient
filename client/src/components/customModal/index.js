@@ -3,9 +3,15 @@ import { Modal, Button, Row, Col, Form,ProgressBar } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import './index.scss';
 
-const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData },ref)=> {
+const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData, className },ref)=> {
     const [valueObj,setValueObj] = useState({});
     const { t } = useTranslation();
+
+    // Focus the first input after modal transition completes (fixes Electron focus issue)
+    const handleEntered = (node) => {
+        const firstInput = node?.querySelector('input, select, textarea');
+        if (firstInput) firstInput.focus();
+    };
 
     // 初始化 valueObj，保证 defaultValue 生效
     useEffect(() => {
@@ -30,28 +36,32 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
           nextVal = override;
         }
       }
-      setValueObj({ ...valueObj, [item.key]: nextVal });
+      setValueObj(prev => ({ ...prev, [item.key]: nextVal }));
       if (handleData) {
         handleData(item.key, nextVal);
       }
     }
     // 多选添加：将指定选项加入已选
     const multipleAdd = (itemKey, optionValue) => {
-      const selected = valueObj[itemKey] || [];
-      const newSelected = Array.from(new Set([...selected, optionValue]));
-      setValueObj({ ...valueObj, [itemKey]: newSelected });
-      if (handleData) {
-        handleData(itemKey, newSelected);
-      }
+      setValueObj(prev => {
+        const selected = prev[itemKey] || [];
+        const newSelected = Array.from(new Set([...selected, optionValue]));
+        if (handleData) {
+          handleData(itemKey, newSelected);
+        }
+        return { ...prev, [itemKey]: newSelected };
+      });
     };
     // 多选移除：将指定选项从已选中移除
     const multipleMinus = (itemKey, optionValue) => {
-      const selected = valueObj[itemKey] || [];
-      const newSelected = selected.filter(v => v !== optionValue);
-      setValueObj({ ...valueObj, [itemKey]: newSelected });
-      if (handleData) {
-        handleData(itemKey, newSelected);
-      }
+      setValueObj(prev => {
+        const selected = prev[itemKey] || [];
+        const newSelected = selected.filter(v => v !== optionValue);
+        if (handleData) {
+          handleData(itemKey, newSelected);
+        }
+        return { ...prev, [itemKey]: newSelected };
+      });
     };
     // 检查选项是否已选中（使用Set优化时间复杂度）
     const isOptionSelected = (itemKey, optionValue) => {
@@ -76,13 +86,13 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
     }));
 
     return (
-        <Modal show={show} onHide={handleClose} className="custom-modal">
+        <Modal show={show} onHide={handleClose} onEntered={handleEntered} autoFocus={false} enforceFocus={false} className={`custom-modal${className ? ' ' + className : ''}`}>
             <Modal.Header closeButton>
                 <Modal.Title>{title}</Modal.Title>
             </Modal.Header>
             <Modal.Body>
                 {rowList && rowList.map((row, rowIndex) => (
-                    <Row key={rowIndex} style={{margin:'1px'}}>
+                    <Row key={rowIndex}>
                         {row.map((item, colIndex) => (
                             <Col key={colIndex} md={item.colWidth} style={{...item.style, ...(item.type === 'button' ? { display: 'flex', justifyContent: 'flex-end', alignItems: 'center' } : {}) }}>
                                 {item.type === 'label' && (
@@ -157,7 +167,7 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
                                       value={valueObj[item.key] || item.defaultValue || ''}
                                       onChange={e => {
                                         const nextVal = e.target.value;
-                                        setValueObj({ ...valueObj, [item.key]: nextVal });
+                                        setValueObj(prev => ({ ...prev, [item.key]: nextVal }));
                                         if (handleData) {
                                             handleData(item.key, nextVal);
                                         }
@@ -171,7 +181,17 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
                                   )
                                 )}
                                 {item.type === 'button' && (
-                                    <Button className='ms-1' style={item.style} onClick={item.click}>{item.text}</Button>
+                                    <Button
+                                        className='ms-1'
+                                        style={item.style}
+                                        onClick={item.click}
+                                        disabled={item.key ? valueObj[item.key + '_loading'] : false}
+                                    >
+                                        {item.key && valueObj[item.key + '_loading']
+                                            ? <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{valueObj[item.key + '_loading']}</>
+                                            : item.text
+                                        }
+                                    </Button>
                                 )}
                                 {item.type === 'progress' && (
                                     <ProgressBar now={valueObj[item.key]} />

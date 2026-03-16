@@ -130,14 +130,13 @@ async function openBrowser(config) {
     let argArr = [
         `--user-data-dir=${config.chromeUserDataPath}`,
         '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
         '--disable-infobars',
         '--webrtc-ip-handling-policy=disable_non_proxied_udp',
         '--force-webrtc-ip-handling-policy',
     ];
     if (taskData.ipInfo && taskData.ipInfo.proxyUrl) {
         argArr.push('--proxy-server=' + taskData.ipInfo.proxyUrl);
+        argArr.push('--disable-ipv6');
         argArr.push('--timezone=' + taskData.ipInfo.timeZone);
         argArr.push('--tz=' + taskData.ipInfo.timeZone);
         argArr.push('--geolocation=' + taskData.ipInfo.ll.join(','));

@@ -137,8 +137,6 @@ function buildFingerprints(env) {
 function buildLaunchArgs(env, metamaskDir) {
     const args = [
         '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
         '--disable-infobars',
     ];
     if (env && env.user_agent) args.push(`--user-agent=${env.user_agent}`);

@@ -243,7 +243,6 @@ async function dispatchTextChangeEvent(page, evt) {
 async function launch(env, chromePath, savePath, metamaskDir, position) {
   const args = [
     '--disable-blink-features=AutomationControlled',
-    '--no-sandbox',
     '--disable-infobars',
   ];
   // log(`Slave ${JSON.stringify(env)}`);

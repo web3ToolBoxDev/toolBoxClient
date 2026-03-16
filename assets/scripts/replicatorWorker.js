@@ -50,23 +50,22 @@ function buildFingerprints(env) {
       clientHint: env.clientHint,
       languages_js: env.language_js,
       languages_http: env.language_http,
-      fonts_remove: env.fonts_remove,
+
       position: env.position,
       timeZone: env.timeZone,
       webrtc_public: env.webrtc_public,
     });
   }
   return JSON.stringify({
-    audio: env.audio * 10,
+    audio: env.audio,
     clientRect: env.clientRect,
     webgl: env.webgl,
-    canvas: env.canvas ? { toDataUrl: env.canvas.toDataUrl * 10 } : undefined,
+    canvas: env.canvas,
     hardware: env.hardware,
     screen: env.screen,
     clientHint: env.clientHint,
     languages_js: env.language_js,
-    languages_http: env.language_http,
-    fonts_remove: env.fonts_remove,
+    languages_http: env.language_http
   });
 }
 
@@ -244,7 +243,6 @@ async function dispatchTextChangeEvent(page, evt) {
 async function launch(env, chromePath, savePath, metamaskDir, position) {
   const args = [
     '--disable-blink-features=AutomationControlled',
-    '--no-sandbox',
     '--disable-infobars',
   ];
   // log(`Slave ${JSON.stringify(env)}`);
@@ -261,6 +259,7 @@ async function launch(env, chromePath, savePath, metamaskDir, position) {
   }
   if (env?.proxyUrl) {
     args.push(`--proxy-server=${env.proxyUrl}`);
+    args.push('--disable-ipv6');
   }
   if (metamaskDir) {
     args.push(`--disable-extensions-except=${metamaskDir}`);

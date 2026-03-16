@@ -361,6 +361,64 @@ class Config {
         this._loadAllPathsFromJson();
         return { success: !!this._paths.chromePath, path: this._paths.chromePath };
     }
+
+    // ── mini_installer 管理 ──
+    setInstallerPath(installerPath) {
+        console.log("设置 Installer 路径:", installerPath);
+        this._paths.installerPath = installerPath;
+        this._saveAllPathsToJson();
+        return { success: true };
+    }
+
+    getInstallerPath() {
+        if (this._paths.installerPath) {
+            return { success: true, path: this._paths.installerPath };
+        }
+        // 检查 assets 目录下是否存在 mini_installer.exe
+        const assetsInstaller = path.join(this.assetsPath, 'mini_installer.exe');
+        if (fs.existsSync(assetsInstaller)) {
+            return { success: true, path: assetsInstaller };
+        }
+        this._loadAllPathsFromJson();
+        return { success: !!this._paths.installerPath, path: this._paths.installerPath };
+    }
+
+    /**
+     * 运行 mini_installer.exe 安装浏览器，安装完成后自动更新 chromePath
+     * @returns {Promise<{success: boolean, message: string, chromePath?: string}>}
+     */
+    async runInstaller() {
+        const { execFile } = require('child_process');
+        const installerRes = this.getInstallerPath();
+        if (!installerRes.success || !installerRes.path) {
+            return { success: false, message: 'Installer path not configured' };
+        }
+        const installerPath = installerRes.path;
+        if (!fs.existsSync(installerPath)) {
+            return { success: false, message: `Installer not found: ${installerPath}` };
+        }
+
+        return new Promise((resolve) => {
+            console.log(`Running installer: ${installerPath}`);
+            execFile(installerPath, [], { windowsHide: false }, (error) => {
+                if (error) {
+                    console.error('Installer error:', error);
+                    return resolve({ success: false, message: error.message });
+                }
+                // mini_installer 默认安装路径
+                const defaultChromePath = path.join(
+                    process.env.LOCALAPPDATA || '',
+                    'Chromium', 'Application', 'chrome.exe'
+                );
+                if (fs.existsSync(defaultChromePath)) {
+                    this.setChromePath(defaultChromePath);
+                    resolve({ success: true, message: 'Installation completed', chromePath: defaultChromePath });
+                } else {
+                    resolve({ success: true, message: 'Installer ran but chrome.exe not found at default path. Please set chromePath manually.' });
+                }
+            });
+        });
+    }
 	// 获取 initWallet/openWallet 脚本路径（优先用户设置，其次默认 assets/scripts）
 	getInitWalletScriptPath() {
 		const p = this._paths.initWalletScriptPath;

@@ -24,7 +24,8 @@ describe('browserLauncher', () => {
         it('builds basic args without proxy', () => {
             const args = buildChromeArgs(baseEnv);
             expect(args).toContain('--disable-blink-features=AutomationControlled');
-            expect(args).toContain('--no-sandbox');
+            // --no-sandbox removed to avoid Cloudflare detection
+            expect(args).not.toContain('--no-sandbox');
             expect(args).toContain(`--user-agent=${baseEnv.user_agent}`);
             expect(args).toContain(`--lang=${baseEnv.language_js}`);
             // Should have --toolbox with fingerprint JSON

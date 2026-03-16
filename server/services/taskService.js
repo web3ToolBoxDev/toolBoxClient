@@ -1,6 +1,6 @@
 const webSocketService = require('./webSocketService').getInstance();
 const spawn = require('child_process').spawn;
-const {  stopProxy, checkAndStartProxy } = require('./proxyService');
+const {  startProxy, stopProxy, checkAndStartProxy } = require('./proxyService');
 const { sleep } = require('../utils');
 const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
@@ -491,6 +491,7 @@ class TaskService {
             const envRes = await getEnvById(id);
             const env = envRes?.data;
             if (!env) {
+                console.error(`[buildTaskContext] getEnvById("${id}") failed:`, envRes?.code, envRes?.message);
                 return null;
             }
             let envData = envsData[id] || {};
@@ -852,6 +853,18 @@ class TaskService {
                     taskData.env.useProxy = true;
                     this.isUseProxy[taskName] = true;
                     this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} use proxy:${url}`, 0, taskName));
+                } else {
+                    // Fallback: proxy verification failed, start proxy without verification
+                    this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} proxy verify failed (${proxyRes.message}), starting proxy without verification...`, 1, taskName));
+                    const fallbackUrl = await startProxy(taskName, taskData.env.proxy.ipType, taskData.env.proxy.ipHost, taskData.env.proxy.ipPort, taskData.env.proxy.ipUsername, taskData.env.proxy.ipPassword);
+                    if (fallbackUrl) {
+                        taskData.env.proxyUrl = fallbackUrl;
+                        taskData.env.useProxy = true;
+                        this.isUseProxy[taskName] = true;
+                        this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} proxy fallback started:${fallbackUrl}`, 0, taskName));
+                    } else {
+                        this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} proxy fallback also failed, launching without proxy`, 1, taskName));
+                    }
                 }
             }
             this.isRunning[taskName] = true;
@@ -974,7 +987,8 @@ class TaskService {
                 }
                 // 保持兼容：如果检测到运行结束且标记为已完成，则触发一次 finishTask 并退出
                 if ((!this.isRunning[taskName] || this.isRunning[taskName] === false) && (this.isCompleted[taskName] === true)) {
-                    finishTask(this, taskName, true, 'Task completed (checkCompleted)');
+                    const success = !!this.isSuccess[taskName];
+                    finishTask(this, taskName, success, success ? 'Task completed (checkCompleted)' : 'Task terminated (checkCompleted)');
                     break;
                 }
             }

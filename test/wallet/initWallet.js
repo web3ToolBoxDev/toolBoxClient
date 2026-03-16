@@ -287,8 +287,6 @@ async function runTask() {
     let metamaskEx = path.resolve(baseExtensionDir, './metamask-chrome-13.2.0');
     let fingerprints = '';
     let args = ['--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
         '--disable-infobars',
         `--user-agent=${taskData.env.user_agent}`,
         `--lang=${taskData.env.language_js}`,

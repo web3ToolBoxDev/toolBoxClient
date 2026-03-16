@@ -25,9 +25,10 @@ const genId = () => `browser_${Date.now()}_${Math.random().toString(16).slice(2,
 function buildChromeArgs(env, options = {}) {
     const args = [
         '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
+        // NOTE: --no-sandbox removed — Cloudflare detects it and blocks access (e.g. Indeed)
         '--disable-infobars',
+        '--no-first-run',
+        '--no-default-browser-check',
         `--user-agent=${env.user_agent}`,
         `--lang=${env.language_js}`
     ];
@@ -43,8 +44,7 @@ function buildChromeArgs(env, options = {}) {
         screen: env.screen,
         clientHint: env.clientHint,
         languages_js: env.language_js,
-        languages_http: env.language_http,
-        fonts_remove: env.fonts_remove
+        languages_http: env.language_http
     };
     if (env.useProxy) {
         fingerprints.position = env.position;
@@ -115,9 +115,10 @@ async function launchWithChrome({ chromePath, headless = false }) {
         executablePath: chromePath,
         ignoreDefaultArgs: ['--enable-automation'],
         args: [
-            '--no-sandbox',
             '--disable-infobars',
-            '--disable-blink-features=AutomationControlled'
+            '--disable-blink-features=AutomationControlled',
+            '--no-first-run',
+            '--no-default-browser-check'
         ],
         defaultViewport: null
     });
@@ -138,7 +139,7 @@ async function launchHeadless({ chromePath } = {}) {
     const puppeteer = _getPuppeteer();
     const launchOpts = {
         headless: 'new',
-        args: ['--no-sandbox', '--disable-infobars'],
+        args: ['--disable-infobars'],
         defaultViewport: null
     };
     if (chromePath) launchOpts.executablePath = chromePath;

@@ -156,7 +156,7 @@ function buildFingerprints(env) {
       clientHint: env.clientHint,
       languages_js: env.language_js,
       languages_http: env.language_http,
-      fonts_remove: env.fonts_remove,
+
       position: env.position,
       timeZone: env.timeZone,
       webrtc_public: env.webrtc_public,
@@ -171,16 +171,13 @@ function buildFingerprints(env) {
     screen: env.screen,
     clientHint: env.clientHint,
     languages_js: env.language_js,
-    languages_http: env.language_http,
-    fonts_remove: env.fonts_remove,
+    languages_http: env.language_http
   });
 }
 
 function buildLaunchArgs(env, metamaskDir) {
     const args = [
         '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
         '--disable-infobars',
     ];
     if (env && env.user_agent) args.push(`--user-agent=${env.user_agent}`);
@@ -189,7 +186,10 @@ function buildLaunchArgs(env, metamaskDir) {
         args.push(`--disable-extensions-except=${metamaskDir}`);
         args.push(`--load-extension=${metamaskDir}`);
     }
-    if (env && env.useProxy && env.proxyUrl) args.push(`--proxy-server=${env.proxyUrl}`);
+    if (env && env.useProxy && env.proxyUrl) {
+        args.push(`--proxy-server=${env.proxyUrl}`);
+        args.push('--disable-ipv6');
+    }
     if (env) args.push(`--toolbox=${buildFingerprints(env)}`);
     return args;
 }

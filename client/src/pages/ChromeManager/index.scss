@@ -26,6 +26,92 @@
     .card-body {
       padding: 1.2rem 1rem 1rem 1rem;
 
+      .browser-install-section {
+        .install-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+        }
+        .install-info {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+        }
+        .install-icon {
+          font-size: 1.5rem;
+          line-height: 1;
+        }
+        .install-text {
+          display: flex;
+          flex-direction: column;
+        }
+        .install-title {
+          font-size: 0.95rem;
+          font-weight: 600;
+          color: $clr-page-text;
+        }
+        .install-status {
+          font-size: 0.82rem;
+          font-weight: 500;
+          &.status-installed { color: #28a745; }
+          &.status-not-installed { color: $clr-btn-warning; }
+        }
+        .btn-install-browser {
+          font-size: 0.92rem;
+          padding: 0.35rem 1rem;
+          background: $clr-btn-primary;
+          border: none;
+          color: #fff;
+          border-radius: 4px;
+          white-space: nowrap;
+          min-width: 120px;
+          &:hover:not(:disabled) { background: $clr-btn-primary-hover; }
+          &:disabled { opacity: 0.7; cursor: not-allowed; }
+        }
+        .install-path-row {
+          margin-top: 0.5rem;
+          padding: 0.4rem 0.6rem;
+          background: $clr-bg-light;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          .path-label {
+            font-size: 0.85rem;
+            color: $clr-link-text;
+            font-weight: 500;
+            flex-shrink: 0;
+          }
+          .path-value {
+            font-size: 0.85rem;
+            color: $clr-page-text;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+        }
+        .install-msg {
+          margin-top: 0.4rem;
+          font-size: 0.85rem;
+          padding: 0.25rem 0.6rem;
+          border-radius: 4px;
+          &.install-msg-success {
+            color: #155724;
+            background: #d4edda;
+          }
+          &.install-msg-error {
+            color: #721c24;
+            background: #f8d7da;
+          }
+        }
+      }
+
+      .section-divider {
+        margin: 0.8rem 0;
+        border-color: #eee;
+      }
+
       .panel-labels {
         margin-bottom: 1rem;
         .row {
@@ -49,7 +135,6 @@
             font-weight: 500;
           }
         }
-        .btn-chrome-path,
         .btn-config-path {
           font-size: 0.95rem;
           padding: 0.25rem 0.75rem;

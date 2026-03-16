@@ -284,6 +284,14 @@ class APIManager {
         const res = await axios.get(`${this.baseUrl}/getChromePath`);
         return res.data;
     }
+    async runInstaller() {
+        const res = await axios.post(`${this.baseUrl}/runInstaller`);
+        return res.data;
+    }
+    async getInstallerPath() {
+        const res = await axios.get(`${this.baseUrl}/getInstallerPath`);
+        return res.data;
+    }
     //删除指纹环境
     async deleteFingerPrints(ids) {
         const res = await axios.post(`${this.baseUrl}/deleteFingerPrints`, { ids });

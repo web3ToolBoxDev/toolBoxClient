@@ -210,9 +210,7 @@ async function runTask() {
     }
     console.log('useProxy', taskData.env.useProxy);
     let fingerprints = '';
-    let args = ['--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
+    let args = [
         '--disable-infobars',
         `--user-agent=${taskData.env.user_agent}`,
         `--lang=${taskData.env.language_js}`
@@ -228,12 +226,13 @@ async function runTask() {
             clientHint: taskData.env.clientHint,
             languages_js: taskData.env.language_js,
             languages_http: taskData.env.language_http,
-            fonts_remove: taskData.env.fonts_remove,
+
             position: taskData.env.position,
             timeZone: taskData.env.timeZone,
             webrtc_public: taskData.env.webrtc_public,
         });
         args.push(`--proxy-server=${taskData.env.proxyUrl}`);
+        args.push('--disable-ipv6');
 
 
 
@@ -247,8 +246,7 @@ async function runTask() {
             screen: taskData.env.screen,
             clientHint: taskData.env.clientHint,
             languages_js: taskData.env.language_js,
-            languages_http: taskData.env.language_http,
-            fonts_remove: taskData.env.fonts_remove
+            languages_http: taskData.env.language_http
         });
     }
 
