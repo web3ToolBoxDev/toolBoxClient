@@ -397,7 +397,27 @@ async function deleteFingerPrintProxy(id) {
     delete fingerprint.position;
     delete fingerprint.webrtc_public;
     delete fingerprint.timeZone;
-    await setEnvById(id, fingerprint);
+    // 清除运行时代理字段（taskService 启动代理时写入内存缓存的）
+    delete fingerprint.proxyUrl;
+    delete fingerprint.useProxy;
+    delete fingerprint.country;
+
+    // 用 $unset 从 NeDB 中真正移除字段（$set 不会删除缺失字段）
+    const fieldsToUnset = {
+        proxy_type: true, proxy_ip: true, proxy_port: true,
+        proxy_username: true, proxy_password: true,
+        position: true, webrtc_public: true, timeZone: true,
+        proxyUrl: true, useProxy: true, country: true
+    };
+    if (isFingerPrintDbAvailable()) {
+        const db = config.getFingerPrintDb();
+        const updateAsync = util.promisify(db.update).bind(db);
+        try {
+            await updateAsync({ id }, { $set: { proxy: null }, $unset: fieldsToUnset }, {});
+        } catch (_) {}
+    }
+    // 内存同步
+    envData[id] = fingerprint;
     return { success: true, code: 0, message: 'Proxy info cleared', data: fingerprint };
 }
 

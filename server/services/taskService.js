@@ -840,6 +840,8 @@ class TaskService {
             // 在任务真正开始前，重置完成通知标记，允许同名任务后续发送完成通知
             if (!this._sentCompleted) this._sentCompleted = {};
             this._sentCompleted[taskName] = false;
+            // 防止运行时代理字段污染内存中的 envData 缓存（taskData.env 是引用）
+            taskData.env = { ...taskData.env };
             // 检查环境是否配置代理，执行checkAndStartProxy
             if (taskData.env && taskData.env.proxy && taskData.env.proxy.ipType && taskData.env.proxy.ipHost && taskData.env.proxy.ipPort) {
                 const proxyRes = await checkAndStartProxy(taskName,taskData.env.proxy.ipType, taskData.env.proxy.ipHost, taskData.env.proxy.ipPort, taskData.env.proxy.ipUsername, taskData.env.proxy.ipPassword);
