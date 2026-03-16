@@ -112,7 +112,7 @@ function buildFingerprints(env) {
       hardware: env.hardware,
       screen: env.screen,
       clientHint: env.clientHint,
-      languages_js: env.language_http,
+      languages_js: (env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
       languages_http: env.language_http,
       fonts_remove: env.fonts_remove,
       position: env.position,
@@ -128,7 +128,7 @@ function buildFingerprints(env) {
     hardware: env.hardware,
     screen: env.screen,
     clientHint: env.clientHint,
-    languages_js: env.language_http,
+    languages_js: (env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
     languages_http: env.language_http,
     fonts_remove: env.fonts_remove,
   });

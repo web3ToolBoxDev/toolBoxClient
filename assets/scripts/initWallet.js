@@ -372,7 +372,7 @@ async function runTask() {
             hardware: taskData.env.hardware,
             screen: taskData.env.screen,
             clientHint: taskData.env.clientHint,
-            languages_js: taskData.env.language_http,
+            languages_js: (taskData.env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
             languages_http: taskData.env.language_http,
             position: taskData.env.position,
             timeZone: taskData.env.timeZone,
@@ -389,7 +389,7 @@ async function runTask() {
             hardware: taskData.env.hardware,
             screen: taskData.env.screen,
             clientHint: taskData.env.clientHint,
-            languages_js: taskData.env.language_http,
+            languages_js: (taskData.env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
             languages_http: taskData.env.language_http
         });
     }

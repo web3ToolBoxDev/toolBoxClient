@@ -268,7 +268,7 @@ async function runTask() {
             hardware: currentTaskData.env.hardware,
             screen: currentTaskData.env.screen,
             clientHint: currentTaskData.env.clientHint,
-            languages_js: currentTaskData.env.language_http,
+            languages_js: (currentTaskData.env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
             languages_http: currentTaskData.env.language_http,
             position: currentTaskData.env.position,
             timeZone: currentTaskData.env.timeZone,
@@ -285,7 +285,7 @@ async function runTask() {
             hardware: currentTaskData.env.hardware,
             screen: currentTaskData.env.screen,
             clientHint: currentTaskData.env.clientHint,
-            languages_js: currentTaskData.env.language_http,
+            languages_js: (currentTaskData.env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
             languages_http: currentTaskData.env.language_http
         });
     }
