@@ -186,3 +186,4 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData 
 });
 
 export default CustomModal;
+

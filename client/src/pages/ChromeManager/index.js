@@ -494,6 +494,15 @@ const ChromeManager = () => {
 
     // 打开指纹环境
     const openEnv = (id) => {
+        // 检测绑定的钱包是否已初始化
+        const fp = fingerPrintsObj[id];
+        if (fp && fp.bindWalletId) {
+            const boundWallet = Array.isArray(wallets) && wallets.find(w => w.id === fp.bindWalletId);
+            if (boundWallet && !boundWallet.walletInitialized) {
+                alert(t('walletNotInitialized', '该环境绑定的钱包尚未初始化，请先初始化钱包'));
+                return;
+            }
+        }
         api.execTask('openChrome', { envIds:[id] }).then((res) => {
             console.log('openEnv response:', res);
             if (res && res.success) {

@@ -19,6 +19,30 @@ if (fs.existsSync(fpDataPath)) {
 // envData 以 {id: value} 形式存在内存
 const envData = {};
 
+// 迁移旧格式指纹到新格式（audio: float → {seed}, canvas: number/{toDataUrl} → {toDataUrl, seed}）
+function migrateFingerprint(fp) {
+    if (!fp) return false;
+    let changed = false;
+    const randomSeed = () => Math.floor(Math.random() * 99999) + 1;
+
+    // audio: old float → new {seed: N}
+    if (typeof fp.audio === 'number' || fp.audio === undefined || fp.audio === null) {
+        fp.audio = { seed: randomSeed() };
+        changed = true;
+    }
+
+    // canvas: old number or {toDataUrl} without seed → {toDataUrl, seed}
+    if (typeof fp.canvas === 'number' || fp.canvas === undefined || fp.canvas === null) {
+        fp.canvas = { toDataUrl: (Math.random() * 10), seed: randomSeed() };
+        changed = true;
+    } else if (typeof fp.canvas === 'object' && fp.canvas.seed === undefined) {
+        fp.canvas.seed = randomSeed();
+        changed = true;
+    }
+
+    return changed;
+}
+
 // 检查指纹数据库是否可用
 function isFingerPrintDbAvailable() {
     const db = config.getFingerPrintDb();
@@ -37,9 +61,14 @@ function isFingerPrintDbAvailable() {
         const findAsync = util.promisify(db.find).bind(db);
         const fingerprints = await findAsync({});
         if (Array.isArray(fingerprints)) {
-            fingerprints.forEach(fp => {
+            const updateAsync = util.promisify(db.update).bind(db);
+            for (const fp of fingerprints) {
+                const migrated = migrateFingerprint(fp);
                 envData[fp.id || fp._id] = fp;
-            });
+                if (migrated) {
+                    try { await updateAsync({ id: fp.id }, { $set: { audio: fp.audio, canvas: fp.canvas } }, {}); } catch (_) {}
+                }
+            }
             console.log(`[envData] Loaded ${Object.keys(envData).length} fingerprints into memory.`);
         }
     } catch (e) {
@@ -144,12 +173,12 @@ async function generateRandomFingerPrint(counts) {
             language_js: fpData.languageFingerprintList[languageIndex].jsLanguage,
             language_http: fpData.languageFingerprintList[languageIndex].httpLanguage,
             // screen: fpData.screenFingerprintList[screenIndex],
-            canvas: { toDataUrl: random1() * 10 },
+            canvas: { toDataUrl: random1() * 10, seed: Math.floor(Math.random() * 99999) + 1 },
             hardware: fpData.userdata.hardware || {
                 memory: 8,
                 concurrency: 8
             },
-            audio: random1(),
+            audio: { seed: Math.floor(Math.random() * 99999) + 1 },
             clientRect: random1(),
             fonts_remove: removeFonts.join(','),
             createdAt: Date.now(), // 新增创建时间戳
@@ -186,9 +215,10 @@ async function getFingerPrints() {
             return { success: false, code: 2005, message: 'No fingerprints found' };
         }
         
-        fingerprints.forEach(fp => {
+        for (const fp of fingerprints) {
+            migrateFingerprint(fp);
             envData[fp.id || fp._id] = fp; // 同步到内存
-        });
+        }
         return { success: true, code: 0, data: { ...envData } };
     } catch (error) {
         console.error('Error fetching fingerprints:', error);
@@ -273,6 +303,12 @@ async function getEnvById(id){
     try {
         const fingerprint = await findAsync({ id });
         if (fingerprint) {
+            if (migrateFingerprint(fingerprint)) {
+                try {
+                    const updateAsync2 = util.promisify(db.update).bind(db);
+                    await updateAsync2({ id }, { $set: { audio: fingerprint.audio, canvas: fingerprint.canvas } }, {});
+                } catch (_) {}
+            }
             envData[id] = fingerprint; // 同步到内存
             return { success: true, code: 0, data: fingerprint };
         } else {
@@ -357,6 +393,10 @@ async function deleteFingerPrintProxy(id) {
     delete fingerprint.proxy_port;
     delete fingerprint.proxy_username;
     delete fingerprint.proxy_password;
+    // 清除代理关联的地理位置信息
+    delete fingerprint.position;
+    delete fingerprint.webrtc_public;
+    delete fingerprint.timeZone;
     await setEnvById(id, fingerprint);
     return { success: true, code: 0, message: 'Proxy info cleared', data: fingerprint };
 }
