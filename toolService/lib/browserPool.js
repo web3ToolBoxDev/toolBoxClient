@@ -24,9 +24,7 @@ const genId = () => `browser_${Date.now()}_${Math.random().toString(16).slice(2,
 
 function buildChromeArgs(env, options = {}) {
     const args = [
-        '--disable-blink-features=AutomationControlled',
         // NOTE: --no-sandbox removed — Cloudflare detects it and blocks access (e.g. Indeed)
-        '--disable-infobars',
         '--no-first-run',
         '--no-default-browser-check',
         `--user-agent=${env.user_agent}`,
@@ -35,8 +33,14 @@ function buildChromeArgs(env, options = {}) {
     if (options.walletExtensionPath) {
         args.push(`--disable-extensions-except=${options.walletExtensionPath}`);
     }
+    // 将新格式 audio: {seed: N} 转为 Chromium 补丁期望的浮点数噪声值
+    let audioNoise = env.audio;
+    if (audioNoise && typeof audioNoise === 'object' && audioNoise.seed !== undefined) {
+        const s = audioNoise.seed;
+        audioNoise = ((((s * 1103515245 + 12345) & 0x7fffffff) % 10000) + 1) / 1000000;
+    }
     const fingerprints = {
-        audio: env.audio,
+        audio: audioNoise,
         clientRect: env.clientRect,
         webgl: env.webgl,
         canvas: env.canvas,
@@ -274,14 +278,27 @@ function size() {
 
 // ─── Internal ───
 
+let _puppeteerInstance = null;
 function _getPuppeteer() {
+    if (_puppeteerInstance) return _puppeteerInstance;
+    // 优先使用 puppeteer-extra（带 stealth 插件，过 Turnstile/Cloudflare 检测）
     try {
-        return require('puppeteer-core');
+        const puppeteerExtra = require('puppeteer-extra');
+        const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+        puppeteerExtra.use(StealthPlugin());
+        _puppeteerInstance = puppeteerExtra;
+        return _puppeteerInstance;
+    } catch (_) {}
+    // 回退到 puppeteer-core
+    try {
+        _puppeteerInstance = require('puppeteer-core');
+        return _puppeteerInstance;
     } catch (_) {
         try {
-            return require('puppeteer');
+            _puppeteerInstance = require('puppeteer');
+            return _puppeteerInstance;
         } catch (_2) {
-            throw new Error('Neither puppeteer-core nor puppeteer is installed');
+            throw new Error('Neither puppeteer-extra, puppeteer-core, nor puppeteer is installed');
         }
     }
 }
