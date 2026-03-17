@@ -3945,12 +3945,10 @@ function renderWfeCard(step, cfg, t) {
         h += wfeToggle('wfe_tailorResume', t.wfeTailorResume, step.tailorResume !== false);
         h += wfeToggle('wfe_coverLetter', t.wfeCoverLetter, step.coverLetter !== false);
         h += wfeToggle('wfe_interviewPrep', t.wfeInterviewPrep, step.interviewPrep !== false);
-        h += wfeJobList(step, 'generate', t);
     }
 
     if (step.name === 'apply') {
         h += wfeToggle('wfe_confirmBeforeApply', t.wfeConfirmBeforeApply, step.confirmBeforeApply !== false);
-        h += wfeJobList(step, 'apply', t);
         h += wfePlatformList(step, 'apply', t);
     }
 
@@ -4037,16 +4035,36 @@ function toggleWfStep(name) {
     var step = _wfeConfig.steps.find(function(s) { return s.name === name; });
     if (!step) return;
 
-    // Count enabled (non-customizeProfile) steps
-    var enabledCount = _wfeConfig.steps.filter(function(s) {
-        return s.name !== 'customizeProfile' && s.enabled;
-    }).length;
+    var getStep = function(n) { return _wfeConfig.steps.find(function(s) { return s.name === n; }); };
+    var searchStep = getStep('search');
+    var genStep = getStep('generate');
+    var applyStep = getStep('apply');
 
-    if (step.enabled && enabledCount <= 1) {
-        alert('At least one step must be enabled');
-        return;
+    if (step.enabled) {
+        // Disabling a step — cascade: disabling search disables generate+apply, disabling generate disables apply
+        // At least search must remain enabled
+        if (name === 'search') {
+            alert('Search is required — it cannot be disabled');
+            return;
+        }
+        step.enabled = false;
+        if (name === 'generate' && applyStep && applyStep.enabled) {
+            applyStep.enabled = false;
+        }
+    } else {
+        // Enabling a step — enforce prerequisites: generate needs search, apply needs generate+search
+        if (name === 'generate' && searchStep && !searchStep.enabled) {
+            alert('Search must be enabled before Generate');
+            return;
+        }
+        if (name === 'apply') {
+            if (genStep && !genStep.enabled) {
+                alert('Generate must be enabled before Apply');
+                return;
+            }
+        }
+        step.enabled = true;
     }
-    step.enabled = !step.enabled;
     renderWorkflowEditor();
 }
 
@@ -4078,8 +4096,7 @@ async function confirmWorkflow() {
         var cl = el ? el.checked : true;
         el = document.getElementById('wfe_interviewPrep');
         var ip = el ? el.checked : true;
-        var gj = []; document.querySelectorAll('[data-wfe-job="generate"]:checked').forEach(function(cb) { gj.push(cb.value); });
-        patch.steps.generate = { enabled: genStep.enabled, tailorResume: tr, coverLetter: cl, interviewPrep: ip, jobIds: gj };
+        patch.steps.generate = { enabled: genStep.enabled, tailorResume: tr, coverLetter: cl, interviewPrep: ip };
     }
 
     // Apply toggles + platforms + jobs
@@ -4087,8 +4104,7 @@ async function confirmWorkflow() {
         el = document.getElementById('wfe_confirmBeforeApply');
         var cba = el ? el.checked : true;
         var ap = []; document.querySelectorAll('[data-wfe-platform="apply"]:checked').forEach(function(cb) { ap.push(cb.value); });
-        var aj = []; document.querySelectorAll('[data-wfe-job="apply"]:checked').forEach(function(cb) { aj.push(cb.value); });
-        patch.steps.apply = { enabled: applyStep.enabled, confirmBeforeApply: cba, platforms: ap, jobIds: aj };
+        patch.steps.apply = { enabled: applyStep.enabled, confirmBeforeApply: cba, platforms: ap };
     }
 
     try {
