@@ -13,7 +13,9 @@ jest.mock('./tools/parseListing', () => ({
     extractRequirements: jest.fn()
 }));
 jest.mock('./tools/matchProfile', () => ({
-    handler: jest.fn()
+    handler: jest.fn(),
+    buildMatchPrompt: jest.fn(() => 'mock match prompt'),
+    parseMatchResponse: jest.fn(() => ({ overallScore: 75, breakdown: {}, interviewPrep: [] }))
 }));
 jest.mock('./tools/resumeGen', () => ({
     handler: jest.fn()
@@ -28,6 +30,7 @@ jest.mock('./dashboardServer', () => ({
     upsertJobCard: jest.fn(),
     updateJobStatus: jest.fn(),
     updatePlatformCell: jest.fn(),
+    updatePipelineProgress: jest.fn(),
     getJobCards: jest.fn(() => [])
 }));
 
@@ -151,8 +154,8 @@ describe('searchPipeline', () => {
 
         it('prevents duplicate pipeline runs', () => {
             jobSearchHandler.mockResolvedValue(new Promise(() => {})); // Never resolves
-            pipeline.startPipeline('dup-test-1', {}, DIRECTION, PROFILE);
-            const dup = pipeline.startPipeline('dup-test-1', {}, DIRECTION, PROFILE);
+            pipeline.startPipeline('dup-test-1', { aiMatcher: jest.fn() }, DIRECTION, PROFILE);
+            const dup = pipeline.startPipeline('dup-test-1', { aiMatcher: jest.fn() }, DIRECTION, PROFILE);
             expect(dup.error).toMatch(/already running/i);
         });
 
@@ -175,7 +178,7 @@ describe('searchPipeline', () => {
 
         it('returns progress for active session', () => {
             jobSearchHandler.mockResolvedValue(new Promise(() => {}));
-            pipeline.startPipeline('status-test-1', {}, DIRECTION, PROFILE);
+            pipeline.startPipeline('status-test-1', { aiMatcher: jest.fn() }, DIRECTION, PROFILE);
             const status = pipeline.getPipelineStatus('status-test-1');
             expect(status.running).toBe(true);
             expect(status.progress).toBeDefined();
@@ -192,7 +195,7 @@ describe('searchPipeline', () => {
 
         it('stops a running pipeline', () => {
             jobSearchHandler.mockResolvedValue(new Promise(() => {}));
-            pipeline.startPipeline('stop-test-1', {}, DIRECTION, PROFILE);
+            pipeline.startPipeline('stop-test-1', { aiMatcher: jest.fn() }, DIRECTION, PROFILE);
             const result = pipeline.stopPipeline('stop-test-1');
             expect(result.stopped).toBe(true);
         });
@@ -219,13 +222,13 @@ describe('searchPipeline', () => {
             mockExecuteSearch.mockResolvedValue({
                 success: true,
                 jobs: [
-                    { url: 'https://j.com/1', title: 'Dev', company: 'Acme' },
-                    { url: 'https://j.com/2', title: 'SWE', company: 'BigCo' }
+                    { url: 'https://j.com/1', title: 'Dev', company: 'Acme', fullText: 'Full stack developer needed' },
+                    { url: 'https://j.com/2', title: 'SWE', company: 'BigCo', fullText: 'Software engineer position' }
                 ]
             });
             matchProfileHandler.mockReturnValue({ overallScore: 75 });
 
-            pipeline.startPipeline('exec-test-1', { minScore: 50, targetCount: 5 }, DIRECTION, PROFILE);
+            pipeline.startPipeline('exec-test-1', { minScore: 50, targetCount: 5, aiMatcher: matchProfileHandler }, DIRECTION, PROFILE);
             // Wait for async pipeline
             await new Promise(r => setTimeout(r, 500));
 
@@ -238,13 +241,13 @@ describe('searchPipeline', () => {
             mockExecuteSearch.mockResolvedValue({
                 success: true,
                 jobs: [
-                    { url: 'https://dup.com/1', title: 'Dev' },
-                    { url: 'https://dup.com/1', title: 'Dev duplicate' }
+                    { url: 'https://dup.com/1', title: 'Dev', fullText: 'Developer role' },
+                    { url: 'https://dup.com/1', title: 'Dev duplicate', fullText: 'Developer role' }
                 ]
             });
             matchProfileHandler.mockReturnValue({ overallScore: 80 });
 
-            pipeline.startPipeline('dedup-test-1', { minScore: 50 }, DIRECTION, PROFILE);
+            pipeline.startPipeline('dedup-test-1', { minScore: 50, aiMatcher: matchProfileHandler }, DIRECTION, PROFILE);
             await new Promise(r => setTimeout(r, 500));
 
             const matchedCalls = dashboardServer.upsertJobCard.mock.calls
@@ -265,12 +268,12 @@ describe('searchPipeline', () => {
         it('stops early when targetCount qualified reached', async () => {
             const jobs = [];
             for (let i = 0; i < 20; i++) {
-                jobs.push({ url: `https://target.com/${i}`, title: `Job ${i}` });
+                jobs.push({ url: `https://target.com/${i}`, title: `Job ${i}`, fullText: `Job description ${i}` });
             }
             mockExecuteSearch.mockResolvedValue({ success: true, jobs });
             matchProfileHandler.mockReturnValue({ overallScore: 90 });
 
-            pipeline.startPipeline('target-test-1', { minScore: 50, targetCount: 3 }, DIRECTION, PROFILE);
+            pipeline.startPipeline('target-test-1', { minScore: 50, targetCount: 3, aiMatcher: matchProfileHandler }, DIRECTION, PROFILE);
             await new Promise(r => setTimeout(r, 1000));
 
             const status = pipeline.getPipelineStatus('target-test-1');
@@ -284,7 +287,7 @@ describe('searchPipeline', () => {
                 error: 'Network timeout'
             });
 
-            pipeline.startPipeline('err-test-1', {}, DIRECTION, PROFILE);
+            pipeline.startPipeline('err-test-1', { aiMatcher: matchProfileHandler }, DIRECTION, PROFILE);
             await new Promise(r => setTimeout(r, 500));
 
             const status = pipeline.getPipelineStatus('err-test-1');
@@ -295,11 +298,11 @@ describe('searchPipeline', () => {
         it('handles match errors without crashing', async () => {
             mockExecuteSearch.mockResolvedValue({
                 success: true,
-                jobs: [{ url: 'https://matcherr.com/1', title: 'Dev' }]
+                jobs: [{ url: 'https://matcherr.com/1', title: 'Dev', fullText: 'Developer role description' }]
             });
             matchProfileHandler.mockImplementation(() => { throw new Error('AI unavailable'); });
 
-            pipeline.startPipeline('matcherr-test-1', {}, DIRECTION, PROFILE);
+            pipeline.startPipeline('matcherr-test-1', { aiMatcher: matchProfileHandler }, DIRECTION, PROFILE);
             await new Promise(r => setTimeout(r, 500));
 
             const status = pipeline.getPipelineStatus('matcherr-test-1');
@@ -617,6 +620,7 @@ describe('searchPipeline', () => {
             pipeline.startPipeline('low-null-1', {
                 minScore: 60, targetCount: 10,
                 aiInvoke: null,
+                aiMatcher: matchProfileHandler,
                 platforms: ['plat_linkedin']
             }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
 
@@ -645,8 +649,8 @@ describe('searchPipeline', () => {
                 return {
                     success: true,
                     jobs: [
-                        { url: 'https://indeed.com/j1', title: 'Dev', fullText: 'text' },
-                        { url: 'https://indeed.com/j2', title: 'SWE', fullText: 'text2' }
+                        { url: 'https://indeed.com/j1', title: 'Dev', fullText: 'Developer role description text' },
+                        { url: 'https://indeed.com/j2', title: 'SWE', fullText: 'Software engineer role description text2' }
                     ]
                 };
             });
@@ -654,6 +658,7 @@ describe('searchPipeline', () => {
 
             pipeline.startPipeline('noblock-1', {
                 minScore: 60, targetCount: 10,
+                aiMatcher: matchProfileHandler,
                 platforms: ['plat_linkedin', 'plat_indeed']
             }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
 

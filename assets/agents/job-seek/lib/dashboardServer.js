@@ -990,6 +990,11 @@ function start(getState, port, options) {
                     ctx.aiExpander = _buildAiExpander();
                     ctx.aiMatcher = _buildAiMatcher();
                     ctx.aiInvoke = _buildAiInvoke();
+                    // AI pre-check: AI is required (algorithm fallback removed)
+                    if (!ctx.aiInvoke) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ success: false, error: 'AI provider required. Configure an API key or CLI provider before starting the workflow.' }));
+                    }
                     // Attach search history for dedup
                     ctx.searchHistory = state.searchHistory?.[sid] || {};
                     ctx.onHistorySave = (history) => {
@@ -1016,6 +1021,108 @@ function start(getState, port, options) {
             const code = result.success ? 200 : 400;
             res.writeHead(code, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify(result));
+        }
+
+        // POST /api/workflow/:sid/retry-job — retry a single failed job at a specific phase
+        const wfRetryJobMatch = url.match(/^\/api\/workflow\/([^/]+)\/retry-job$/);
+        if (wfRetryJobMatch && req.method === 'POST') {
+            const sid = decodeURIComponent(wfRetryJobMatch[1]);
+            _readBody(req, async (body) => {
+                try {
+                    const { jobUrl, phase } = body;
+                    if (!jobUrl || !phase) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ success: false, error: 'jobUrl and phase required' }));
+                    }
+
+                    const aiInvoke = _buildAiInvoke();
+                    if (!aiInvoke) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ success: false, error: 'AI provider required for retry' }));
+                    }
+
+                    const state = _stateGetter ? _stateGetter() : {};
+                    const profile = state.profileSections?.[sid] || {};
+
+                    if (phase === 'generate') {
+                        // Retry document generation for a single job
+                        const searchPipeline = require('./searchPipeline');
+                        const result = await searchPipeline.generateAllDocs(sid, jobUrl, profile, {
+                            aiInvoke,
+                            tailorResume: true,
+                            coverLetter: true,
+                            interviewPrep: true,
+                            sessionProfile: null
+                        });
+                        if (result.error) {
+                            res.writeHead(500, { 'Content-Type': 'application/json' });
+                            return res.end(JSON.stringify({ success: false, error: result.error }));
+                        }
+                        // Broadcast success to remove from failed list
+                        _broadcastSSE(sid, 'pipelineProgress', {
+                            phase: 'taskRetried',
+                            jobUrl,
+                            failPhase: 'generate',
+                            status: 'ok'
+                        });
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ success: true, action: 'regenerated', results: result.results }));
+
+                    } else if (phase === 'search') {
+                        // Rebuild search tool for the failed platform, then re-search
+                        const cards = getJobCards(sid);
+                        const job = cards.find(c => c.url === jobUrl);
+                        const platformSource = job?.taskLog?.search?.source || '';
+
+                        if (!platformSource) {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            return res.end(JSON.stringify({ success: false, error: 'Cannot determine platform from job' }));
+                        }
+
+                        // Find platform ID by source name
+                        const platforms = require('./workflow/platformStore').getPlatforms(sid);
+                        const matchedPlatform = platforms.find(p =>
+                            p.name?.toLowerCase().includes(platformSource.toLowerCase()) ||
+                            p.url?.toLowerCase().includes(platformSource.toLowerCase())
+                        );
+                        const platformId = matchedPlatform?.id || null;
+
+                        if (platformId) {
+                            // Rebuild search tool
+                            const scriptBuilder = require('./workflow/scriptBuilder');
+                            const buildResult = await scriptBuilder.buildTool(sid, platformId, 'search', { aiInvoke });
+                            if (!buildResult.success) {
+                                res.writeHead(500, { 'Content-Type': 'application/json' });
+                                return res.end(JSON.stringify({ success: false, error: `Tool rebuild failed: ${buildResult.error}` }));
+                            }
+                        }
+
+                        // Broadcast success
+                        _broadcastSSE(sid, 'pipelineProgress', {
+                            phase: 'taskRetried',
+                            jobUrl,
+                            failPhase: 'search',
+                            status: 'ok',
+                            message: platformId ? 'Search tool rebuilt' : 'No platform tool found'
+                        });
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ success: true, action: 'rebuild_search', platformId }));
+
+                    } else if (phase === 'apply') {
+                        // TODO: single-job apply retry (requires apply step extraction)
+                        res.writeHead(501, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ success: false, error: 'Apply retry not yet implemented' }));
+
+                    } else {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ success: false, error: `Unknown phase: ${phase}` }));
+                    }
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
         }
 
         // POST /api/workflow/:sid/resume — resume workflow
@@ -2724,6 +2831,19 @@ function buildDashboardHTML(sessionId) {
 
   /* Log area */
   .wf-log-area { background: #0d0e1a; border: 1px solid #2d2f4a; border-radius: 8px; padding: 0.75rem; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.78rem; line-height: 1.5; color: #9da0c3; max-height: 300px; overflow-y: auto; }
+  .wf-current-job { padding: 0.6rem; border-radius: 6px; background: rgba(99,102,241,0.1); border-left: 3px solid #6366f1; }
+  .wf-current-job .cj-title { font-size: 0.85rem; color: #e2e8f0; }
+  .wf-current-job .cj-phase { font-size: 0.75rem; color: #a5b4fc; display: flex; align-items: center; gap: 6px; }
+  .wf-current-job .cj-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #6366f1; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .wf-failed-list { max-height: 250px; overflow-y: auto; }
+  .wf-failed-item { padding: 0.5rem; border-left: 3px solid #ef4444; border-radius: 4px; margin-bottom: 0.4rem; background: rgba(239,68,68,0.06); }
+  .wf-failed-item .fi-error { font-size: 0.8rem; color: #f87171; margin: 2px 0; }
+  .wf-failed-item .fi-actions { margin-top: 4px; display: flex; gap: 6px; }
+  .wf-failed-btn-retry { font-size: 0.75rem; padding: 2px 8px; border-radius: 3px; border: none; cursor: pointer; background: #6366f1; color: #fff; }
+  .wf-failed-btn-retry:hover { background: #4f46e5; }
+  .wf-failed-btn-delete { font-size: 0.75rem; padding: 2px 8px; border-radius: 3px; border: none; cursor: pointer; background: #374151; color: #9ca3af; }
+  .wf-failed-btn-delete:hover { background: #4b5563; }
   .wf-log-entry { margin-bottom: 0.25rem; }
   .wf-log-time { color: #6b7280; }
   .wf-log-info { color: #60a5fa; }
@@ -3096,6 +3216,14 @@ function buildDashboardHTML(sessionId) {
     </div>
     <div id="wfStepTimeline">
       <ul class="step-timeline" id="stepTimelineList"></ul>
+    </div>
+    <div id="wfCurrentJob" style="margin-top:1rem;display:none;">
+      <h4 style="color:#8b9aff;font-size:0.9rem;margin:0 0 0.5rem 0;">Processing</h4>
+      <div class="wf-current-job" id="wfCurrentJobCard"></div>
+    </div>
+    <div id="wfFailedSection" style="margin-top:1rem;display:none;">
+      <h4 style="color:#ef4444;font-size:0.9rem;margin:0 0 0.5rem 0;">Failed <span id="wfFailedCount" style="color:#6b7280;font-size:0.8rem;"></span></h4>
+      <div class="wf-failed-list" id="wfFailedList"></div>
     </div>
     <div style="margin-top:1rem;">
       <h4 style="color:#8b9aff;font-size:0.9rem;margin:0 0 0.5rem 0;" data-i18n="wfLogs">Logs</h4>
@@ -4162,6 +4290,13 @@ async function confirmWorkflow() {
             closeWorkflowEditor();
             document.getElementById('wfBtnStart').style.display = 'none';
             document.getElementById('wfBtnStop').style.display = 'inline-block';
+            // Reset workflow progress state for new run
+            _wfCurrentJob = null;
+            _wfFailedTasks = [];
+            _wfLogs = [];
+            renderCurrentJob();
+            renderFailedTasks();
+            renderWfLogs();
         } else {
             alert(startData.error || 'Start failed');
         }
@@ -4207,6 +4342,82 @@ async function pollWfStatus() {
 var _wfLogs = [];
 var MAX_WF_LOGS = 200;
 var _lastPipelineLogIdx = 0;  // tracks how many pipeline logs we already synced
+var _wfCurrentJob = null;     // currently processing job
+var _wfFailedTasks = [];      // failed tasks in current workflow run
+
+function renderCurrentJob() {
+    var el = document.getElementById('wfCurrentJob');
+    var card = document.getElementById('wfCurrentJobCard');
+    if (!_wfCurrentJob) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    var phaseLabels = { search_match: 'AI Matching...', search_generate: 'Matching + Generating Docs...', generating: 'Generating docs...', applying: 'Auto applying...' };
+    card.innerHTML = '<div class="cj-phase"><span class="cj-spinner"></span>' + (phaseLabels[_wfCurrentJob.phase] || _wfCurrentJob.phase) + '</div>' +
+        '<div class="cj-title">' + (_wfCurrentJob.title || 'Unknown') + ' @ ' + (_wfCurrentJob.company || '?') + '</div>';
+}
+
+function renderFailedTasks() {
+    var section = document.getElementById('wfFailedSection');
+    var el = document.getElementById('wfFailedList');
+    var countEl = document.getElementById('wfFailedCount');
+    if (_wfFailedTasks.length === 0) { section.style.display = 'none'; return; }
+    section.style.display = 'block';
+    countEl.textContent = '(' + _wfFailedTasks.length + ')';
+    var icons = { search: '🔍', generate: '📄', apply: '📨' };
+    el.innerHTML = _wfFailedTasks.map(function(t, idx) {
+        var retryLabel = t.failPhase === 'search' ? 'Rebuild & Retry' : 'Retry';
+        return '<div class="wf-failed-item">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+            '<span style="font-size:0.75rem;color:#9da0c3;text-transform:uppercase;">' + (icons[t.failPhase] || '') + ' ' + (t.failPhase || '?') + '</span>' +
+            '<span style="font-size:0.7rem;color:#6b7280;">' + (t.at ? new Date(t.at).toLocaleTimeString() : '') + '</span>' +
+            '</div>' +
+            '<div style="font-size:0.85rem;color:#e2e8f0;margin:2px 0;">' + (t.title || 'Unknown') + ' @ ' + (t.company || '?') + '</div>' +
+            '<div class="fi-error">' + (t.error || 'Unknown error') + '</div>' +
+            '<div class="fi-actions">' +
+            '<button class="wf-failed-btn-retry" onclick="retryFailedTask(' + idx + ')">' + retryLabel + '</button>' +
+            '<button class="wf-failed-btn-delete" onclick="deleteFailedTask(' + idx + ')">Delete</button>' +
+            '</div></div>';
+    }).join('');
+}
+
+async function retryFailedTask(idx) {
+    var t = _wfFailedTasks[idx];
+    if (!t) return;
+    try {
+        var resp = await fetch('/api/workflow/' + encodeURIComponent(_currentSessionId) + '/retry-job', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobUrl: t.jobUrl, phase: t.failPhase })
+        });
+        var result = await resp.json();
+        if (result.success) {
+            _wfFailedTasks.splice(idx, 1);
+            renderFailedTasks();
+            refreshJobRecords();
+            addWfLog('Retry succeeded: ' + (t.title || t.jobUrl), 'success');
+        } else {
+            addWfLog('Retry failed: ' + (result.error || 'unknown'), 'error');
+        }
+    } catch (e) {
+        addWfLog('Retry error: ' + e.message, 'error');
+    }
+}
+
+async function deleteFailedTask(idx) {
+    var t = _wfFailedTasks[idx];
+    if (!t) return;
+    try {
+        await fetch('/api/jobs/' + encodeURIComponent(_currentSessionId) + '/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobUrl: t.jobUrl })
+        });
+        _wfFailedTasks.splice(idx, 1);
+        renderFailedTasks();
+        refreshJobRecords();
+    } catch (e) {
+        addWfLog('Delete error: ' + e.message, 'error');
+    }
+}
 
 function toggleProgressOffcanvas() {
     var oc = document.getElementById('progressOffcanvas');
@@ -4357,9 +4568,11 @@ function updateWfUI(data) {
         _lastPipelineLogIdx = data.pipelineLogs.length;
     }
 
-    // When workflow finishes, lock pipeline log index to prevent re-sync of stale logs
+    // When workflow finishes, lock pipeline log index and clear current job
     if (status !== 'running' && prevStatus === 'running') {
         _lastPipelineLogIdx = -1;  // locked
+        _wfCurrentJob = null;
+        renderCurrentJob();
     }
     // When workflow starts fresh, unlock pipeline log index
     if (status === 'running' && prevStatus !== 'running') {
@@ -4724,6 +4937,37 @@ function connectSSE() {
         try {
             var data = JSON.parse(e.data);
             showToast(data.title + ': ' + data.message, data.type || 'info');
+        } catch (_) {}
+    });
+    _evtSource.addEventListener('pipelineProgress', function(e) {
+        try {
+            var data = JSON.parse(e.data);
+            // Handle currentJob updates
+            if (data.currentJob !== undefined) {
+                _wfCurrentJob = data.currentJob;
+                renderCurrentJob();
+            }
+            // Handle taskFailed events
+            if (data.phase === 'taskFailed') {
+                _wfFailedTasks.unshift({
+                    jobUrl: data.jobUrl,
+                    title: data.title || '',
+                    company: data.company || '',
+                    platform: data.platform || '',
+                    failPhase: data.failPhase || 'search',
+                    error: data.error || 'Unknown error',
+                    at: data.at || new Date().toISOString()
+                });
+                renderFailedTasks();
+                addWfLog('Failed: ' + (data.title || data.jobUrl) + ' (' + (data.failPhase || '?') + ')', 'error');
+            }
+            // Handle taskRetried events (remove from failed list)
+            if (data.phase === 'taskRetried') {
+                _wfFailedTasks = _wfFailedTasks.filter(function(t) {
+                    return !(t.jobUrl === data.jobUrl && t.failPhase === data.failPhase);
+                });
+                renderFailedTasks();
+            }
         } catch (_) {}
     });
     _evtSource.addEventListener('desktopNotify', function(e) {

@@ -474,6 +474,15 @@ async function _runPipeline(sessionId) {
         return;
     }
 
+    // AI pre-check: algorithm fallback removed, AI is required
+    if (!config.aiMatcher && !config.aiInvoke) {
+        pipeline.running = false;
+        pipeline.progress.phase = 'error';
+        pipeline.progress.errors.push('No AI provider configured — AI matching is required');
+        _log('ERROR: No AI provider — cannot start (algorithm fallback removed)');
+        return;
+    }
+
     // ── Search + Match (merged): process each job inline as it's found ──
     pipeline.progress.phase = 'searching';
     let _totalFetched = 0;  // total listings fetched across all sources (replaces allListings.length)
@@ -598,6 +607,17 @@ async function _runPipeline(sessionId) {
     // ── Helper: process a single job — match + optional inline generate ──
     async function _processJob(listing) {
         try {
+            // Broadcast: currently processing this job
+            dashboardServer.updatePipelineProgress(sessionId, {
+                phase: config.generateInline ? 'search_generate' : 'matching',
+                currentJob: {
+                    title: listing.title || 'Unknown',
+                    company: listing.company || '?',
+                    url: listing.url,
+                    phase: config.generateInline ? 'search_generate' : 'search_match'
+                }
+            });
+
             // 1. Parse JD
             let requirements = null;
             if (listing.fullText) {
@@ -648,38 +668,44 @@ async function _runPipeline(sessionId) {
                     if (matchResult) {
                         _log(`  AI match: ${matchResult.overallScore}%`);
                     } else {
-                        _log(`  AI matcher returned null, using algorithm`);
+                        _log(`  AI matcher returned null`);
                     }
                 } catch (err) {
-                    _log(`  AI match failed: ${err.message}, fallback to algorithm`);
+                    _log(`  AI match failed: ${err.message}`);
                 }
             }
 
-            // Path C: Algorithmic fallback
+            // No AI result → error state (algorithm fallback removed)
             if (!matchResult) {
-                matchResult = matchProfileHandler({
-                    profile,
-                    requirements: requirements || {
-                        title: listing.title || '',
-                        sections: { technical: '', experience: '', education: '', soft_skills: '' }
-                    },
-                    jobTitle: listing.title,
-                    skillTaxonomy: config.skillTaxonomy
-                });
-            }
-
-            // Low-score AI retry
-            if (matchResult.overallScore < config.minScore &&
-                config.aiMatcher && listing.fullText && !matchResult.aiMatched) {
-                try {
-                    const aiRetry = await config.aiMatcher(profile, listing, config.skillTaxonomy);
-                    if (aiRetry && aiRetry.overallScore > matchResult.overallScore) {
-                        _log(`  AI retry: ${matchResult.overallScore}% → ${aiRetry.overallScore}%`);
-                        matchResult = aiRetry;
+                _log(`✗ AI match unavailable for "${listing.title}" — skipping`);
+                pipeline.progress.matched++;
+                pipeline.progress.errors.push(`AI unavailable: ${listing.title}`);
+                dashboardServer.upsertJobCard(sessionId, {
+                    url: listing.url,
+                    title: listing.title || '',
+                    company: listing.company || '',
+                    status: 'discovered',
+                    taskLog: {
+                        search: {
+                            status: 'error',
+                            at: new Date().toISOString(),
+                            source: listing.source || '',
+                            error: 'AI matching failed — no result from any AI provider'
+                        }
                     }
-                } catch (err) {
-                    _log(`  AI retry failed: ${err.message}`);
-                }
+                });
+                // Broadcast failure for Workflow Progress UI
+                dashboardServer.updatePipelineProgress(sessionId, {
+                    phase: 'taskFailed',
+                    jobUrl: listing.url,
+                    title: listing.title || '',
+                    company: listing.company || '',
+                    platform: listing.source || '',
+                    failPhase: 'search',
+                    error: 'AI matching failed',
+                    at: new Date().toISOString()
+                });
+                return;
             }
 
             // 3. Score check
@@ -777,14 +803,29 @@ async function _runPipeline(sessionId) {
 
                 const allOk = Object.values(docOutcomes).every(d => d.ok);
                 const anyOk = Object.values(docOutcomes).some(d => d.ok);
+                const genAt = new Date().toISOString();
                 taskLog.generate = {
                     status: allOk ? 'ok' : anyOk ? 'partial' : 'error',
-                    at: new Date().toISOString(),
+                    at: genAt,
                     aiGenerated,
                     error: genErrors.length > 0 ? genErrors.join('; ') : null,
                     docs: docOutcomes
                 };
-                status = 'tailored';
+                status = allOk ? 'tailored' : 'matched'; // partial/error → stay matched
+
+                // Broadcast generate failure if not all OK
+                if (!allOk) {
+                    dashboardServer.updatePipelineProgress(sessionId, {
+                        phase: 'taskFailed',
+                        jobUrl: listing.url,
+                        title: listing.title || '',
+                        company: listing.company || '',
+                        platform: listing.source || '',
+                        failPhase: 'generate',
+                        error: genErrors.join('; ') || 'Document generation incomplete',
+                        at: genAt
+                    });
+                }
             }
 
             // 6. Upsert job card
@@ -804,14 +845,15 @@ async function _runPipeline(sessionId) {
             pipeline.progress.qualified++;
             _sourceQualified[listing.source] = (_sourceQualified[listing.source] || 0) + 1;
 
-            // SSE broadcast
+            // SSE broadcast: success + clear currentJob
             dashboardServer.updatePipelineProgress(sessionId, {
                 phase: config.generateInline ? 'search_generate' : 'matching',
                 message: `${config.generateInline ? 'Matched+Generated' : 'Qualified'}: "${listing.title}" (${score}%)`,
                 qualified: pipeline.progress.qualified,
                 source: listing.source,
                 sourceQualified: _sourceQualified[listing.source],
-                targetCount: config.targetCount
+                targetCount: config.targetCount,
+                currentJob: null // done processing this job
             });
         } catch (err) {
             _log(`ERROR processing "${listing.title}": ${err.message}`);
@@ -829,6 +871,18 @@ async function _runPipeline(sessionId) {
                         source: listing.source || listing.platform || ''
                     }
                 }
+            });
+            // Broadcast failure for Workflow Progress UI
+            dashboardServer.updatePipelineProgress(sessionId, {
+                phase: 'taskFailed',
+                jobUrl: listing.url,
+                title: listing.title || '',
+                company: listing.company || '',
+                platform: listing.source || '',
+                failPhase: 'search',
+                error: err.message,
+                at: new Date().toISOString(),
+                currentJob: null
             });
         }
     }
