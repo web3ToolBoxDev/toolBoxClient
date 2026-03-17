@@ -3306,32 +3306,47 @@ async function deleteJob(jobUrl) {
 
 // ─── Bulk actions (Control Panel) ───
 
+var _selectedJobs = new Set(); // persists across re-renders
+
 function getSelectedJobs() {
-    var urls = [];
-    document.querySelectorAll('.job-select:checked').forEach(function(cb) { urls.push(cb.value); });
-    return urls;
+    return Array.from(_selectedJobs);
 }
 
 function toggleSelectAll() {
     var checked = document.getElementById('selectAllJobs').checked;
-    document.querySelectorAll('.job-select').forEach(function(cb) { cb.checked = checked; });
+    document.querySelectorAll('.job-select').forEach(function(cb) {
+        cb.checked = checked;
+        if (checked) _selectedJobs.add(cb.value); else _selectedJobs.delete(cb.value);
+    });
     updateBulkBar();
 }
 
 function updateBulkBar() {
-    var selected = getSelectedJobs();
+    // Sync Set from visible checkboxes
+    document.querySelectorAll('.job-select').forEach(function(cb) {
+        if (cb.checked) _selectedJobs.add(cb.value); else _selectedJobs.delete(cb.value);
+    });
+    var count = _selectedJobs.size;
     var bar = document.getElementById('bulkBar');
     var countEl = document.getElementById('bulkCount');
-    if (selected.length > 0) {
+    if (count > 0) {
         bar.classList.add('visible');
-        countEl.textContent = t('selectedCount').replace('{n}', selected.length);
+        countEl.textContent = t('selectedCount').replace('{n}', count);
     } else {
         bar.classList.remove('visible');
     }
     // Sync select-all checkbox
     var allCbs = document.querySelectorAll('.job-select');
-    var allChecked = allCbs.length > 0 && selected.length === allCbs.length;
+    var allChecked = allCbs.length > 0 && count >= allCbs.length;
     document.getElementById('selectAllJobs').checked = allChecked;
+}
+
+/** Restore checkbox state after innerHTML re-render */
+function _restoreCheckboxes() {
+    document.querySelectorAll('.job-select').forEach(function(cb) {
+        if (_selectedJobs.has(cb.value)) cb.checked = true;
+    });
+    updateBulkBar();
 }
 
 function toggleGenDropdown(e) {
@@ -3401,6 +3416,7 @@ async function bulkMarkApplied() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jobUrls: urls, status: 'submitted' })
         });
+        _selectedJobs.clear();
         refreshJobRecords();
     } catch (e) { alert(e.message); }
 }
@@ -3415,6 +3431,7 @@ async function bulkArchive() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jobUrls: urls, status: 'archived' })
         });
+        _selectedJobs.clear();
         refreshJobRecords();
     } catch (e) { alert(e.message); }
 }
@@ -3429,6 +3446,7 @@ async function bulkDelete() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jobUrls: urls })
         });
+        _selectedJobs.clear();
         refreshJobRecords();
     } catch (e) { alert(e.message); }
 }
@@ -3575,6 +3593,7 @@ function render(data) {
         jobBody.innerHTML = jobs.map(renderJobRow).join('');
         noJobsEl.style.display = 'none';
         document.getElementById('jobTable').style.display = 'table';
+        _restoreCheckboxes();
     } else {
         jobBody.innerHTML = '';
         noJobsEl.style.display = 'block';
@@ -4540,6 +4559,7 @@ async function refreshJobRecords() {
             jobBody.innerHTML = data.jobs.map(renderJobRow).join('');
             noJobsEl.style.display = 'none';
             document.getElementById('jobTable').style.display = 'table';
+            _restoreCheckboxes();
             // Render pagination
             var pages = data.totalPages || 1;
             var html = '';
