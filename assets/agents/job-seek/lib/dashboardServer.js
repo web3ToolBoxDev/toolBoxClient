@@ -3925,14 +3925,25 @@ function render(data) {
         ' | Updated: ' + new Date().toLocaleString();
 }
 
+function _applySession(encodedId) {
+    _wfSessionId = encodedId;
+    API_URL = BASE_URL + '/api/dashboard/' + encodedId;
+    PIPE_URL = BASE_URL + '/api/pipeline/' + encodedId;
+    WF_URL = BASE_URL + '/api/workflow-status/' + encodedId;
+    WF_API = BASE_URL + '/api/workflow/' + encodedId;
+    ALERT_API = BASE_URL + '/api/workflow/' + encodedId + '/alerts';
+    // Reconnect SSE for the new session
+    connectSSE();
+}
+
 async function refresh() {
     try {
         const res = await fetch(API_URL);
         if (res.ok) {
             const data = await res.json();
 
-            // Auto-detect: if baked-in session has no data, switch to active session
-            if (!_sessionChecked && !data.direction?.jobTitle && !data.profile?.basic) {
+            // Auto-detect: on first load, always verify baked session matches active session
+            if (!_sessionChecked) {
                 _sessionChecked = true;
                 try {
                     const activeRes = await fetch(BASE_URL + '/api/active-session');
@@ -3941,15 +3952,13 @@ async function refresh() {
                         if (active.sessionId && active.sessionId !== data.sessionId) {
                             console.log('[dashboard] Switching to active session:', active.sessionId);
                             var encoded = encodeURIComponent(active.sessionId);
-                            API_URL = BASE_URL + '/api/dashboard/' + encoded;
-                            PIPE_URL = BASE_URL + '/api/pipeline/' + encoded;
+                            _applySession(encoded);
                             // Re-fetch with correct session
                             var retry = await fetch(API_URL);
                             if (retry.ok) {
                                 var retryData = await retry.json();
                                 render(retryData);
                                 document.getElementById('refresh').textContent = 'Auto-refresh: active (session switched)';
-                                // pipeline status handled by workflow engine
                                 return;
                             }
                         }
@@ -4486,7 +4495,7 @@ async function retryFailedTask(idx) {
     var t = _wfFailedTasks[idx];
     if (!t) return;
     try {
-        var resp = await fetch('/api/workflow/' + encodeURIComponent(_currentSessionId) + '/retry-job', {
+        var resp = await fetch(WF_API + '/retry-job', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jobUrl: t.jobUrl, phase: t.failPhase })
@@ -4509,7 +4518,7 @@ async function deleteFailedTask(idx) {
     var t = _wfFailedTasks[idx];
     if (!t) return;
     try {
-        await fetch('/api/jobs/' + encodeURIComponent(_currentSessionId) + '/delete', {
+        await fetch(BASE_URL + '/api/jobs/' + _wfSessionId + '/delete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jobUrl: t.jobUrl })
