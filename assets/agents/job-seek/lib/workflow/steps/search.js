@@ -21,6 +21,11 @@ async function execute({ sessionId, config, context }) {
 
     // Get platform IDs selected in workflow editor for search step
     const searchStep = (config.steps || []).find(s => s.name === 'search');
+
+    // Detect if generate step is enabled — enables inline generation during search
+    const generateStep = (config.steps || []).find(s => s.name === 'generate');
+    const generateEnabled = !!(generateStep?.enabled && context.aiInvoke);
+
     const searchConfig = {
         minScore: config.search?.minScore || 60,
         targetCount: config.search?.targetCount || 10,
@@ -34,7 +39,14 @@ async function execute({ sessionId, config, context }) {
         aiMatcher: context.aiMatcher || null,
         aiInvoke: context.aiInvoke || null,
         searchHistory: context.searchHistory || {},
-        onHistorySave: context.onHistorySave || null
+        onHistorySave: context.onHistorySave || null,
+        // Inline generation: merge match + doc generation into one AI call when generate step is enabled
+        generateInline: generateEnabled,
+        generateOpts: generateEnabled ? {
+            tailorResume: generateStep.tailorResume !== false,
+            coverLetter: generateStep.coverLetter !== false,
+            interviewPrep: generateStep.interviewPrep !== false
+        } : {}
     };
 
     // Start pipeline

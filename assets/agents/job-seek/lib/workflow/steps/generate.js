@@ -34,9 +34,12 @@ async function execute({ sessionId, config, context }) {
         jobIds:        generateStep?.jobIds || []
     };
 
-    // Get matched jobs from dashboard
+    // Get qualified jobs from dashboard (matched or tailored)
     const cards = dashboardServer.getJobCards(sessionId);
-    const qualifiedJobs = cards.filter(c => c.status === 'matched' && (c.matchScore || 0) >= (config.search?.minScore || 60));
+    const qualifiedJobs = cards.filter(c =>
+        ['matched', 'tailored'].includes(c.status) &&
+        (c.matchScore || 0) >= (config.search?.minScore || 60)
+    );
 
     // Filter by jobIds if user selected specific jobs in the editor
     let targetJobs = qualifiedJobs;
@@ -44,8 +47,19 @@ async function execute({ sessionId, config, context }) {
         targetJobs = qualifiedJobs.filter(j => opts.jobIds.includes(j.url));
     }
 
+    // Skip jobs already generated inline during search (taskLog.generate.status === 'ok')
+    const skippedCount = targetJobs.filter(j => j.taskLog?.generate?.status === 'ok').length;
+    targetJobs = targetJobs.filter(job => {
+        const genLog = job.taskLog?.generate;
+        if (genLog && genLog.status === 'ok') return false; // fully generated inline
+        return true; // not generated or partial — process
+    });
+
     if (targetJobs.length === 0) {
-        return { generated: 0, summary: 'No qualified jobs to generate documents for' };
+        const msg = skippedCount > 0
+            ? `All ${skippedCount} jobs already generated inline during search`
+            : 'No qualified jobs to generate documents for';
+        return { generated: skippedCount, summary: msg };
     }
 
     let generated = 0;

@@ -10,7 +10,7 @@
 
 const { handler: jobSearchHandler } = require('./tools/jobSearch');
 const { handler: parseListingHandler, extractRequirements } = require('./tools/parseListing');
-const { handler: matchProfileHandler } = require('./tools/matchProfile');
+const { handler: matchProfileHandler, buildMatchPrompt, parseMatchResponse } = require('./tools/matchProfile');
 const { handler: resumeGenHandler } = require('./tools/resumeGen');
 const { handler: coverLetterHandler } = require('./tools/coverLetter');
 const { handler: mockInterviewHandler } = require('./tools/mockInterview');
@@ -373,6 +373,8 @@ function startPipeline(sessionId, config, direction, profile) {
             aiInvoke: config.aiInvoke || null,      // injected AI callback for self-heal (analyzeFailure + healScript)
             skillTaxonomy: config.skillTaxonomy || null,  // AI-generated skill taxonomy for smart matching
             onHistorySave: config.onHistorySave || null,  // callback to persist search history
+            generateInline: config.generateInline || false,  // merge match + generate into one AI call
+            generateOpts: config.generateOpts || {},         // { tailorResume, coverLetter, interviewPrep }
             _prevTotalRuns: config.searchHistory?.totalRuns || 0
         },
         direction,
@@ -472,9 +474,9 @@ async function _runPipeline(sessionId) {
         return;
     }
 
-    // Phase 1: Search — uses platform tool scripts only (no API fallback)
+    // ── Search + Match (merged): process each job inline as it's found ──
     pipeline.progress.phase = 'searching';
-    const allListings = [];
+    let _totalFetched = 0;  // total listings fetched across all sources (replaces allListings.length)
     if (previouslySeen.size > 0) {
         _log(`Loaded ${previouslySeen.size} previously seen job URLs — will filter duplicates`);
     }
@@ -502,9 +504,13 @@ async function _runPipeline(sessionId) {
     const _failedSources = new Set();     // sources whose search query failed at runtime
     // Use pipeline-level tracking for adaptive search support
     const _sourceResultCount = pipeline._sourceResultCount;
+    const _sourceQualified = pipeline._sourceQualified;
 
     const runnableQueryCount = queries.filter(q => platformToolMap[q.source]).length;
     _log(`Runnable queries: ${runnableQueryCount} of ${queries.length}, maxResults per platform: ${config.maxResults}`);
+    if (config.generateInline) {
+        _log(`Inline generation ENABLED: match + docs in one AI call`);
+    }
 
     // ── Helper: validate browser & login for a platform (once per platform) ──
     async function _validatePlatform(source, platformTool) {
@@ -589,11 +595,256 @@ async function _runPipeline(sessionId) {
         return true;
     }
 
+    // ── Helper: process a single job — match + optional inline generate ──
+    async function _processJob(listing) {
+        try {
+            // 1. Parse JD
+            let requirements = null;
+            if (listing.fullText) {
+                requirements = extractRequirements({ text: listing.fullText, title: listing.title || '' });
+                pipeline.progress.parsed++;
+                dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
+                _log(`  Parsed JD (${listing.fullText.length} chars)`);
+            } else {
+                try {
+                    const parsed = await parseListingHandler({ url: listing.url, useBrowser: false });
+                    requirements = parsed;
+                    pipeline.progress.parsed++;
+                    dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
+                } catch { /* Parse failure is non-fatal */ }
+            }
+
+            // 2. Match — combined AI (match+generate) or match-only
+            let matchResult = null;
+            let aiResumeMd = null;
+            let aiCoverMd = null;
+            let aiGenerated = false;
+
+            // Path A: Combined AI call (match + generate in one)
+            if (config.generateInline && config.aiInvoke && listing.fullText) {
+                try {
+                    const combinedPrompt = _buildCombinedPrompt(
+                        listing, profile, config.skillTaxonomy,
+                        config.generateOpts || {}
+                    );
+                    const raw = await config.aiInvoke(combinedPrompt);
+                    const parsed = _parseCombinedResponse(raw);
+                    matchResult = parsed.matchResult;
+                    aiResumeMd = parsed.resume;
+                    aiCoverMd = parsed.coverLetter;
+                    aiGenerated = !!(aiResumeMd || aiCoverMd);
+                    if (matchResult) {
+                        _log(`  Combined AI: score=${matchResult.overallScore}%, resume=${aiResumeMd ? 'YES' : 'NO'}, cover=${aiCoverMd ? 'YES' : 'NO'}`);
+                    }
+                } catch (err) {
+                    _log(`  Combined AI failed: ${err.message}, falling back`);
+                }
+            }
+
+            // Path B: Match-only AI (existing aiMatcher)
+            if (!matchResult && config.aiMatcher && listing.fullText) {
+                try {
+                    matchResult = await config.aiMatcher(profile, listing, config.skillTaxonomy);
+                    if (matchResult) {
+                        _log(`  AI match: ${matchResult.overallScore}%`);
+                    } else {
+                        _log(`  AI matcher returned null, using algorithm`);
+                    }
+                } catch (err) {
+                    _log(`  AI match failed: ${err.message}, fallback to algorithm`);
+                }
+            }
+
+            // Path C: Algorithmic fallback
+            if (!matchResult) {
+                matchResult = matchProfileHandler({
+                    profile,
+                    requirements: requirements || {
+                        title: listing.title || '',
+                        sections: { technical: '', experience: '', education: '', soft_skills: '' }
+                    },
+                    jobTitle: listing.title,
+                    skillTaxonomy: config.skillTaxonomy
+                });
+            }
+
+            // Low-score AI retry
+            if (matchResult.overallScore < config.minScore &&
+                config.aiMatcher && listing.fullText && !matchResult.aiMatched) {
+                try {
+                    const aiRetry = await config.aiMatcher(profile, listing, config.skillTaxonomy);
+                    if (aiRetry && aiRetry.overallScore > matchResult.overallScore) {
+                        _log(`  AI retry: ${matchResult.overallScore}% → ${aiRetry.overallScore}%`);
+                        matchResult = aiRetry;
+                    }
+                } catch (err) {
+                    _log(`  AI retry failed: ${err.message}`);
+                }
+            }
+
+            // 3. Score check
+            const score = matchResult.overallScore || 0;
+            pipeline.progress.matched++;
+            const qualified = score >= config.minScore;
+            _log(`${qualified ? '✓' : '✗'} "${listing.title}" @ ${listing.company || '?'} → score: ${score}%${qualified ? ' QUALIFIED' : ''}`, {
+                url: listing.url, score, title: listing.title, company: listing.company || '?'
+            });
+
+            if (!qualified) return;
+
+            // 4. Build job card data
+            const taskLog = {
+                search: {
+                    status: 'ok',
+                    at: new Date().toISOString(),
+                    source: listing.source || listing.platform || '',
+                    aiMatched: !!matchResult.aiMatched
+                }
+            };
+
+            let status = 'matched';
+            const artifacts = requirements ? { requirements } : {};
+
+            // 5. Inline generation: finalize docs for qualified jobs
+            if (config.generateInline) {
+                const genOpts = config.generateOpts || {};
+                const docOutcomes = {};
+                const genErrors = [];
+
+                // Resume
+                if (genOpts.tailorResume) {
+                    let resumeMd = aiResumeMd;
+                    if (!resumeMd) {
+                        try {
+                            const tmpl = resumeGenHandler({
+                                profile, sessionProfile: null,
+                                jobTitle: listing.title, company: listing.company,
+                                requirements: requirements || {},
+                                matchResult: matchResult.breakdown ? { breakdown: matchResult.breakdown } : undefined
+                            });
+                            resumeMd = tmpl.markdown;
+                        } catch (err) { genErrors.push(`Resume template: ${err.message}`); }
+                    }
+                    if (resumeMd) {
+                        artifacts.resume = resumeMd;
+                        try {
+                            const { markdownToDocx } = require('./tools/docxBuilder');
+                            const docxResult = await markdownToDocx(resumeMd, { type: 'Resume', company: listing.company, title: listing.title });
+                            artifacts.resumeDocx = docxResult.buffer.toString('base64');
+                        } catch (docxErr) {
+                            _log(`  Resume DOCX failed: ${docxErr.message}`);
+                        }
+                    }
+                    docOutcomes.resume = { ok: !!resumeMd, source: aiResumeMd ? 'ai' : 'template' };
+                }
+
+                // Cover letter
+                if (genOpts.coverLetter) {
+                    let coverMd = aiCoverMd;
+                    if (!coverMd) {
+                        try {
+                            const tmpl = coverLetterHandler({
+                                profile, company: listing.company, jobTitle: listing.title,
+                                requirements: requirements || {}
+                            });
+                            coverMd = tmpl.markdown;
+                        } catch (err) { genErrors.push(`Cover letter template: ${err.message}`); }
+                    }
+                    if (coverMd) {
+                        artifacts.coverLetter = coverMd;
+                        try {
+                            const { markdownToDocx } = require('./tools/docxBuilder');
+                            const docxResult = await markdownToDocx(coverMd, { type: 'CoverLetter', company: listing.company, title: listing.title });
+                            artifacts.coverLetterDocx = docxResult.buffer.toString('base64');
+                        } catch (docxErr) {
+                            _log(`  Cover letter DOCX failed: ${docxErr.message}`);
+                        }
+                    }
+                    docOutcomes.coverLetter = { ok: !!coverMd, source: aiCoverMd ? 'ai' : 'template' };
+                }
+
+                // Interview prep (always template, zero AI cost)
+                if (genOpts.interviewPrep) {
+                    try {
+                        const jobForPrep = { ...listing, matchScore: score, matchBreakdown: matchResult.breakdown, artifacts };
+                        artifacts.interviewPrep = _buildInterviewPrompt(jobForPrep, profile);
+                        docOutcomes.interviewPrep = { ok: true, source: 'template' };
+                    } catch (err) {
+                        genErrors.push(`Interview prep: ${err.message}`);
+                        docOutcomes.interviewPrep = { ok: false, source: 'template' };
+                    }
+                }
+
+                const allOk = Object.values(docOutcomes).every(d => d.ok);
+                const anyOk = Object.values(docOutcomes).some(d => d.ok);
+                taskLog.generate = {
+                    status: allOk ? 'ok' : anyOk ? 'partial' : 'error',
+                    at: new Date().toISOString(),
+                    aiGenerated,
+                    error: genErrors.length > 0 ? genErrors.join('; ') : null,
+                    docs: docOutcomes
+                };
+                status = 'tailored';
+            }
+
+            // 6. Upsert job card
+            dashboardServer.upsertJobCard(sessionId, {
+                url: listing.url,
+                title: listing.title,
+                company: listing.company,
+                location: listing.location,
+                salary: listing.salary,
+                fullText: listing.fullText || '',
+                matchScore: score,
+                status,
+                artifacts,
+                matchBreakdown: matchResult.breakdown || null,
+                taskLog
+            });
+            pipeline.progress.qualified++;
+            _sourceQualified[listing.source] = (_sourceQualified[listing.source] || 0) + 1;
+
+            // SSE broadcast
+            dashboardServer.updatePipelineProgress(sessionId, {
+                phase: config.generateInline ? 'search_generate' : 'matching',
+                message: `${config.generateInline ? 'Matched+Generated' : 'Qualified'}: "${listing.title}" (${score}%)`,
+                qualified: pipeline.progress.qualified,
+                source: listing.source,
+                sourceQualified: _sourceQualified[listing.source],
+                targetCount: config.targetCount
+            });
+        } catch (err) {
+            _log(`ERROR processing "${listing.title}": ${err.message}`);
+            pipeline.progress.errors.push(`Process error (${listing.url}): ${err.message}`);
+            dashboardServer.upsertJobCard(sessionId, {
+                url: listing.url,
+                title: listing.title || '',
+                company: listing.company || '',
+                status: 'discovered',
+                taskLog: {
+                    search: {
+                        status: 'error',
+                        at: new Date().toISOString(),
+                        error: err.message,
+                        source: listing.source || listing.platform || ''
+                    }
+                }
+            });
+        }
+    }
+
     // ── Helper: run all queries for a single source sequentially ──
     async function _runSourceQueries(source) {
         const sqList = sourceQueries[source] || [];
         for (const q of sqList) {
             if (!pipeline.running) break;
+
+            // Early termination: platform already has enough qualified jobs
+            const srcQual = _sourceQualified[q.source] || 0;
+            if (srcQual >= config.targetCount) {
+                _log(`⊘ [${q.source}] Skipped — already ${srcQual}/${config.targetCount} qualified (targetCount met)`);
+                break;
+            }
 
             const platformTool = platformToolMap[q.source];
 
@@ -651,7 +902,6 @@ async function _runPipeline(sessionId) {
                                 cell: 'search', status: 'error',
                                 message: `Only ${listings.length} result(s) for "${q.query}" — please Rebuild search tool`
                             });
-                            // Don't block other platforms — continue pipeline
                         }
                     } else {
                         const errMsg = scriptResult.error || 'unknown error';
@@ -662,21 +912,19 @@ async function _runPipeline(sessionId) {
                             message: `Search failed: ${errMsg} — please Rebuild search tool`
                         });
                         pipeline.progress.errors.push(`[${q.source}] Search tool failed: ${errMsg}`);
-                        // Don't auto-heal — let user rebuild manually via dashboard
                     }
                 } else {
                     _log(`[${q.source}] No platform tool available — skipped`);
                     continue;
                 }
 
-                // ── Overlap rate detection: determine how many results are already seen ──
+                // ── Overlap rate detection ──
                 const totalResults = listings.filter(l => l.url).length;
                 const seenCount = listings.filter(l => l.url && seenUrls.has(l.url)).length;
                 const overlapRate = totalResults > 0 ? seenCount / totalResults : 0;
                 const newCount = totalResults - seenCount;
 
                 if (overlapRate >= 0.8 && totalResults > 0) {
-                    // Almost all results are old → advance pageOffset for next run
                     const offsetKey = `${q.source}|${q.query}|${q.location}`;
                     pipeline._pageOffsets[offsetKey] = (pipeline._pageOffsets[offsetKey] || 0) + 1;
                     _log(`⚡ [${q.source}] High overlap (${Math.round(overlapRate * 100)}%) for "${q.query}" — will use page ${pipeline._pageOffsets[offsetKey]} next time`);
@@ -685,19 +933,30 @@ async function _runPipeline(sessionId) {
                 }
                 _log(`[${q.source}] Found ${totalResults} results (${newCount} new, overlap: ${Math.round(overlapRate * 100)}%)`);
 
-                // Filter: only add new (unseen) listings
+                // ── Process each new listing inline (match + optional generate) ──
                 for (const listing of listings) {
+                    if (!pipeline.running) break;
+
+                    // Early termination: check targetCount mid-batch
+                    if ((_sourceQualified[listing.source] || 0) >= config.targetCount) {
+                        _log(`⊘ [${listing.source}] targetCount reached mid-batch — skipping rest`);
+                        break;
+                    }
+
                     if (listing.url && !seenUrls.has(listing.url)) {
                         seenUrls.add(listing.url);
-                        _addSeenJob(sessionId, listing.url); // persist for cross-run overlap detection
-                        allListings.push(listing);
+                        _addSeenJob(sessionId, listing.url);
                         _sourceResultCount[q.source] = (_sourceResultCount[q.source] || 0) + 1;
+                        _totalFetched++;
                         _log(`+ "${listing.title}" @ ${listing.company || '?'} (${listing.location || '?'})`);
+
+                        // Inline match + optional generate
+                        await _processJob(listing);
                     }
                 }
 
                 pipeline.progress.searched++;
-                pipeline.progress.total = allListings.length;
+                pipeline.progress.total = _totalFetched;
             } catch (err) {
                 _log(`ERROR [${q.source}]: ${err.message}`);
                 pipeline.progress.errors.push(`Search error: ${err.message}`);
@@ -711,150 +970,13 @@ async function _runPipeline(sessionId) {
         await _runSourceQueries(source);
     }
 
-    _log(`Search complete: ${allListings.length} unique listings from ${pipeline.progress.searched} queries`);
+    _log(`Search${config.generateInline ? '+Generate' : ''} complete: ${_totalFetched} unique listings from ${pipeline.progress.searched} queries`);
 
     if (!pipeline.running) { _finishPipeline(sessionId, 'stopped'); return; }
 
-    // Phase 2: Parse & Match (targetCount is per-platform)
-    pipeline.progress.phase = 'matching';
-    _log(`Matching ${allListings.length} listings against profile (minScore: ${config.minScore}%, targetCount per platform: ${config.targetCount})...`);
-    // Use pipeline-level qualified tracking for adaptive rounds
-    const _sourceQualified = pipeline._sourceQualified;
-
-    for (const listing of allListings) {
-        if (!pipeline.running) break;
-
-        // Per-platform targetCount: skip if this source already has enough qualified jobs
-        const srcQual = _sourceQualified[listing.source] || 0;
-        if (srcQual >= config.targetCount) {
-            _log(`⊘ [${listing.source}] Skipped matching — already ${srcQual}/${config.targetCount} qualified`);
-            continue;
-        }
-
-        try {
-            // Parse listing requirements — prefer fullText from search script
-            let requirements = null;
-            if (listing.fullText) {
-                // JD already fetched by search script Phase 2
-                requirements = extractRequirements({ text: listing.fullText, title: listing.title || '' });
-                pipeline.progress.parsed++;
-                dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
-                _log(`  Parsed JD from search script fullText (${listing.fullText.length} chars)`);
-            } else {
-                // Fallback: try HTTP fetch (may be blocked by anti-bot)
-                try {
-                    const parsed = await parseListingHandler({
-                        url: listing.url,
-                        useBrowser: false
-                    });
-                    requirements = parsed;
-                    pipeline.progress.parsed++;
-                    dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
-                } catch {
-                    // Parse failure is non-fatal, use what we have
-                }
-            }
-
-            // Match against profile — prefer AI full-JD matching, fallback to algorithm
-            let matchResult;
-            if (config.aiMatcher && listing.fullText) {
-                try {
-                    matchResult = await config.aiMatcher(profile, listing, config.skillTaxonomy);
-                    if (matchResult) {
-                        _log(`  AI match: ${matchResult.overallScore}%`);
-                    } else {
-                        _log(`  AI matcher returned null (provider unavailable?), using algorithm`);
-                    }
-                } catch (err) {
-                    _log(`  AI match failed: ${err.message}, fallback to algorithm`);
-                }
-            }
-            if (!matchResult) {
-                matchResult = matchProfileHandler({
-                    profile,
-                    requirements: requirements || {
-                        title: listing.title || '',
-                        sections: { technical: '', experience: '', education: '', soft_skills: '' }
-                    },
-                    jobTitle: listing.title,
-                    skillTaxonomy: config.skillTaxonomy
-                });
-            }
-
-            // Low-score AI retry: if algorithm scored below threshold, give AI a second chance
-            if (matchResult.overallScore < config.minScore &&
-                config.aiMatcher && listing.fullText && !matchResult.aiMatched) {
-                try {
-                    const aiRetry = await config.aiMatcher(profile, listing, config.skillTaxonomy);
-                    if (aiRetry && aiRetry.overallScore > matchResult.overallScore) {
-                        _log(`  AI retry: ${matchResult.overallScore}% → ${aiRetry.overallScore}%`);
-                        matchResult = aiRetry;
-                    }
-                } catch (err) {
-                    _log(`  AI retry failed: ${err.message}`);
-                }
-            }
-
-            const score = matchResult.overallScore || 0;
-            pipeline.progress.matched++;
-
-            const qualified = score >= config.minScore;
-            _log(`${qualified ? '✓' : '✗'} "${listing.title}" @ ${listing.company || '?'} → score: ${score}%${qualified ? ' QUALIFIED' : ''}`, {
-                url: listing.url, score, title: listing.title, company: listing.company || '?'
-            });
-
-            // Only store qualified jobs (score >= minScore)
-            if (qualified) {
-                dashboardServer.upsertJobCard(sessionId, {
-                    url: listing.url,
-                    title: listing.title,
-                    company: listing.company,
-                    location: listing.location,
-                    salary: listing.salary,
-                    fullText: listing.fullText || '',
-                    matchScore: score,
-                    status: 'matched',
-                    artifacts: requirements ? { requirements } : {},
-                    matchBreakdown: matchResult.breakdown || null,
-                    taskLog: {
-                        search: {
-                            status: 'ok',
-                            at: new Date().toISOString(),
-                            source: listing.source || listing.platform || '',
-                            aiMatched: !!matchResult.aiMatched
-                        }
-                    }
-                });
-                pipeline.progress.qualified++;
-                _sourceQualified[listing.source] = (_sourceQualified[listing.source] || 0) + 1;
-            }
-
-            // Track this URL as seen (persisted across pipeline runs)
-            _addSeenJob(sessionId, listing.url);
-        } catch (err) {
-            _log(`ERROR matching "${listing.title}": ${err.message}`);
-            pipeline.progress.errors.push(`Match error (${listing.url}): ${err.message}`);
-            // Record search error on job card for interrupted workflow tracking
-            dashboardServer.upsertJobCard(sessionId, {
-                url: listing.url,
-                title: listing.title || '',
-                company: listing.company || '',
-                status: 'discovered',
-                taskLog: {
-                    search: {
-                        status: 'error',
-                        at: new Date().toISOString(),
-                        error: err.message,
-                        source: listing.source || listing.platform || ''
-                    }
-                }
-            });
-        }
-    }
-
     const p = pipeline.progress;
     const srcSummary = Object.entries(_sourceQualified).map(([s, n]) => `${s}: ${n}/${config.targetCount}`).join(', ');
-    _log(`Round ${pipeline._searchRound}: ${p.qualified} qualified / ${p.matched} scored / ${allListings.length} found (${p.errors.length} errors)`);
+    _log(`Round ${pipeline._searchRound}: ${p.qualified} qualified / ${p.matched} scored / ${_totalFetched} found (${p.errors.length} errors)`);
     _log(`Per-platform qualified: ${srcSummary || 'none'}`);
 
     // ─── Adaptive expansion: retry if results insufficient ───
@@ -901,7 +1023,7 @@ async function _runPipeline(sessionId) {
                 sourceQueries[src] = qList;
             }
 
-            // Phase 1 again: run new queries (only for gap sources)
+            // Run new queries — _runSourceQueries now handles inline match + generate
             pipeline.progress.phase = 'searching';
             for (const source of newSourceOrder) {
                 if (!pipeline.running) break;
@@ -910,125 +1032,12 @@ async function _runPipeline(sessionId) {
 
             if (!pipeline.running) { _finishPipeline(sessionId, 'stopped'); return; }
 
-            // Phase 2 again: match new results only
-            const newListings = allListings.filter(l => !_getSeenJobs(sessionId).has(l.url));
-            if (newListings.length > 0) {
-                pipeline.progress.phase = 'matching';
-                _log(`Matching ${newListings.length} new listings from round ${round + 1}...`);
-
-                for (const listing of newListings) {
-                    if (!pipeline.running) break;
-                    const srcQual = _sourceQualified[listing.source] || 0;
-                    if (srcQual >= config.targetCount) continue;
-
-                    try {
-                        let requirements = null;
-                        if (listing.fullText) {
-                            requirements = extractRequirements({ text: listing.fullText, title: listing.title || '' });
-                            pipeline.progress.parsed++;
-                            dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
-                        }
-
-                        // Match — prefer AI full-JD matching, fallback to algorithm
-                        let matchResult;
-                        if (config.aiMatcher && listing.fullText) {
-                            try {
-                                matchResult = await config.aiMatcher(profile, listing, config.skillTaxonomy);
-                                if (matchResult) {
-                                    _log(`  AI match: ${matchResult.overallScore}%`);
-                                } else {
-                                    _log(`  AI matcher returned null, using algorithm`);
-                                }
-                            } catch (err) {
-                                _log(`  AI match failed: ${err.message}, fallback to algorithm`);
-                            }
-                        }
-                        if (!matchResult) {
-                            matchResult = matchProfileHandler({
-                                profile,
-                                requirements: requirements || {
-                                    title: listing.title || '',
-                                    sections: { technical: '', experience: '', education: '', soft_skills: '' }
-                                },
-                                jobTitle: listing.title,
-                                skillTaxonomy: config.skillTaxonomy
-                            });
-                        }
-
-                        // Low-score AI retry
-                        if (matchResult.overallScore < config.minScore &&
-                            config.aiMatcher && listing.fullText && !matchResult.aiMatched) {
-                            try {
-                                const aiRetry = await config.aiMatcher(profile, listing, config.skillTaxonomy);
-                                if (aiRetry && aiRetry.overallScore > matchResult.overallScore) {
-                                    _log(`  AI retry: ${matchResult.overallScore}% → ${aiRetry.overallScore}%`);
-                                    matchResult = aiRetry;
-                                }
-                            } catch (err) {
-                                _log(`  AI retry failed: ${err.message}`);
-                            }
-                        }
-
-                        const score = matchResult.overallScore || 0;
-                        pipeline.progress.matched++;
-                        const qualified = score >= config.minScore;
-                        _log(`${qualified ? '✓' : '✗'} "${listing.title}" @ ${listing.company || '?'} → score: ${score}%${qualified ? ' QUALIFIED' : ''}`, {
-                            url: listing.url, score, title: listing.title, company: listing.company || '?'
-                        });
-
-                        if (qualified) {
-                            dashboardServer.upsertJobCard(sessionId, {
-                                url: listing.url,
-                                title: listing.title,
-                                company: listing.company,
-                                location: listing.location,
-                                salary: listing.salary,
-                                fullText: listing.fullText || '',
-                                matchScore: score,
-                                status: 'matched',
-                                artifacts: requirements ? { requirements } : {},
-                                matchBreakdown: matchResult.breakdown || null,
-                                taskLog: {
-                                    search: {
-                                        status: 'ok',
-                                        at: new Date().toISOString(),
-                                        source: listing.source || listing.platform || '',
-                                        aiMatched: !!matchResult.aiMatched
-                                    }
-                                }
-                            });
-                            pipeline.progress.qualified++;
-                            _sourceQualified[listing.source] = (_sourceQualified[listing.source] || 0) + 1;
-                        }
-                        _addSeenJob(sessionId, listing.url);
-                    } catch (err) {
-                        _log(`ERROR matching "${listing.title}": ${err.message}`);
-                        pipeline.progress.errors.push(`Match error (${listing.url}): ${err.message}`);
-                        dashboardServer.upsertJobCard(sessionId, {
-                            url: listing.url,
-                            title: listing.title || '',
-                            company: listing.company || '',
-                            status: 'discovered',
-                            taskLog: {
-                                search: {
-                                    status: 'error',
-                                    at: new Date().toISOString(),
-                                    error: err.message,
-                                    source: listing.source || listing.platform || ''
-                                }
-                            }
-                        });
-                    }
-                }
-            }
-
-            // Check if another round is needed (recursive gap check, capped by maxSearchRounds)
+            // Check if another round is needed
             const nextGap = _analyzeGap(_pipelines, sessionId);
             const nextHasGap = Object.keys(nextGap).length > 0;
             if (nextHasGap && pipeline._searchRound < config.maxSearchRounds && pipeline.running) {
-                // Log and continue (will be handled by next iteration if we refactor to loop)
                 const nextSrcSummary = Object.entries(_sourceQualified).map(([s, n]) => `${s}: ${n}/${config.targetCount}`).join(', ');
-                _log(`After round ${pipeline._searchRound}: ${nextSrcSummary} — still has gap, but max rounds reached or will try next round`);
+                _log(`After round ${pipeline._searchRound}: ${nextSrcSummary} — still has gap`);
             }
         } else {
             _log(`Round ${round + 1}: no new queries generated — finishing`);
@@ -1355,6 +1364,165 @@ async function generateInterviewPrep(sessionId, jobUrl, profile) {
     } catch (err) {
         return { error: err.message };
     }
+}
+
+/**
+ * Build a combined AI prompt: match scoring + resume + cover letter in ONE call.
+ * Used when Generate step is enabled during search to merge match + generate into a single AI invocation.
+ *
+ * @param {object} listing - { title, company, location, salary, fullText }
+ * @param {object} profile - user profile sections
+ * @param {object} taxonomy - skill taxonomy for smart matching
+ * @param {object} generateOpts - { tailorResume, coverLetter }
+ * @returns {string} combined prompt
+ */
+function _buildCombinedPrompt(listing, profile, taxonomy, generateOpts = {}) {
+    const skills = Array.isArray(profile.skills) ? profile.skills.join(', ') : (profile.skills || '');
+    const experience = Array.isArray(profile.experience) ? profile.experience.join('\n') : (profile.experience || '');
+    const education = Array.isArray(profile.education) ? profile.education.join('\n') : (profile.education || '');
+
+    let taxonomySummary = '';
+    if (taxonomy && taxonomy.taxonomy) {
+        const cats = Object.entries(taxonomy.taxonomy).slice(0, 20);
+        taxonomySummary = cats.map(([cat, sks]) => `${cat}: ${sks.slice(0, 8).join(', ')}`).join('\n');
+    }
+
+    // Candidate snapshot for doc generation
+    const candidateLines = [];
+    if (profile) {
+        for (const [section, content] of Object.entries(profile)) {
+            if (content && typeof content === 'string' && content.trim()) {
+                candidateLines.push(`**${section}:** ${content.trim()}`);
+            } else if (content && typeof content === 'object') {
+                candidateLines.push(`**${section}:** ${JSON.stringify(content)}`);
+            }
+        }
+    }
+    const candidateSnapshot = candidateLines.length > 0 ? candidateLines.join('\n') : 'No profile provided.';
+
+    const jdText = (listing.fullText || '').slice(0, 3500);
+    const jobTitle = listing.title || 'Unknown';
+
+    let prompt = `You are an expert career consultant and job matching specialist. Complete ALL tasks below in a single response.
+
+## Candidate Profile
+Skills: ${skills}
+Experience: ${experience.slice(0, 500)}
+Education: ${education.slice(0, 300)}
+
+## Job Description
+Title: ${jobTitle}
+Company: ${listing.company || 'N/A'}
+Location: ${listing.location || 'N/A'}
+${jdText}
+
+${taxonomySummary ? `## Skill Taxonomy (skills in same category are similar/substitutable)\n${taxonomySummary}` : ''}
+
+---
+
+## TASK 1: Match Scoring
+
+Score how well the candidate matches this job.
+
+Scoring Rules:
+- Overall = skills x 50% + experience x 30% + education x 20%
+- Exact skill match = full credit
+- Same-category skill (from taxonomy) = 60% credit, record in "similar" with category name
+- Skills in job title = core skills, weight x 1.5
+- "Nice to have" / "preferred" / "bonus" skills = weight x 0.5, track in niceToHave
+- Experience: 100 if meets/exceeds, 70 if close (within 1 yr), 40 if under, 50 if unspecified
+- Education: 100 if matches, 40-50 if partial, 50 if unspecified
+
+Output match result between these delimiters:
+
+===MATCH_JSON_START===
+Return ONLY valid JSON (no markdown fences):
+{"overallScore":0,"breakdown":{"skills":{"score":0,"matched":[],"similar":[{"req":"","have":"","category":""}],"missing":[],"niceToHave":{"matched":[],"similar":[],"missing":[]}},"experience":{"score":0,"detail":""},"education":{"score":0,"detail":""}},"interviewPrep":[]}
+===MATCH_JSON_END===`;
+
+    if (generateOpts.tailorResume) {
+        prompt += `
+
+## TASK 2: Generate Resume
+
+===RESUME_START===
+Generate a professional, ATS-optimized resume in Markdown:
+- Candidate name as H1
+- Contact info (email, phone, location) on one line
+- Professional Summary (2-3 sentences highlighting fit for THIS role)
+- Technical Skills section (emphasize skills matching job requirements)
+- Work Experience (most relevant first, bullet points with metrics/achievements)
+- Education
+- Certifications/Projects (if relevant)
+
+Keep it concise (1-2 pages when printed). Tailor every section to match the job requirements.
+
+Candidate Background:
+${candidateSnapshot}
+===RESUME_END===`;
+    }
+
+    if (generateOpts.coverLetter) {
+        prompt += `
+
+## TASK ${generateOpts.tailorResume ? '3' : '2'}: Generate Cover Letter
+
+===COVER_LETTER_START===
+Generate a professional cover letter in Markdown:
+- Date and greeting (Dear Hiring Manager at ${listing.company || 'the company'})
+- Opening: Express interest, mention the specific role
+- Body 1: Highlight 2-3 technical skills matching requirements with specific examples
+- Body 2: Demonstrate understanding of the company/role, explain why great fit
+- Closing: Call to action, express enthusiasm
+- Professional sign-off
+
+Keep under 400 words. Reference specific requirements from the JD.
+===COVER_LETTER_END===`;
+    }
+
+    return prompt;
+}
+
+/**
+ * Parse a combined AI response that contains match JSON + optional docs.
+ * @param {string} raw - AI response text
+ * @returns {{ matchResult: object|null, resume: string|null, coverLetter: string|null }}
+ */
+function _parseCombinedResponse(raw) {
+    const result = { matchResult: null, resume: null, coverLetter: null };
+    if (!raw || typeof raw !== 'string') return result;
+
+    // Extract match JSON
+    const matchBlock = raw.match(/===MATCH_JSON_START===([\s\S]*?)===MATCH_JSON_END===/);
+    if (matchBlock) {
+        result.matchResult = parseMatchResponse(matchBlock[1].trim());
+        if (result.matchResult) result.matchResult.aiMatched = true;
+    }
+
+    // Extract docs
+    const resumeMatch = raw.match(/===RESUME_START===([\s\S]*?)===RESUME_END===/);
+    if (resumeMatch) {
+        // Strip the instruction text, keep only the generated content after the instructions
+        let resumeText = resumeMatch[1].trim();
+        // If the AI included the instruction text, try to find the actual resume starting with # or name
+        const resumeContentStart = resumeText.search(/^#\s/m);
+        if (resumeContentStart > 50) {
+            resumeText = resumeText.slice(resumeContentStart).trim();
+        }
+        result.resume = resumeText;
+    }
+
+    const coverMatch = raw.match(/===COVER_LETTER_START===([\s\S]*?)===COVER_LETTER_END===/);
+    if (coverMatch) {
+        let coverText = coverMatch[1].trim();
+        const coverContentStart = coverText.search(/^[A-Z#\*]/m);
+        if (coverContentStart > 50) {
+            coverText = coverText.slice(coverContentStart).trim();
+        }
+        result.coverLetter = coverText;
+    }
+
+    return result;
 }
 
 /**
