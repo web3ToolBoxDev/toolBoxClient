@@ -199,6 +199,14 @@ async function _executePipeline(sessionId, config, context) {
         // Skip already completed steps (for resume)
         if (['done', 'skipped'].includes(step.status)) continue;
 
+        // [VERSION LOCK] Apply step deferred to next version — auto-skip
+        if (step.name === 'apply') {
+            store.updateStepStatus(sessionId, step.name, 'skipped', {
+                error: 'Auto-Apply is coming in the next version.'
+            });
+            continue;
+        }
+
         const handler = handlers[step.name];
         if (!handler || !handler.execute) {
             store.updateStepStatus(sessionId, step.name, 'error', {

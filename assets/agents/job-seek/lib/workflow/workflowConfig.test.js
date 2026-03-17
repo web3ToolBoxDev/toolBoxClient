@@ -30,7 +30,9 @@ describe('workflowConfig', () => {
         test('has all 4 steps in order', () => {
             const cfg = buildDefaultConfig('New York');
             expect(cfg.steps.map(s => s.name)).toEqual(VALID_STEPS);
-            expect(cfg.steps.every(s => s.enabled)).toBe(true);
+            // apply step locked (enabled:false) for this version
+            expect(cfg.steps.filter(s => s.name !== 'apply').every(s => s.enabled)).toBe(true);
+            expect(cfg.steps.find(s => s.name === 'apply').enabled).toBe(false);
         });
 
         test('applies search overrides', () => {

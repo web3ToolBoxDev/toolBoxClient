@@ -724,72 +724,18 @@ function start(getState, port, options) {
             return;
         }
 
-        // POST /api/pipeline/:sessionId/apply — trigger batch auto-apply
+        // POST /api/pipeline/:sessionId/apply — [LOCKED] auto-apply deferred to next version
         const batchApplyMatch = url.match(/^\/api\/pipeline\/(.+)\/apply$/);
         if (batchApplyMatch && req.method === 'POST') {
-            const sessionId = decodeURIComponent(batchApplyMatch[1]);
-            _readBody(req, async (data) => {
-                try {
-                    const applyStep = require('./workflow/steps/apply');
-                    const state = _stateGetter ? _stateGetter() : {};
-                    const sections = state.profileSections?.[sessionId] || {};
-                    const config = state.workflowConfigs?.[sessionId] || {};
-
-                    // Override jobIds if provided in request body
-                    const applyConfig = { ...config };
-                    if (data.jobUrls?.length > 0) {
-                        const steps = (applyConfig.steps || []).map(s =>
-                            s.name === 'apply' ? { ...s, jobIds: data.jobUrls } : s
-                        );
-                        applyConfig.steps = steps;
-                    }
-
-                    const result = await applyStep.execute({
-                        sessionId,
-                        config: applyConfig,
-                        context: { profile: sections, direction: state.directions?.[sessionId] }
-                    });
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify(result));
-                } catch (e) {
-                    res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: e.message }));
-                }
-            });
-            return;
+            res.writeHead(501, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: 'Auto-Apply is coming in the next version.' }));
         }
 
-        // POST /api/pipeline/:sessionId/apply-single/:encodedJobUrl — trigger single job apply
+        // POST /api/pipeline/:sessionId/apply-single/:encodedJobUrl — [LOCKED] deferred to next version
         const singleApplyMatch = url.match(/^\/api\/pipeline\/([^/]+)\/apply-single\/(.+)$/);
         if (singleApplyMatch && req.method === 'POST') {
-            const sessionId = decodeURIComponent(singleApplyMatch[1]);
-            const jobUrl = decodeURIComponent(singleApplyMatch[2]);
-            _readBody(req, async () => {
-                try {
-                    const applyStep = require('./workflow/steps/apply');
-                    const state = _stateGetter ? _stateGetter() : {};
-                    const sections = state.profileSections?.[sessionId] || {};
-                    const config = state.workflowConfigs?.[sessionId] || {};
-
-                    // Force single job
-                    const applyConfig = { ...config };
-                    applyConfig.steps = (applyConfig.steps || []).map(s =>
-                        s.name === 'apply' ? { ...s, jobIds: [jobUrl], maxApplyPerRun: 1 } : s
-                    );
-
-                    const result = await applyStep.execute({
-                        sessionId,
-                        config: applyConfig,
-                        context: { profile: sections, direction: state.directions?.[sessionId] }
-                    });
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify(result));
-                } catch (e) {
-                    res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: e.message }));
-                }
-            });
-            return;
+            res.writeHead(501, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: 'Auto-Apply is coming in the next version.' }));
         }
 
         // GET /api/pipeline/:sessionId/apply-screenshot/:encodedJobUrl — get apply screenshot
@@ -3346,6 +3292,8 @@ var _i18n = {
         markApplied: 'Mark Applied', archiveJobs: 'Archive',
         bulkDelete: 'Delete', confirmBulkDelete: 'Delete {n} selected job(s)?',
         confirmBulkApply: 'Auto-apply to {n} selected job(s)?',
+        applyComingSoon: '🚧 Auto-Apply is coming in the next version. Stay tuned!',
+        applyStepLocked: 'Coming in next version',
         confirmMarkApplied: 'Mark {n} job(s) as applied?',
         confirmArchive: 'Archive {n} selected job(s)?',
         noJobsSelected: 'No jobs selected',
@@ -3401,6 +3349,8 @@ var _i18n = {
         markApplied: '标记已投递', archiveJobs: '归档',
         bulkDelete: '删除', confirmBulkDelete: '确定删除 {n} 个选中职位？',
         confirmBulkApply: '确定自动投递 {n} 个选中职位？',
+        applyComingSoon: '🚧 自动投递功能将在下个版本上线，敬请期待！',
+        applyStepLocked: '下个版本上线',
         confirmMarkApplied: '确定将 {n} 个职位标记为已投递？',
         confirmArchive: '确定归档 {n} 个选中职位？',
         noJobsSelected: '未选择职位',
@@ -3627,16 +3577,8 @@ async function bulkGenerateDocs() {
 }
 
 async function bulkAutoApply() {
-    var urls = getSelectedJobs();
-    if (urls.length === 0) { alert(t('noJobsSelected')); return; }
-    if (!confirm(t('confirmBulkApply').replace('{n}', urls.length))) return;
-    try {
-        await fetch(PIPE_URL + '/apply', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jobUrls: urls })
-        });
-    } catch (e) { alert(e.message); }
+    showToast(t('applyComingSoon'), 'info');
+    return;
 }
 
 async function bulkMarkApplied() {
@@ -4177,6 +4119,9 @@ function renderWfeCard(step, cfg, t) {
     if (step.name === 'search') {
         // Search is always required — show lock badge, no click
         toggleBtn = '<span class="wfe-card-toggle locked" title="' + t.wfeRequired + '">&#128274;</span>';
+    } else if (step.name === 'apply') {
+        // Apply locked for this version — show lock badge
+        toggleBtn = '<span class="wfe-card-toggle locked" title="' + t.applyStepLocked + '">&#128274;</span>';
     } else {
         var toggleIcon = disabled ? '+' : '✕';
         var toggleCls = 'wfe-card-toggle' + (disabled ? ' off' : '');
@@ -4208,12 +4153,9 @@ function renderWfeCard(step, cfg, t) {
     }
 
     if (step.name === 'apply') {
-        if (disabled && !genEnabled) {
-            h += '<div class="wfe-dep-hint">' + t.wfeRequiresGenerate + '</div>';
-        } else {
-            h += wfeToggle('wfe_confirmBeforeApply', t.wfeConfirmBeforeApply, step.confirmBeforeApply !== false);
-            h += wfePlatformList(step, 'apply', t);
-        }
+        h += '<div style="text-align:center;padding:1rem 0;color:#9da0c3;">' +
+            '<span style="font-size:1.5rem;">🚧</span><br>' +
+            '<span style="font-size:0.85rem;">' + t.applyStepLocked + '</span></div>';
     }
 
     h += '</div></div>';

@@ -22,7 +22,7 @@ const STEP_DEFAULTS = {
     customizeProfile: { enabled: true, order: 0 },
     search:           { enabled: true, order: 1, platforms: [] },
     generate:         { enabled: true, order: 2, tailorResume: true, coverLetter: true, interviewPrep: true, jobIds: [] },
-    apply:            { enabled: true, order: 3, autoSubmit: true, delayBetweenJobs: [10, 30], maxApplyPerRun: 10, skipOnCaptchaFail: true, platforms: [], jobIds: [] }
+    apply:            { enabled: false, order: 3, autoSubmit: true, delayBetweenJobs: [10, 30], maxApplyPerRun: 10, skipOnCaptchaFail: true, platforms: [], jobIds: [] } // [LOCKED] deferred to next version
 };
 
 const VALID_STEPS = Object.keys(STEP_DEFAULTS);
