@@ -292,16 +292,12 @@ function _buildAiMatcher() {
  *    (screenshots saved to workspace file, path included in prompt for CLI to read)
  *  - API providers (openai, anthropic, google) → use aiClient.callAPI
  *
- * Returns null if no AI backend is available (lazy detection at build time).
+ * Always returns a function (consistent with _buildAiMatcher/_buildAiExpander).
+ * Provider is resolved lazily at each invocation — throws if unavailable at call time.
  */
 function _buildAiInvoke() {
-    // Pre-check: if no provider can be resolved, return null immediately
-    // so callers can detect "no AI" at config time.
-    const preCheck = _resolveAiProvider(_stateGetter ? _stateGetter() : {});
-    if (!preCheck) return null;
-
     return async function aiInvoke(prompt, screenshot) {
-        // Lazy resolve: re-check provider at each invocation for freshness
+        // Lazy resolve: check provider at each invocation for freshness
         const state = _stateGetter ? _stateGetter() : {};
         const resolved = _resolveAiProvider(state);
         if (!resolved) throw new Error('No AI provider available');
@@ -2192,10 +2188,13 @@ function updatePlatformCell(sessionId, platformId, update) {
 
 // ─── Job workflow state ───
 // Jobs tracked per session: sessionId → Map<jobUrl, JobWorkflowCard>
+// Synced to state.jobCards for persistence across restarts.
 const _jobCards = new Map();
+const _jobCardsLoaded = new Set(); // tracks which sessions have been hydrated from state
 
 /**
  * Get or create job cards map for a session.
+ * On first access, hydrates from state.jobCards (persisted by sessionStore).
  * @param {string} sessionId
  * @returns {Map}
  */
@@ -2203,7 +2202,41 @@ function _getJobCards(sessionId) {
     if (!_jobCards.has(sessionId)) {
         _jobCards.set(sessionId, new Map());
     }
+    // Hydrate from persisted state on first access
+    if (!_jobCardsLoaded.has(sessionId) && _stateGetter) {
+        _jobCardsLoaded.add(sessionId);
+        const state = _stateGetter();
+        const persisted = state.jobCards?.[sessionId];
+        if (persisted && typeof persisted === 'object') {
+            const cards = _jobCards.get(sessionId);
+            for (const [url, card] of Object.entries(persisted)) {
+                if (!cards.has(url)) cards.set(url, card);
+            }
+            if (Object.keys(persisted).length > 0) {
+                console.log(`[dashboardServer] Hydrated ${Object.keys(persisted).length} job cards for ${sessionId} from state`);
+            }
+        }
+    }
     return _jobCards.get(sessionId);
+}
+
+/**
+ * Sync in-memory job cards back to state for persistence.
+ * @param {string} sessionId
+ */
+function _syncJobCardsToState(sessionId) {
+    if (!_stateGetter) return;
+    const state = _stateGetter();
+    if (!state.jobCards) state.jobCards = {};
+    const cards = _jobCards.get(sessionId);
+    if (!cards) return;
+    const obj = {};
+    for (const [url, card] of cards.entries()) {
+        // Exclude fullText from persistence to save space (can be re-fetched)
+        const { fullText, ...rest } = card;
+        obj[url] = rest;
+    }
+    state.jobCards[sessionId] = obj;
 }
 
 /**
@@ -2230,6 +2263,7 @@ function upsertJobCard(sessionId, job) {
         updatedAt: new Date().toISOString(),
         createdAt: existing.createdAt || new Date().toISOString()
     });
+    _syncJobCardsToState(sessionId);
 }
 
 /**
@@ -2244,6 +2278,7 @@ function updateJobStatus(sessionId, jobUrl, status) {
     if (card) {
         card.status = status;
         card.updatedAt = new Date().toISOString();
+        _syncJobCardsToState(sessionId);
     }
 }
 

@@ -622,9 +622,9 @@ async function _runPipeline(sessionId) {
                         }));
                         _log(`[${q.source}] Platform tool returned ${listings.length} results`);
 
-                        // ── Low result anomaly: may indicate broken selectors ──
+                        // ── Low/zero result anomaly: may indicate broken selectors or geo issues ──
                         const LOW_RESULT_THRESHOLD = 3;
-                        if (listings.length > 0 && listings.length < LOW_RESULT_THRESHOLD && config.aiInvoke) {
+                        if (listings.length < LOW_RESULT_THRESHOLD && config.aiInvoke) {
                             _log(`⚠ [${q.source}] Suspiciously low results (${listings.length}) — triggering self-heal...`);
                             dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
                                 cell: 'search', status: 'warning',
@@ -632,7 +632,8 @@ async function _runPipeline(sessionId) {
                             });
                             const healedListings = await _selfHealAndRetry(
                                 sessionId, platformTool, q, config,
-                                `Only ${listings.length} result(s) returned (expected 10+). Selectors may be broken or page layout changed.`,
+                                `Only ${listings.length} result(s) returned for "${q.query}" @ ${q.location || 'any'} (expected 10+). ` +
+                                `Possible causes: broken selectors, page layout changed, geolocation mismatch, or anti-bot block.`,
                                 scriptResult.screenshot || null, _log
                             );
                             if (healedListings && healedListings.length > listings.length) {
