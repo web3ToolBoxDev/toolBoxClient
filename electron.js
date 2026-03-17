@@ -145,6 +145,37 @@ app.whenReady().then(() => {
   ipcMain.handle('dialog:chooseDirectory', chooseDirectory)
   ipcMain.handle('dialog:openLink', (event, url) => openLink(url))
   ipcMain.handle('dialog:revealInFolder', (event, payload) => revealInFolder(payload))
+
+  // Allow renderer to request webContents focus (fixes modal input focus on Windows).
+  // Electron on Windows sometimes loses keyboard event routing to the renderer.
+  // blur()+focus() on the BrowserWindow simulates the user switching away and back,
+  // which triggers the 'focus' event handler that calls webContents.focus().
+  ipcMain.handle('window:focusWebContents', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.blur();
+      mainWindow.focus();
+    }
+  })
+
+  // Use Electron's dialog API instead of native alert()/confirm() to avoid
+  // keyboard focus loss bug (https://github.com/electron/electron/issues/20821).
+  // Must use synchronous IPC (sendSync/returnValue) because alert() blocks JS.
+  ipcMain.on('dialog:alertSync', (event, message) => {
+    dialog.showMessageBoxSync(mainWindow, {
+      type: 'info',
+      message: String(message),
+      buttons: ['OK']
+    });
+    event.returnValue = true;
+  })
+  ipcMain.on('dialog:confirmSync', (event, message) => {
+    const result = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question',
+      message: String(message),
+      buttons: ['OK', 'Cancel']
+    });
+    event.returnValue = result === 0; // 0 = OK, 1 = Cancel
+  })
   if (mainWindow === null) {
     createWindow();
     // createBackendProcess();

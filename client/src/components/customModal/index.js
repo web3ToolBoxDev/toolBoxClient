@@ -7,12 +7,6 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData,
     const [valueObj,setValueObj] = useState({});
     const { t } = useTranslation();
 
-    // Focus the first input after modal transition completes (fixes Electron focus issue)
-    const handleEntered = (node) => {
-        const firstInput = node?.querySelector('input, select, textarea');
-        if (firstInput) firstInput.focus();
-    };
-
     // 初始化 valueObj，保证 defaultValue 生效
     useEffect(() => {
         if (rowList && Array.isArray(rowList)) {
@@ -86,7 +80,7 @@ const CustomModal = forwardRef(({ show, handleClose, title, rowList, handleData,
     }));
 
     return (
-        <Modal show={show} onHide={handleClose} onEntered={handleEntered} autoFocus={false} enforceFocus={false} className={`custom-modal${className ? ' ' + className : ''}`}>
+        <Modal show={show} onHide={handleClose} className={`custom-modal${className ? ' ' + className : ''}`}>
             <Modal.Header closeButton>
                 <Modal.Title>{title}</Modal.Title>
             </Modal.Header>
