@@ -470,6 +470,26 @@ function start(getState, port, options) {
             return;
         }
 
+        // POST /api/jobs/:sessionId/delete — delete a job card
+        const jobDeleteMatch = url.match(/^\/api\/jobs\/(.+)\/delete$/);
+        if (jobDeleteMatch && req.method === 'POST') {
+            const sessionId = decodeURIComponent(jobDeleteMatch[1]);
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                try {
+                    const { jobUrl } = JSON.parse(body);
+                    const deleted = deleteJobCard(sessionId, jobUrl);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, deleted }));
+                } catch (e) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
         // POST /api/jobs/:sessionId — upsert a job card
         const jobsMatch = url.match(/^\/api\/jobs\/(.+)$/);
         if (jobsMatch && req.method === 'POST') {
@@ -2287,6 +2307,19 @@ function updateJobStatus(sessionId, jobUrl, status) {
 }
 
 /**
+ * Delete a job card by URL.
+ * @param {string} sessionId
+ * @param {string} jobUrl
+ * @returns {boolean} true if deleted
+ */
+function deleteJobCard(sessionId, jobUrl) {
+    const cards = _getJobCards(sessionId);
+    const deleted = cards.delete(jobUrl);
+    if (deleted) _syncJobCardsToState(sessionId);
+    return deleted;
+}
+
+/**
  * Get all job cards for a session.
  * @param {string} sessionId
  * @returns {Array<object>}
@@ -2974,7 +3007,8 @@ var _i18n = {
         wfeTargetCountHint: 'Stop searching each platform after finding this many qualified jobs',
         wfeMaxResultsHint: 'Max jobs to fetch per platform before moving to next',
         aiProviderOk: 'AI Provider',
-        aiProviderMissing: 'No AI provider detected. Go to AI Panel \u2192 Runtime Settings \u2192 Select a provider and click "Apply Model" to enable AI matching and self-heal.'
+        aiProviderMissing: 'No AI provider detected. Go to AI Panel \u2192 Runtime Settings \u2192 Select a provider and click "Apply Model" to enable AI matching and self-heal.',
+        confirmDeleteJob: 'Remove this job from the list?'
     },
     'zh-CN': {
         envBound: '已绑定浏览器环境', envNotBound: '未绑定浏览器环境。请前往 AI 面板 → 运行时设置 → 绑定环境，以启用登录和搜索功能。',
@@ -3014,7 +3048,8 @@ var _i18n = {
         wfeTargetCountHint: '每个平台找到此数量的合格职位后停止该平台搜索',
         wfeMaxResultsHint: '每个平台最多抓取的职位数量',
         aiProviderOk: 'AI 供应商',
-        aiProviderMissing: '未检测到 AI 供应商。请前往 AI 面板 → 运行时设置 → 选择供应商并点击「应用模型」，以启用 AI 匹配和自愈修复。'
+        aiProviderMissing: '未检测到 AI 供应商。请前往 AI 面板 → 运行时设置 → 选择供应商并点击「应用模型」，以启用 AI 匹配和自愈修复。',
+        confirmDeleteJob: '确定从列表中移除此职位？'
     }
 };
 var _lang = (navigator.language || 'en').startsWith('zh') ? 'zh-CN' : 'en';
@@ -3134,6 +3169,18 @@ function openJob(url) {
     window.open(url, '_blank');
 }
 
+async function deleteJob(jobUrl) {
+    if (!confirm(t('confirmDeleteJob'))) return;
+    try {
+        await fetch(BASE + '/api/jobs/' + encodeURIComponent(SID) + '/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobUrl: jobUrl })
+        });
+        refreshJobRecords();
+    } catch (e) { alert(e.message); }
+}
+
 // ─── Modal ───
 function showModal(title, content, jobUrl, docType) {
     document.getElementById('modalTitle').textContent = title;
@@ -3180,6 +3227,7 @@ function renderJobRow(job) {
             '<button class="btn btn-sm" style="background:#8b5cf6;color:#fff" onclick="genInterviewPrep(\\'' + safeUrl + '\\')">Prep</button>' +
             '<button class="btn btn-success btn-sm" onclick="markApplied(\\'' + safeUrl + '\\')">Applied</button>' +
             '<button class="btn btn-sm" style="background:#6366f1;color:#fff" onclick="openJob(\\'' + safeUrl + '\\')">Link</button>' +
+            '<button class="btn btn-sm" style="background:#ef4444;color:#fff" onclick="deleteJob(\\'' + safeUrl + '\\')" title="Remove this job">✕</button>' +
         '</td>' +
     '</tr>';
 }
@@ -4348,7 +4396,7 @@ function getDashboardURL(sessionId) {
 module.exports = {
     start, stop, getDashboardURL, DASHBOARD_PORT,
     // Job workflow
-    upsertJobCard, updateJobStatus, getJobCards, getJobStats,
+    upsertJobCard, updateJobStatus, deleteJobCard, getJobCards, getJobStats,
     // Platform workflow status
     updatePlatformCell, getWorkflowStatus, computeCellVisual,
     clearPlatformStatuses, removePlatformStatus,
