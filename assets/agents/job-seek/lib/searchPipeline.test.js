@@ -363,6 +363,56 @@ describe('searchPipeline', () => {
         });
     });
 
+    // ─── generateAllDocs ───
+    describe('generateAllDocs', () => {
+        it('generates displayJson with sections for resume and cover letter', async () => {
+            const resumeMd = '## Summary\n\nGreat engineer.\n\n## Key Skills\n\nReact, Node.js, TypeScript';
+            const coverMd = '## Opening\n\nDear Hiring Manager.\n\n## Body\n\nI am interested.';
+            dashboardServer.getJobCards
+                .mockReturnValueOnce([{ url: 'https://dl.com/1', title: 'Dev', company: 'Acme', artifacts: {} }])
+                .mockReturnValue([{ url: 'https://dl.com/1', title: 'Dev', company: 'Acme', artifacts: { resume: resumeMd, coverLetter: coverMd } }]);
+            resumeGenHandler.mockReturnValue({ markdown: resumeMd });
+            coverLetterHandler.mockReturnValue({ markdown: coverMd });
+
+            await pipeline.generateAllDocs('docjson-1', 'https://dl.com/1', PROFILE, {
+                tailorResume: true, coverLetter: true, interviewPrep: false
+            });
+
+            // displayJson upsert should be called with section arrays
+            const displayJsonCall = dashboardServer.upsertJobCard.mock.calls.find(c =>
+                c[0] === 'docjson-1' && c[1]?.artifacts?.displayJson
+            );
+            expect(displayJsonCall).toBeTruthy();
+            const dj = displayJsonCall[1].artifacts.displayJson;
+            expect(Array.isArray(dj.resume)).toBe(true);
+            expect(dj.resume.length).toBeGreaterThan(0);
+            expect(dj.resume[0]).toHaveProperty('title');
+            expect(dj.resume[0]).toHaveProperty('content');
+            expect(dj.resume[0]).toHaveProperty('type');
+        });
+
+        it('marks skills section type correctly', async () => {
+            const resumeMd = '## Key Skills\n\nReact, Node.js, TypeScript\n\n## Experience\n\nWorked at Acme.';
+            dashboardServer.getJobCards
+                .mockReturnValueOnce([{ url: 'https://dl.com/2', title: 'Dev', company: 'Acme', artifacts: {} }])
+                .mockReturnValue([{ url: 'https://dl.com/2', title: 'Dev', company: 'Acme', artifacts: { resume: resumeMd } }]);
+            resumeGenHandler.mockReturnValue({ markdown: resumeMd });
+
+            await pipeline.generateAllDocs('docjson-2', 'https://dl.com/2', PROFILE, {
+                tailorResume: true, coverLetter: false, interviewPrep: false
+            });
+
+            const displayJsonCall = dashboardServer.upsertJobCard.mock.calls.find(c =>
+                c[0] === 'docjson-2' && c[1]?.artifacts?.displayJson
+            );
+            const sections = displayJsonCall?.[1].artifacts.displayJson.resume || [];
+            const skillsSection = sections.find(s => s.title.toLowerCase().includes('skills'));
+            expect(skillsSection?.type).toBe('skills');
+            const expSection = sections.find(s => s.title.toLowerCase().includes('experience'));
+            expect(expSection?.type).toBe('experience');
+        });
+    });
+
     // ─── markApplied ───
     describe('markApplied', () => {
         it('marks job as submitted with note', () => {

@@ -2638,6 +2638,11 @@ function buildDashboardHTML(sessionId) {
   .item .val { font-size: 1.05rem; font-weight: 500; white-space: pre-wrap; }
   .item .val.empty { color: #555; font-style: italic; }
   .item.full-width { grid-column: 1 / -1; }
+  .grid-profile { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+  .grid-profile .item { background: rgba(255,255,255,0.04); border-radius: 8px; padding: 0.75rem 1rem; min-height: 80px; }
+  .grid-profile .item.full-width { grid-column: 1 / -1; }
+  .grid-profile .item label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; display: block; margin-bottom: 0.4rem; }
+  .grid-profile .item .val { font-size: 0.875rem; color: #e2e8f0; line-height: 1.5; white-space: pre-wrap; word-break: break-word; font-weight: 400; }
   table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
   th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #2d2f4a; }
   th { color: #9da0c3; font-weight: 600; }
@@ -2860,13 +2865,37 @@ function buildDashboardHTML(sessionId) {
   /* Modals */
   .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; }
   .modal-overlay.visible { display: flex; align-items: center; justify-content: center; }
-  .modal { background: #242640; border: 1px solid #2d2f4a; border-radius: 12px; padding: 2rem; max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto; }
+  .modal { background: #242640; border: 1px solid #2d2f4a; border-radius: 12px; max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto; }
   .modal h3 { color: #8b9aff; margin-top: 0; }
-  .modal .content { background: #1a1b2e; border-radius: 8px; padding: 1rem; white-space: pre-wrap; font-size: 0.9rem; line-height: 1.6; }
   .modal .close-btn { float: right; background: none; border: none; color: #9da0c3; font-size: 1.5rem; cursor: pointer; }
   .modal-form { display: flex; flex-direction: column; gap: 0.75rem; }
   .modal-form label { color: #9da0c3; font-size: 0.85rem; }
   .modal-form input, .modal-form select { background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 6px; color: #dfe3ff; padding: 0.5rem 0.75rem; font-size: 0.95rem; }
+  /* Document modal */
+  .doc-modal { max-width: 860px; width: 92vw; max-height: 85vh; display: flex; flex-direction: column; overflow-y: unset; padding: 0; }
+  .doc-modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.25rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.08); flex-shrink: 0; }
+  .doc-modal-header h3 { margin: 0; color: #8b9aff; font-size: 1rem; }
+  .doc-modal-header .close-btn { float: none; font-size: 1.5rem; }
+  .doc-tabs { display: flex; border-bottom: 1px solid rgba(255,255,255,0.08); flex-shrink: 0; }
+  .doc-tab { padding: 0.6rem 1.2rem; font-size: 0.85rem; cursor: pointer; color: #9ca3af; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .doc-tab.active { color: #8b9aff; border-bottom-color: #6366f1; }
+  .doc-tab:hover:not(.active) { color: #e2e8f0; }
+  .doc-modal-body { flex: 1; overflow-y: auto; padding: 1.25rem; }
+  .doc-modal-footer { display: flex; gap: 0.75rem; justify-content: flex-end; padding: 0.75rem 1.25rem; border-top: 1px solid rgba(255,255,255,0.08); flex-shrink: 0; }
+  .doc-modal-footer .btn { font-size: 0.82rem; padding: 0.4rem 1rem; }
+  /* Section types */
+  .doc-section { margin-bottom: 1.5rem; }
+  .doc-section h4 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6366f1; margin: 0 0 0.5rem; }
+  .doc-section-content { font-size: 0.875rem; color: #d1d5db; line-height: 1.65; white-space: pre-wrap; word-break: break-word; border-left: 2px solid rgba(99,102,241,0.25); padding-left: 0.75rem; }
+  .skill-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .skill-tag { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.78rem; background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.35); color: #a5b4fc; }
+  .experience-block { font-size: 0.875rem; color: #d1d5db; line-height: 1.7; white-space: pre-wrap; background: rgba(255,255,255,0.03); border-radius: 6px; padding: 0.75rem 1rem; border-left: 3px solid #6366f1; }
+  .summary-text { font-size: 0.9rem; color: #e2e8f0; line-height: 1.7; font-style: italic; white-space: pre-wrap; }
+  .doc-section--qa { background: rgba(16,185,129,0.05); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; }
+  .qa-question { font-size: 0.875rem; color: #10b981; font-weight: 600; margin-bottom: 0.5rem; }
+  .qa-q-label { display: inline-block; width: 20px; height: 20px; border-radius: 50%; background: #10b981; color: #0f172a; font-size: 0.7rem; font-weight: 700; text-align: center; line-height: 20px; margin-right: 8px; }
+  .qa-answer { font-size: 0.875rem; color: #d1d5db; line-height: 1.65; white-space: pre-wrap; padding-left: 28px; }
+  .letter-para { font-size: 0.9rem; color: #e2e8f0; line-height: 1.8; white-space: pre-wrap; }
 
   /* Filter bar (legacy — now part of .job-control-panel) */
 
@@ -2959,33 +2988,11 @@ function buildDashboardHTML(sessionId) {
   <div class="grid-2" id="direction"></div>
 </div>
 
-<h2 data-i18n="profile">Profile</h2>
-<div class="card">
-  <div class="grid-2" id="profile"></div>
-</div>
-
 <h2 data-i18n="workflowGrid">Platform Management</h2>
 <div class="card">
   <div class="wf-status-grid" id="wfGrid">
     <div style="color:#9da0c3;text-align:center;grid-column:1/-1;" data-i18n="noPlatforms">No platforms configured yet.</div>
   </div>
-</div>
-
-<h2 data-i18n="statsOverview">Stats Overview</h2>
-<div class="card" id="statsPanel">
-  <div class="grid-2" id="statsGrid">
-    <div class="item"><label data-i18n="jobsFound">Jobs Found</label><div class="val" id="statJobsTotal">0</div></div>
-    <div class="item"><label data-i18n="jobsMatched">Jobs Matched</label><div class="val" id="statJobsMatched">0</div></div>
-    <div class="item"><label data-i18n="jobsApplied">Jobs Applied</label><div class="val" id="statJobsApplied">0</div></div>
-    <div class="item"><label data-i18n="platformsReady">Platforms Ready</label><div class="val" id="statPlatformsReady">0</div></div>
-    <div class="item"><label data-i18n="workflowStatus">Workflow Status</label><div class="val" id="statWfStatus">idle</div></div>
-    <div class="item"><label data-i18n="runHistory">Run History</label><div class="val" id="statHistoryCount">0</div></div>
-  </div>
-</div>
-
-<h2 data-i18n="applicationPipeline">Application Pipeline</h2>
-<div class="card">
-  <div class="pipeline" id="pipeline"></div>
 </div>
 
 <div class="tab-bar">
@@ -3065,18 +3072,47 @@ function buildDashboardHTML(sessionId) {
   </div>
 </div>
 
-<!-- Artifact modal -->
+<h2 data-i18n="statsOverview" style="margin-top:2rem;">Stats Overview</h2>
+<div class="card" id="statsPanel">
+  <div class="grid-2" id="statsGrid">
+    <div class="item"><label data-i18n="jobsFound">Jobs Found</label><div class="val" id="statJobsTotal">0</div></div>
+    <div class="item"><label data-i18n="jobsMatched">Jobs Matched</label><div class="val" id="statJobsMatched">0</div></div>
+    <div class="item"><label data-i18n="jobsApplied">Jobs Applied</label><div class="val" id="statJobsApplied">0</div></div>
+    <div class="item"><label data-i18n="platformsReady">Platforms Ready</label><div class="val" id="statPlatformsReady">0</div></div>
+    <div class="item"><label data-i18n="workflowStatus">Workflow Status</label><div class="val" id="statWfStatus">idle</div></div>
+    <div class="item"><label data-i18n="runHistory">Run History</label><div class="val" id="statHistoryCount">0</div></div>
+  </div>
+</div>
+
+<h2 data-i18n="applicationPipeline">Application Pipeline</h2>
+<div class="card">
+  <div class="pipeline" id="pipeline"></div>
+</div>
+
+<details id="profileDetails" style="margin-top:2rem;margin-bottom:1.5rem;">
+  <summary style="cursor:pointer;color:#6a7eff;font-size:1.1rem;font-weight:600;padding:0.5rem 0;list-style:none;display:flex;align-items:center;gap:0.5rem;">
+    <span style="font-size:0.9rem;color:#9da0c3;">&#9654;</span>
+    <span data-i18n="profile">Profile</span>
+    <span style="font-size:0.8rem;color:#6b7280;font-weight:400;">(click to expand)</span>
+  </summary>
+  <div class="card" style="margin-top:0.75rem;">
+    <div class="grid-profile" id="profile"></div>
+  </div>
+</details>
+
+<!-- Document preview modal -->
 <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
-  <div class="modal">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <h3 id="modalTitle" style="margin:0"></h3>
-      <div>
-        <button class="btn btn-sm" id="modalCopy" style="display:none;background:#6a7eff;color:#fff;margin-right:8px" onclick="copyModalContent()">&#128203; Copy</button>
-        <button class="btn btn-sm" id="modalDownload" style="display:none;background:#10b981;color:#fff;margin-right:8px">Download</button>
-        <button class="close-btn" onclick="closeModal()" style="float:none">&times;</button>
-      </div>
+  <div class="modal doc-modal" onclick="event.stopPropagation()">
+    <div class="doc-modal-header">
+      <h3 id="modalTitle">Documents</h3>
+      <button class="close-btn" onclick="closeModal()">&times;</button>
     </div>
-    <div class="content" id="modalContent"></div>
+    <div class="doc-tabs" id="docTabs"></div>
+    <div class="doc-modal-body" id="docModalBody"></div>
+    <div class="doc-modal-footer">
+      <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="copyModalContent()">&#128203; Copy Text</button>
+      <button class="btn btn-sm btn-success" id="modalDownloadBtn" onclick="downloadCurrentDoc()">&#8595; Download DOCX</button>
+    </div>
   </div>
 </div>
 
@@ -3261,7 +3297,7 @@ var _i18n = {
     en: {
         envBound: 'Environment bound', envNotBound: 'No browser environment bound. Please go to AI Panel → Runtime Settings → Bind an environment to enable login and search.',
         direction: 'Direction', profile: 'Profile', workflowProgress: 'Workflow Progress',
-        workflowGrid: 'Platform Management',
+        workflowGrid: 'Source Website Management',
         statsOverview: 'Stats Overview', applicationPipeline: 'Application Pipeline', jobRecords: 'Job Records',
         startWorkflow: 'Start Workflow', stop: 'Stop', settings: 'Settings',
         addWebsite: '+ Add Website', login: 'Login', confirm: 'Confirm',
@@ -3313,7 +3349,7 @@ var _i18n = {
     'zh-CN': {
         envBound: '已绑定浏览器环境', envNotBound: '未绑定浏览器环境。请前往 AI 面板 → 运行时设置 → 绑定环境，以启用登录和搜索功能。',
         direction: '求职方向', profile: '个人资料', workflowProgress: '工作流进度',
-        workflowGrid: '平台管理',
+        workflowGrid: '求职源站管理',
         statsOverview: '统计概览', applicationPipeline: '申请流水线', jobRecords: '职位记录',
         startWorkflow: '启动工作流', stop: '停止', settings: '设置',
         addWebsite: '+ 添加网站', login: '登录', confirm: '确认',
@@ -3639,42 +3675,93 @@ async function bulkDelete() {
     } catch (e) { alert(e.message); }
 }
 
-// ─── Modal ───
-var _modalRawContent = '';
-function showModal(title, content, jobUrl, docType) {
-    _modalRawContent = content || '';
-    document.getElementById('modalTitle').textContent = title;
-    document.getElementById('modalContent').textContent = content;
-    var dlBtn = document.getElementById('modalDownload');
-    var cpBtn = document.getElementById('modalCopy');
-    if (dlBtn) {
-        if (jobUrl && docType) {
-            dlBtn.style.display = 'inline-block';
-            dlBtn.onclick = function() { downloadDoc(jobUrl, docType); };
-        } else {
-            dlBtn.style.display = 'none';
-        }
+// ─── Document Modal ───
+var _docModal = { jobUrl: null, activeTab: null, docs: {} };
+var _docTabLabels = { resume: 'Resume', coverLetter: 'Cover Letter', interviewPrep: 'Interview Prep' };
+
+var _sectionRenderers = {
+    skills: function(s) {
+        var items = s.content.split(/[,\n•\-\*]+/).map(function(x){return x.trim();}).filter(Boolean);
+        return '<div class="doc-section"><h4>'+esc(s.title)+'</h4><div class="skill-tags">'+
+            items.map(function(sk){return '<span class="skill-tag">'+esc(sk)+'</span>';}).join('')+'</div></div>';
+    },
+    experience: function(s) {
+        return '<div class="doc-section"><h4>'+esc(s.title)+'</h4><div class="experience-block">'+esc(s.content)+'</div></div>';
+    },
+    summary: function(s) {
+        return '<div class="doc-section"><h4>'+esc(s.title)+'</h4><div class="summary-text">'+esc(s.content)+'</div></div>';
+    },
+    qa: function(s) {
+        return '<div class="doc-section--qa"><div class="qa-question"><span class="qa-q-label">Q</span>'+esc(s.title)+'</div>'+
+            '<div class="qa-answer">'+esc(s.content)+'</div></div>';
+    },
+    letter: function(s) {
+        return '<div class="doc-section"><h4>'+esc(s.title)+'</h4><div class="letter-para">'+esc(s.content)+'</div></div>';
+    },
+    text: function(s) {
+        return '<div class="doc-section"><h4>'+esc(s.title)+'</h4><div class="doc-section-content">'+esc(s.content)+'</div></div>';
     }
-    if (cpBtn) cpBtn.style.display = content ? 'inline-block' : 'none';
+};
+
+function showDocModal(jobUrl, defaultTab) {
+    var job = (_cachedJobs || []).find(function(j){return j.url===jobUrl;});
+    if (!job || !job.artifacts) return;
+    var dj = job.artifacts.displayJson || {};
+    _docModal.jobUrl = jobUrl;
+    _docModal.docs = dj;
+    var tabs = ['resume','coverLetter','interviewPrep'].filter(function(k){return dj[k]&&dj[k].length;});
+    if (!tabs.length) { return; }
+    _docModal.activeTab = (defaultTab && tabs.includes(defaultTab)) ? defaultTab : tabs[0];
+    document.getElementById('modalTitle').textContent = (job.title||'') + (job.company ? ' — ' + job.company : '');
+    _renderDocTabs(tabs);
+    _renderDocContent(_docModal.activeTab);
     document.getElementById('modalOverlay').classList.add('visible');
 }
+function _renderDocTabs(tabs) {
+    document.getElementById('docTabs').innerHTML = tabs.map(function(k){
+        return '<div class="doc-tab'+(k===_docModal.activeTab?' active':'')+'" onclick="switchDocTab(\''+k+'\')">'+_docTabLabels[k]+'</div>';
+    }).join('');
+}
+function switchDocTab(key) {
+    _docModal.activeTab = key;
+    var tabs = ['resume','coverLetter','interviewPrep'].filter(function(k){return _docModal.docs[k]&&_docModal.docs[k].length;});
+    _renderDocTabs(tabs);
+    _renderDocContent(key);
+}
+function _renderDocContent(key) {
+    var sections = _docModal.docs[key] || [];
+    var el = document.getElementById('docModalBody');
+    if (!sections.length) { el.innerHTML = '<p style="color:#6b7280;padding:1rem;">No content available</p>'; return; }
+    el.innerHTML = sections.map(function(s){
+        var r = _sectionRenderers[s.type] || _sectionRenderers.text;
+        return r(s);
+    }).join('');
+    el.scrollTop = 0;
+}
+function downloadCurrentDoc() {
+    if (!_docModal.jobUrl || !_docModal.activeTab) return;
+    window.open(PIPE_URL+'/download/'+encodeURIComponent(_docModal.jobUrl)+'/'+_docModal.activeTab, '_blank');
+}
 function copyModalContent() {
-    if (!_modalRawContent) return;
-    navigator.clipboard.writeText(_modalRawContent).then(function() {
-        var btn = document.getElementById('modalCopy');
-        var orig = btn.innerHTML;
-        btn.innerHTML = '&#10003; Copied!';
-        btn.style.background = '#10b981';
-        setTimeout(function() { btn.innerHTML = orig; btn.style.background = '#6a7eff'; }, 1500);
-    }).catch(function() {
-        // Fallback for non-secure contexts
+    var sections = _docModal.docs[_docModal.activeTab] || [];
+    var text = sections.map(function(s){return '# '+s.title+'\n\n'+s.content;}).join('\n\n---\n\n');
+    if (!text) return;
+    navigator.clipboard.writeText(text).catch(function(){
         var ta = document.createElement('textarea');
-        ta.value = _modalRawContent;
+        ta.value = text;
         document.body.appendChild(ta);
         ta.select();
         document.execCommand('copy');
         document.body.removeChild(ta);
     });
+}
+// Legacy showModal kept for non-doc usages (alerts, etc.)
+function showModal(title, content) {
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('docTabs').innerHTML = '';
+    document.getElementById('docModalBody').innerHTML = '<div style="padding:1rem;white-space:pre-wrap;font-size:0.9rem;color:#d1d5db;">'+esc(content||'')+'</div>';
+    _docModal.jobUrl = null; _docModal.activeTab = null; _docModal.docs = {};
+    document.getElementById('modalOverlay').classList.add('visible');
 }
 function closeModal(e) {
     if (!e || e.target === document.getElementById('modalOverlay') || e.target.classList.contains('close-btn')) {
@@ -3699,12 +3786,12 @@ function renderJobRow(job) {
     if (log.apply) dots += '<span class="phase-dot phase-' + log.apply.status + '" title="Apply: ' + esc(log.apply.error || 'OK') + '">A</span>';
     var phaseDots = dots ? '<span class="phase-dots">' + dots + '</span>' : '';
 
-    // Artifact badges (docs column)
+    // Artifact badges (docs column) — click opens doc preview modal
     var badges = '';
     if (log.generate?.aiGenerated) badges += '<span class="artifact-badge ai-badge" title="AI-generated documents">AI</span>';
-    if (arts.resume && arts.resume !== 'generated' && arts.resume.length > 10) badges += '<span class="artifact-badge" title="Resume" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'resume\\')">R</span>';
-    if (arts.coverLetter && arts.coverLetter !== 'generated' && arts.coverLetter.length > 10) badges += '<span class="artifact-badge" title="Cover Letter" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'coverLetter\\')">C</span>';
-    if (arts.interviewPrep && arts.interviewPrep !== 'generated' && arts.interviewPrep.length > 10) badges += '<span class="artifact-badge" title="Interview Prep" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'interviewPrep\\')">P</span>';
+    if (arts.resume && arts.resume !== 'generated' && arts.resume.length > 10) badges += '<span class="artifact-badge" title="Resume — click to preview" style="cursor:pointer;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'resume\\')">R</span>';
+    if (arts.coverLetter && arts.coverLetter !== 'generated' && arts.coverLetter.length > 10) badges += '<span class="artifact-badge" title="Cover Letter — click to preview" style="cursor:pointer;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'coverLetter\\')">C</span>';
+    if (arts.interviewPrep && arts.interviewPrep !== 'generated' && arts.interviewPrep.length > 10) badges += '<span class="artifact-badge" title="Interview Prep — click to preview" style="cursor:pointer;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'interviewPrep\\')">P</span>';
     return '<tr>' +
         '<td class="col-check"><input type="checkbox" class="job-select" value="' + url + '" onchange="updateBulkBar()"></td>' +
         '<td class="title-cell"><a href="' + url + '" target="_blank">' + esc(job.title || 'Untitled') + '</a><span class="company">' + esc(job.company || '') + '</span></td>' +
@@ -3805,8 +3892,10 @@ function render(data) {
     // Pipeline stages
     document.getElementById('pipeline').innerHTML = renderPipeline(data.jobStats || {});
 
+    // Cache jobs for doc modal
+    _cachedJobs = data.jobs || [];
     // Job table
-    var jobs = data.jobs || [];
+    var jobs = _cachedJobs;
     var jobBody = document.getElementById('jobTableBody');
     var noJobsEl = document.getElementById('noJobs');
     if (jobs.length > 0) {
@@ -3994,6 +4083,7 @@ var WF_API = BASE_URL + '/api/workflow/' + _wfSessionId;
 // wfStart now opens the Workflow Editor instead of directly starting
 // Checks AI provider availability first
 var _lastAiProvider = null; // set by render()
+var _cachedJobs = [];       // cached from last render(), used by showDocModal()
 async function wfStart() {
     if (!_lastAiProvider || !_lastAiProvider.available) {
         alert(t('aiProviderMissing'));
@@ -4886,6 +4976,7 @@ async function refreshJobRecords() {
         var noJobsEl = document.getElementById('noJobs');
         var paginationEl = document.getElementById('jobPagination');
         if (data.jobs && data.jobs.length > 0) {
+            _cachedJobs = (_cachedJobs || []).filter(function(j){ return !data.jobs.find(function(d){return d.url===j.url;}); }).concat(data.jobs);
             jobBody.innerHTML = data.jobs.map(renderJobRow).join('');
             noJobsEl.style.display = 'none';
             document.getElementById('jobTable').style.display = 'table';

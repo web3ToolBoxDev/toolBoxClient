@@ -38,6 +38,48 @@ function getPlatformService() {
 // Active pipeline runs: sessionId → PipelineState
 const _pipelines = new Map();
 
+// ─── Markdown → Display JSON ───
+/**
+ * Parse markdown into structured sections for in-page display.
+ * Each section gets a `type` for differentiated rendering.
+ */
+function _markdownToSections(md, docType) {
+    if (!md) return [];
+    const SECTION_TYPE_MAP = {
+        'summary': 'summary', 'professional summary': 'summary', 'highlights': 'summary',
+        'skills': 'skills', 'key skills': 'skills', 'technical skills': 'skills', 'core competencies': 'skills',
+        'experience': 'experience', 'work experience': 'experience', 'professional experience': 'experience',
+        'education': 'education',
+        'opening': 'letter', 'body': 'letter', 'closing': 'letter',
+        'why': 'letter', 'sincerely': 'letter',
+    };
+    function detectType(title) {
+        const t = title.toLowerCase();
+        if (docType === 'interviewPrep' || /^q\d+|question \d+/i.test(title)) return 'qa';
+        for (const key of Object.keys(SECTION_TYPE_MAP)) {
+            if (t.includes(key)) return SECTION_TYPE_MAP[key];
+        }
+        if (docType === 'coverLetter') return 'letter';
+        return 'text';
+    }
+    const lines = md.split('\n');
+    const sections = [];
+    let current = null;
+    for (const line of lines) {
+        const h = line.match(/^#{1,3}\s+(.+)/);
+        if (h) {
+            if (current) sections.push({ title: current.title, content: current.content.trim(), type: detectType(current.title) });
+            current = { title: h[1].trim(), content: '' };
+        } else if (current) {
+            current.content += line + '\n';
+        } else if (!sections.length && line.trim()) {
+            current = { title: 'Overview', content: line + '\n' };
+        }
+    }
+    if (current && current.content.trim()) sections.push({ title: current.title, content: current.content.trim(), type: detectType(current.title) });
+    return sections;
+}
+
 // ─── Self-Heal Helper ───
 /**
  * Analyze a search failure/anomaly, heal the script via AI, and retry once.
@@ -812,6 +854,12 @@ async function _runPipeline(sessionId) {
                     docs: docOutcomes
                 };
                 status = allOk ? 'tailored' : 'matched'; // partial/error → stay matched
+                // Generate displayJson for in-page preview
+                artifacts.displayJson = {
+                    resume:        _markdownToSections(artifacts.resume, 'resume'),
+                    coverLetter:   _markdownToSections(artifacts.coverLetter, 'coverLetter'),
+                    interviewPrep: _markdownToSections(artifacts.interviewPrep, 'interviewPrep')
+                };
 
                 // Broadcast generate failure if not all OK
                 if (!allOk) {
@@ -1799,6 +1847,22 @@ async function generateAllDocs(sessionId, jobUrl, profile, options = {}) {
             errors.push(`Interview Prep: ${err.message}`);
             results.interviewPrep = { error: err.message };
         }
+    }
+
+    // --- Generate displayJson for in-page preview ---
+    {
+        const updatedJob = (dashboardServer.getJobCards(sessionId) || []).find(c => c.url === jobUrl);
+        const arts = updatedJob?.artifacts || {};
+        dashboardServer.upsertJobCard(sessionId, {
+            url: jobUrl,
+            artifacts: {
+                displayJson: {
+                    resume:        _markdownToSections(arts.resume, 'resume'),
+                    coverLetter:   _markdownToSections(arts.coverLetter, 'coverLetter'),
+                    interviewPrep: _markdownToSections(arts.interviewPrep, 'interviewPrep')
+                }
+            }
+        });
     }
 
     // --- Record per-job taskLog for generate phase ---
