@@ -218,12 +218,18 @@ Example: ["Staff Nurse ICU", "RN Critical Care", "Registered Nurse Hospital"]`;
  * @returns {Function} async (profile, listing, taxonomy) => matchResult|null
  */
 function _buildAiMatcher() {
+    let _warnedNoProvider = false;
     return async (profile, listing, taxonomy) => {
         const state = _stateGetter ? _stateGetter() : {};
-        console.log(`[aiMatcher] state.currentProvider='${state.currentProvider || ''}', state.runtimeApiKey=${state.runtimeApiKey ? 'SET' : 'EMPTY'}`);
+        if (!_warnedNoProvider) {
+            console.log(`[aiMatcher] state.currentProvider='${state.currentProvider || ''}', state.runtimeApiKey=${state.runtimeApiKey ? 'SET' : 'EMPTY'}`);
+        }
         const resolved = _resolveAiProvider(state);
         if (!resolved) {
-            console.log('[aiMatcher] No API key and no CLI provider — skipping AI match');
+            if (!_warnedNoProvider) {
+                console.log('[aiMatcher] No API key and no CLI provider — AI matching disabled for this pipeline run');
+                _warnedNoProvider = true;
+            }
             return null;
         }
 

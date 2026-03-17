@@ -37,6 +37,77 @@ function getPlatformService() {
 // Active pipeline runs: sessionId → PipelineState
 const _pipelines = new Map();
 
+// ─── Self-Heal Helper ───
+/**
+ * Analyze a search failure/anomaly, heal the script via AI, and retry once.
+ *
+ * Flow: analyzeFailure() → addFixRule() → healScript() → executeSearchScript()
+ *
+ * @param {string} sessionId
+ * @param {object} platformTool - { id, name, url }
+ * @param {object} query - { query, location, source, envId, pageOffset }
+ * @param {object} config - pipeline config (needs aiInvoke, envId, maxResults)
+ * @param {string} errorMsg - the failure description
+ * @param {string|null} screenshot - base64 screenshot at failure time
+ * @param {Function} _log - pipeline logger
+ * @returns {Array|null} healed listings or null if heal failed
+ */
+async function _selfHealAndRetry(sessionId, platformTool, query, config, errorMsg, screenshot, _log) {
+    try {
+        const fullPlatform = getPlatformStore().getPlatform(sessionId, platformTool.id);
+        const currentScript = fullPlatform?.tools?.search?.script || '';
+
+        // Step 1: Analyze failure → generate fix rule
+        const analysis = await getScriptBuilder().analyzeFailure(
+            platformTool.name, platformTool.url, 'search',
+            { error: errorMsg, script: currentScript, screenshot, promptRules: '' },
+            { aiInvoke: config.aiInvoke }
+        );
+        if (analysis.rule) {
+            getPlatformStore().addFixRule(platformTool.url, 'search', analysis.rule);
+            _log(`  Fix rule: ${analysis.rule}`);
+        }
+
+        // Step 2: Heal the script using AI
+        const healResult = await getScriptBuilder().healScript(
+            sessionId, platformTool.id, 'search',
+            { error: errorMsg, screenshot, currentScript },
+            { aiInvoke: config.aiInvoke }
+        );
+        if (!healResult.success) {
+            _log(`  healScript failed: ${healResult.error}`);
+            return null;
+        }
+        _log(`  Script healed — retrying search...`);
+
+        // Step 3: Retry search with healed script
+        const remaining = config.maxResults - (config._sourceResultCount?.[query.source] || 0);
+        const retryResult = await getScriptBuilder().executeSearchScript(
+            sessionId,
+            platformTool.id,
+            { keywords: query.query, location: query.location, pageOffset: query.pageOffset || 0 },
+            { envId: query.envId || config.envId, maxResults: Math.min(remaining, config.maxResults) }
+        );
+
+        if (retryResult.success && retryResult.jobs) {
+            return retryResult.jobs.map(j => ({
+                title: j.title || '',
+                company: j.company || '',
+                location: j.location || query.location || '',
+                url: j.url || j.link || '',
+                salary: j.salary || '',
+                source: query.source,
+                fullText: j.fullText || ''
+            }));
+        }
+        _log(`  Retry after heal also failed: ${retryResult.error || 'no results'}`);
+        return null;
+    } catch (err) {
+        _log(`  Self-heal error: ${err.message}`);
+        return null;
+    }
+}
+
 // ─── S1: Gap Analyzer ───
 /**
  * Analyze which sources still need more qualified results.
@@ -366,6 +437,7 @@ async function _runPipeline(sessionId) {
     const mode = config.envId ? 'fingerprint browser' : 'API (HTTP)';
     _log(`Starting search: "${jobTitle}" in "${location || 'any'}" via ${mode}`);
     _log(`Config: minScore=${config.minScore}, targetCount=${config.targetCount}/platform, maxResults=${config.maxResults}/platform`);
+    _log(`AI: aiMatcher=${config.aiMatcher ? 'SET' : 'NULL'}, aiInvoke=${config.aiInvoke ? 'SET' : 'NULL'}, aiExpander=${config.aiExpander ? 'SET' : 'NULL'}`);
     _log(`Queries: ${queries.map(q => `[${q.source}] "${q.query}" @ ${q.location || 'remote'}`).join(' | ')}`);
 
     if (queries.length === 0) {
@@ -549,6 +621,25 @@ async function _runPipeline(sessionId) {
                             fullText: j.fullText || ''
                         }));
                         _log(`[${q.source}] Platform tool returned ${listings.length} results`);
+
+                        // ── Low result anomaly: may indicate broken selectors ──
+                        const LOW_RESULT_THRESHOLD = 3;
+                        if (listings.length > 0 && listings.length < LOW_RESULT_THRESHOLD && config.aiInvoke) {
+                            _log(`⚠ [${q.source}] Suspiciously low results (${listings.length}) — triggering self-heal...`);
+                            dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                                cell: 'search', status: 'warning',
+                                message: `Low results (${listings.length}) — healing script...`
+                            });
+                            const healedListings = await _selfHealAndRetry(
+                                sessionId, platformTool, q, config,
+                                `Only ${listings.length} result(s) returned (expected 10+). Selectors may be broken or page layout changed.`,
+                                scriptResult.screenshot || null, _log
+                            );
+                            if (healedListings && healedListings.length > listings.length) {
+                                _log(`  Self-heal improved: ${listings.length} → ${healedListings.length} results`);
+                                listings = healedListings;
+                            }
+                        }
                     } else {
                         const errMsg = scriptResult.error || 'unknown error';
                         _log(`✗ [${q.source}] Platform tool failed: ${errMsg}`);
@@ -559,26 +650,20 @@ async function _runPipeline(sessionId) {
                         });
                         pipeline.progress.errors.push(`[${q.source}] Search tool failed: ${errMsg}`);
 
-                        // AI failure research — analyze and generate fix rule for future rebuilds
+                        // ── Self-heal: analyze failure → heal script → retry once ──
                         if (config.aiInvoke) {
-                            try {
-                                const fullPlatform = getPlatformStore().getPlatform(sessionId, platformTool.id);
-                                const currentScript = fullPlatform?.tools?.search?.script || '';
-                                const analysis = await getScriptBuilder().analyzeFailure(
-                                    platformTool.name, platformTool.url, 'search',
-                                    {
-                                        error: errMsg,
-                                        script: currentScript,
-                                        screenshot: scriptResult.failScreenshot || null,
-                                        promptRules: ''  // analyzeFailure reads existing fixRules internally
-                                    },
-                                    { aiInvoke: config.aiInvoke }
-                                );
-                                if (analysis.rule) {
-                                    getPlatformStore().addFixRule(platformTool.url, 'search', analysis.rule);
-                                    _log(`AI fix rule generated: ${analysis.rule}`);
-                                }
-                            } catch (_) { /* non-critical */ }
+                            const healedListings = await _selfHealAndRetry(
+                                sessionId, platformTool, q, config,
+                                errMsg, scriptResult.failScreenshot || null, _log
+                            );
+                            if (healedListings && healedListings.length > 0) {
+                                listings = healedListings;
+                                _failedSources.delete(q.source);
+                                dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                                    cell: 'search', status: 'ok',
+                                    message: `Healed: ${listings.length} results after self-repair`
+                                });
+                            }
                         }
                     }
                 } else {
@@ -676,7 +761,11 @@ async function _runPipeline(sessionId) {
             if (config.aiMatcher && listing.fullText) {
                 try {
                     matchResult = await config.aiMatcher(profile, listing, config.skillTaxonomy);
-                    if (matchResult) _log(`  AI match: ${matchResult.overallScore}%`);
+                    if (matchResult) {
+                        _log(`  AI match: ${matchResult.overallScore}%`);
+                    } else {
+                        _log(`  AI matcher returned null (provider unavailable?), using algorithm`);
+                    }
                 } catch (err) {
                     _log(`  AI match failed: ${err.message}, fallback to algorithm`);
                 }
@@ -691,6 +780,20 @@ async function _runPipeline(sessionId) {
                     jobTitle: listing.title,
                     skillTaxonomy: config.skillTaxonomy
                 });
+            }
+
+            // Low-score AI retry: if algorithm scored below threshold, give AI a second chance
+            if (matchResult.overallScore < config.minScore &&
+                config.aiMatcher && listing.fullText && !matchResult.aiMatched) {
+                try {
+                    const aiRetry = await config.aiMatcher(profile, listing, config.skillTaxonomy);
+                    if (aiRetry && aiRetry.overallScore > matchResult.overallScore) {
+                        _log(`  AI retry: ${matchResult.overallScore}% → ${aiRetry.overallScore}%`);
+                        matchResult = aiRetry;
+                    }
+                } catch (err) {
+                    _log(`  AI retry failed: ${err.message}`);
+                }
             }
 
             const score = matchResult.overallScore || 0;
@@ -809,7 +912,11 @@ async function _runPipeline(sessionId) {
                         if (config.aiMatcher && listing.fullText) {
                             try {
                                 matchResult = await config.aiMatcher(profile, listing, config.skillTaxonomy);
-                                if (matchResult) _log(`  AI match: ${matchResult.overallScore}%`);
+                                if (matchResult) {
+                                    _log(`  AI match: ${matchResult.overallScore}%`);
+                                } else {
+                                    _log(`  AI matcher returned null, using algorithm`);
+                                }
                             } catch (err) {
                                 _log(`  AI match failed: ${err.message}, fallback to algorithm`);
                             }
@@ -824,6 +931,20 @@ async function _runPipeline(sessionId) {
                                 jobTitle: listing.title,
                                 skillTaxonomy: config.skillTaxonomy
                             });
+                        }
+
+                        // Low-score AI retry
+                        if (matchResult.overallScore < config.minScore &&
+                            config.aiMatcher && listing.fullText && !matchResult.aiMatched) {
+                            try {
+                                const aiRetry = await config.aiMatcher(profile, listing, config.skillTaxonomy);
+                                if (aiRetry && aiRetry.overallScore > matchResult.overallScore) {
+                                    _log(`  AI retry: ${matchResult.overallScore}% → ${aiRetry.overallScore}%`);
+                                    matchResult = aiRetry;
+                                }
+                            } catch (err) {
+                                _log(`  AI retry failed: ${err.message}`);
+                            }
                         }
 
                         const score = matchResult.overallScore || 0;
