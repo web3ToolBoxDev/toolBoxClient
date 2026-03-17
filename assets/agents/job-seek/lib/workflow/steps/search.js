@@ -44,8 +44,9 @@ async function execute({ sessionId, config, context }) {
         throw new Error(result.error);
     }
 
-    // Wait for pipeline to complete (poll every 2s, max 5 min)
-    const maxWait = 300_000;
+    // Wait for pipeline to complete (poll every 2s, max 15 min)
+    // AI matching via CLI (codex/claude) can take 30-40s per job, so 5min is too short
+    const maxWait = 900_000;
     const pollInterval = 2000;
     const startTime = Date.now();
 

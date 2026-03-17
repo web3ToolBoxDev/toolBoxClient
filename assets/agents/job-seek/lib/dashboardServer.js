@@ -49,8 +49,8 @@ function getPlatformService() {
         _platformService = require('./workflow/platformService');
         // Wire up screenshot verifier so verifyLogin can use AI + screenshot
         _platformService.setScreenshotVerifier(async (base64png, platformLabel) => {
-            const state = _stateGetter ? _stateGetter() : {};
-            const aiInvoke = _createAiInvoke(state);
+            const aiInvoke = _buildAiInvoke();
+            if (!aiInvoke) throw new Error('No AI provider available for screenshot verification');
             const prompt = `Analyze this screenshot of "${platformLabel}". Is the user currently logged in? `
                 + 'Look for signs like profile avatars, user menus, dashboard content, or logout buttons. '
                 + 'Respond with JSON: { "loggedIn": true/false, "reasoning": "..." }';
@@ -183,14 +183,8 @@ function _buildImageContent(base64png, textPrompt) {
  */
 function _buildAiExpander() {
     return async ({ jobTitle, location, profileSummary, previousQueries, gap }) => {
-        const state = _stateGetter ? _stateGetter() : {};
-        const resolved = _resolveAiProvider(state);
+        const resolved = _resolveAiProvider(_stateGetter ? _stateGetter() : {});
         if (!resolved) return []; // no AI credentials → skip
-
-        // Override state with resolved provider for _createAiInvoke
-        if (resolved.isCliProvider && !state.currentProvider) {
-            state.currentProvider = resolved.provider;
-        }
 
         const prompt = `You are a job search optimization assistant.
 
@@ -215,7 +209,8 @@ Return ONLY a JSON array of strings, each being a search phrase. No explanation.
 Example: ["Staff Nurse ICU", "RN Critical Care", "Registered Nurse Hospital"]`;
 
         try {
-            const aiInvoke = _createAiInvoke(state);
+            const aiInvoke = _buildAiInvoke();
+            if (!aiInvoke) return [];
             const systemPrefix = 'You output only valid JSON arrays. No markdown, no explanation.\n\n';
             const rawText = await aiInvoke(systemPrefix + prompt);
             const text = (typeof rawText === 'string' ? rawText : (rawText?.content || '')).trim();
@@ -256,11 +251,6 @@ function _buildAiMatcher() {
             return null;
         }
 
-        // Override state with resolved provider for _createAiInvoke
-        if (resolved.isCliProvider && !state.currentProvider) {
-            state.currentProvider = resolved.provider;
-        }
-
         const { buildMatchPrompt, parseMatchResponse } = require('./tools/matchProfile');
         const { mergeTaxonomy, BASE_TAXONOMY, BASE_ALIASES } = require('./tools/skillTaxonomy');
 
@@ -273,8 +263,8 @@ function _buildAiMatcher() {
         const prompt = buildMatchPrompt(profile, jdText, listing.title || '', merged);
 
         try {
-            // Use _createAiInvoke to support both CLI (claude-code) and API providers
-            const aiInvoke = _createAiInvoke(state);
+            const aiInvoke = _buildAiInvoke();
+            if (!aiInvoke) return null;
             const systemPrefix = 'You are a job matching expert. Output only valid JSON, no markdown fences, no explanation.\n\n';
             const text = await aiInvoke(systemPrefix + prompt);
             const matchResult = parseMatchResponse(typeof text === 'string' ? text : (text?.content || ''));
@@ -294,31 +284,38 @@ function _buildAiMatcher() {
 }
 
 /**
- * Create an aiInvoke function from the current provider config.
+ * Build a lazy aiInvoke function that resolves provider at call time (not creation time).
  * Signature: async (prompt: string, screenshot?: string) => string
  *
  * Supports:
  *  - 'claude-code' / 'codex-cli' → spawn CLI with prompt piped via stdin
  *    (screenshots saved to workspace file, path included in prompt for CLI to read)
  *  - API providers (openai, anthropic, google) → use aiClient.callAPI
+ *
+ * Returns null if no AI backend is available (lazy detection at build time).
  */
-function _createAiInvoke(state) {
-    const provider = state.currentProvider;
-    const model = state.currentModel || 'default';
-    const subProvider = state.currentSubProvider || '';
-    const apiKey = state.runtimeApiKey || '';
+function _buildAiInvoke() {
+    // Pre-check: if no provider can be resolved, return null immediately
+    // so callers can detect "no AI" at config time.
+    const preCheck = _resolveAiProvider(_stateGetter ? _stateGetter() : {});
+    if (!preCheck) return null;
 
-    if (provider === 'claude-code' || provider === 'codex-cli') {
-        // CLI-based provider — spawn process with prompt on stdin.
-        // For screenshots: save to workspace file, include path in prompt
-        // so the CLI can read the image via its built-in Read tool.
-        // (Same pattern as agent.js invokeCliAsync with resume images)
-        const workspaceDir = path.resolve(__dirname, '..', 'workspace');
-        return async function aiInvoke(prompt, screenshot) {
+    return async function aiInvoke(prompt, screenshot) {
+        // Lazy resolve: re-check provider at each invocation for freshness
+        const state = _stateGetter ? _stateGetter() : {};
+        const resolved = _resolveAiProvider(state);
+        if (!resolved) throw new Error('No AI provider available');
+
+        const { provider, apiKey, isCliProvider } = resolved;
+        const model = state.currentModel || 'default';
+        const subProvider = state.currentSubProvider || '';
+
+        if (isCliProvider) {
+            // CLI-based provider — spawn process with prompt on stdin
+            const workspaceDir = path.resolve(__dirname, '..', 'workspace');
             let imgPath = null;
             let fullPrompt = prompt;
             if (screenshot) {
-                const fs = require('fs');
                 try { fs.mkdirSync(workspaceDir, { recursive: true }); } catch (_) {}
                 imgPath = path.join(workspaceDir, `screenshot_${Date.now()}.png`);
                 fs.writeFileSync(imgPath, Buffer.from(screenshot, 'base64'));
@@ -351,12 +348,10 @@ function _createAiInvoke(state) {
                 child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
                 child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
                 child.on('close', (code) => {
-                    // Cleanup temp screenshot
-                    if (imgPath) { try { require('fs').unlinkSync(imgPath); } catch (_) {} }
+                    if (imgPath) { try { fs.unlinkSync(imgPath); } catch (_) {} }
                     if (code === 0) {
                         resolve(stdout.trim());
                     } else if (code === null && stdout.trim().length > 50) {
-                        // Process killed by signal (e.g. timeout SIGTERM) but produced valid output
                         console.log(`[aiInvoke] ${bin} exited with signal (code=null) but stdout has ${stdout.trim().length} chars — treating as success`);
                         resolve(stdout.trim());
                     } else {
@@ -364,15 +359,13 @@ function _createAiInvoke(state) {
                     }
                 });
                 child.on('error', (err) => {
-                    if (imgPath) { try { require('fs').unlinkSync(imgPath); } catch (_) {} }
+                    if (imgPath) { try { fs.unlinkSync(imgPath); } catch (_) {} }
                     reject(new Error(`${bin} spawn failed: ${err.message}`));
                 });
             });
-        };
-    }
+        }
 
-    // API-based provider — use aiClient
-    return async function aiInvoke(prompt, screenshot) {
+        // API-based provider — use aiClient
         const aiClient = require('./aiClient');
         const conversationHistory = [{ role: 'user', content: prompt }];
         const imageContent = screenshot ? _buildImageContent(screenshot, prompt) : undefined;
@@ -386,6 +379,14 @@ function _createAiInvoke(state) {
         });
         return typeof result === 'string' ? result : (result.content || '');
     };
+}
+
+/**
+ * Legacy wrapper — calls _buildAiInvoke().
+ * @deprecated Use _buildAiInvoke() directly.
+ */
+function _createAiInvoke(state) {
+    return _buildAiInvoke();
 }
 
 /**
@@ -534,7 +535,7 @@ function start(getState, port) {
                     };
 
                     // Build AI invoke for failure analysis (fix rule generation)
-                    const aiInvoke = _createAiInvoke(state);
+                    const aiInvoke = _buildAiInvoke();
 
                     const result = getSearchPipeline().startPipeline(
                         sessionId,
@@ -910,7 +911,7 @@ function start(getState, port) {
                     // Build AI callbacks and attach to context so workflow steps can use them
                     ctx.aiExpander = _buildAiExpander();
                     ctx.aiMatcher = _buildAiMatcher();
-                    ctx.aiInvoke = _createAiInvoke(state);
+                    ctx.aiInvoke = _buildAiInvoke();
                     // Attach search history for dedup
                     ctx.searchHistory = state.searchHistory?.[sid] || {};
                     ctx.onHistorySave = (history) => {
@@ -953,7 +954,7 @@ function start(getState, port) {
                     // Build AI callbacks for resumed workflow (same as start)
                     ctx.aiExpander = _buildAiExpander();
                     ctx.aiMatcher = _buildAiMatcher();
-                    ctx.aiInvoke = _createAiInvoke(state);
+                    ctx.aiInvoke = _buildAiInvoke();
                     ctx.searchHistory = state.searchHistory?.[sid] || {};
                     ctx.onHistorySave = (history) => {
                         const st = _stateGetter ? _stateGetter() : {};
@@ -1495,7 +1496,7 @@ function start(getState, port) {
                         res.writeHead(400, { 'Content-Type': 'application/json' });
                         return res.end(JSON.stringify({ success: false, error: 'No AI provider configured. Set an AI provider first.' }));
                     }
-                    const aiInvoke = _createAiInvoke(state);
+                    const aiInvoke = _buildAiInvoke();
                     body.aiInvoke = aiInvoke;
 
                     // Inject testParams from user's direction for realistic verify
@@ -1554,7 +1555,7 @@ function start(getState, port) {
                         res.writeHead(400, { 'Content-Type': 'application/json' });
                         return res.end(JSON.stringify({ success: false, error: 'No AI provider configured.' }));
                     }
-                    body.aiInvoke = _createAiInvoke(applyState);
+                    body.aiInvoke = _buildAiInvoke();
                     updatePlatformCell(sid, pid, { cell: 'apply', status: 'building', message: 'Building apply tool...' });
                     const result = await getScriptBuilder().buildTool(sid, pid, 'apply', body);
                     if (result.success) {
