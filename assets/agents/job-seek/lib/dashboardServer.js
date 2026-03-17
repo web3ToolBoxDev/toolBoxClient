@@ -2894,6 +2894,7 @@ function buildDashboardHTML(sessionId) {
     <div style="display:flex;justify-content:space-between;align-items:center">
       <h3 id="modalTitle" style="margin:0"></h3>
       <div>
+        <button class="btn btn-sm" id="modalCopy" style="display:none;background:#6a7eff;color:#fff;margin-right:8px" onclick="copyModalContent()">&#128203; Copy</button>
         <button class="btn btn-sm" id="modalDownload" style="display:none;background:#10b981;color:#fff;margin-right:8px">Download</button>
         <button class="close-btn" onclick="closeModal()" style="float:none">&times;</button>
       </div>
@@ -3452,10 +3453,13 @@ async function bulkDelete() {
 }
 
 // ─── Modal ───
+var _modalRawContent = '';
 function showModal(title, content, jobUrl, docType) {
+    _modalRawContent = content || '';
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalContent').textContent = content;
     var dlBtn = document.getElementById('modalDownload');
+    var cpBtn = document.getElementById('modalCopy');
     if (dlBtn) {
         if (jobUrl && docType) {
             dlBtn.style.display = 'inline-block';
@@ -3464,7 +3468,26 @@ function showModal(title, content, jobUrl, docType) {
             dlBtn.style.display = 'none';
         }
     }
+    if (cpBtn) cpBtn.style.display = content ? 'inline-block' : 'none';
     document.getElementById('modalOverlay').classList.add('visible');
+}
+function copyModalContent() {
+    if (!_modalRawContent) return;
+    navigator.clipboard.writeText(_modalRawContent).then(function() {
+        var btn = document.getElementById('modalCopy');
+        var orig = btn.innerHTML;
+        btn.innerHTML = '&#10003; Copied!';
+        btn.style.background = '#10b981';
+        setTimeout(function() { btn.innerHTML = orig; btn.style.background = '#6a7eff'; }, 1500);
+    }).catch(function() {
+        // Fallback for non-secure contexts
+        var ta = document.createElement('textarea');
+        ta.value = _modalRawContent;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+    });
 }
 function closeModal(e) {
     if (!e || e.target === document.getElementById('modalOverlay') || e.target.classList.contains('close-btn')) {

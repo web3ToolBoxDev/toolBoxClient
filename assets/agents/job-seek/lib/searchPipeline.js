@@ -1048,17 +1048,129 @@ function getPipelineStatus(sessionId) {
 }
 
 /**
- * Format interview prep questions into markdown.
+ * Build a high-quality AI prompt for interview preparation.
+ * Users copy this prompt into ChatGPT / Claude to get an interactive interview coach.
+ *
+ * @param {object} job - job card (title, company, location, fullText, artifacts, matchBreakdown)
+ * @param {object} profile - user profile sections
+ * @returns {string} complete AI prompt (markdown-formatted)
  */
-function _formatInterviewPrep(questions) {
-    if (!Array.isArray(questions) || questions.length === 0) return '';
-    return questions.map((q, i) => {
-        let md = `### Q${i + 1}: ${q.question || q}`;
-        if (q.category || q.type) md += `\n**Category:** ${q.category || q.type}`;
-        if (q.hint) md += `\n**Hint:** ${q.hint}`;
-        if (q.sampleAnswer) md += `\n\n**Sample Answer:**\n${q.sampleAnswer}`;
-        return md;
-    }).join('\n\n---\n\n');
+function _buildInterviewPrompt(job, profile) {
+    const req = job.artifacts?.requirements || {};
+    const techSkills = (req.technical || []).join(', ') || 'N/A';
+    const responsibilities = (req.responsibilities || []).map(r => `- ${r}`).join('\n') || 'N/A';
+    const education = req.education || 'N/A';
+    const experience = req.experience || 'N/A';
+
+    // Build candidate snapshot from profile
+    const candidateLines = [];
+    if (profile) {
+        for (const [section, content] of Object.entries(profile)) {
+            if (content && typeof content === 'string' && content.trim()) {
+                candidateLines.push(`**${section}:** ${content.trim()}`);
+            } else if (content && typeof content === 'object') {
+                candidateLines.push(`**${section}:** ${JSON.stringify(content)}`);
+            }
+        }
+    }
+    const candidateSnapshot = candidateLines.length > 0
+        ? candidateLines.join('\n')
+        : 'No candidate profile provided.';
+
+    // Match insights
+    const matchInfo = job.matchBreakdown
+        ? `Match Score: ${job.matchScore || 'N/A'}%\nBreakdown: ${JSON.stringify(job.matchBreakdown)}`
+        : `Match Score: ${job.matchScore || 'N/A'}%`;
+
+    return `# Interview Prep Prompt — Paste into ChatGPT / Claude
+
+> Copy everything below this line into any AI chat to start an interactive interview coaching session.
+
+---
+
+You are an expert interview coach specializing in tech hiring. I am preparing for the following position. Your job is to help me **thoroughly prepare** by creating an interactive coaching session.
+
+## Target Position
+
+- **Title:** ${job.title || 'N/A'}
+- **Company:** ${job.company || 'N/A'}
+- **Location:** ${job.location || 'N/A'}
+- **Salary:** ${job.salary || 'N/A'}
+
+## Job Requirements
+
+**Technical Skills:** ${techSkills}
+
+**Key Responsibilities:**
+${responsibilities}
+
+**Education:** ${education}
+**Experience:** ${experience}
+
+## My Background
+
+${candidateSnapshot}
+
+## Match Analysis
+
+${matchInfo}
+
+---
+
+## Your Task
+
+Please create a **comprehensive, interactive interview preparation session** covering ALL of the following modules. After presenting each module, pause and ask me if I want to:
+- (a) Do a practice round for that module
+- (b) Skip to the next module
+- (c) Deep-dive into a specific topic
+
+### Module 1: Company & Role Research
+- What the company likely values based on the JD
+- Key talking points to demonstrate culture fit
+- Questions I should ask the interviewer about this role
+
+### Module 2: Technical Knowledge Review
+For each technical skill listed in the requirements:
+- Core concepts I must know (brief refresher)
+- Common interview questions for that technology
+- My skill gaps based on my background (be honest)
+- Suggested study resources for weak areas
+
+### Module 3: Behavioral Interview (STAR Method)
+Generate 5 behavioral questions tailored to this specific role's responsibilities. For each:
+- The question
+- Why an interviewer would ask this for THIS role
+- A STAR framework outline I can adapt from my experience
+- Common pitfalls to avoid
+
+### Module 4: Technical Interview Simulation
+Generate 3 technical scenario questions based on the required skills. For each:
+- The problem/scenario
+- Expected approach and thought process
+- Key points the interviewer is evaluating
+- Follow-up questions they might ask
+
+### Module 5: System Design / Architecture (if applicable)
+If this is a senior role or mentions system design:
+- One system design question relevant to this role
+- Walk me through the expected approach
+- Key trade-offs to discuss
+
+### Module 6: Salary & Offer Negotiation
+- Market salary range for this role + location
+- Key negotiation talking points based on my experience
+- How to handle "What are your salary expectations?"
+
+### Module 7: Mock Interview Round
+After all modules, offer to run a **full mock interview simulation**:
+- You play the interviewer
+- Ask 8-10 mixed questions (behavioral + technical + situational)
+- After each answer I give, score it and provide specific feedback
+- At the end, give an overall assessment with a letter grade
+
+---
+
+**Start with Module 1. Present the content, then ask me how I want to proceed.**`;
 }
 
 /**
@@ -1186,22 +1298,14 @@ async function generateInterviewPrep(sessionId, jobUrl, profile) {
     if (!job) return { error: 'Job not found' };
 
     try {
-        const result = await mockInterviewHandler({
-            action: 'generate',
-            profile,
-            jobTitle: job.title,
-            requirements: job.artifacts?.requirements || {},
-            count: 5
-        });
-
-        const prepMarkdown = result.questions ? _formatInterviewPrep(result.questions) : null;
+        const promptMarkdown = _buildInterviewPrompt(job, profile);
 
         dashboardServer.upsertJobCard(sessionId, {
             url: jobUrl,
-            artifacts: { interviewPrep: prepMarkdown }
+            artifacts: { interviewPrep: promptMarkdown }
         });
 
-        return { success: true, questions: result.questions, markdown: prepMarkdown, job };
+        return { success: true, markdown: promptMarkdown, job };
     } catch (err) {
         return { error: err.message };
     }
