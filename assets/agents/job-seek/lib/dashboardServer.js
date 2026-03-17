@@ -2328,6 +2328,12 @@ function getDashboardData(sessionId) {
         intentVersion: intent?.version || 1,
         jobs: getJobCards(sessionId),
         jobStats: getJobStats(sessionId),
+        aiProvider: (() => {
+            const resolved = _resolveAiProvider(state);
+            return resolved
+                ? { available: true, provider: resolved.provider, isCli: resolved.isCliProvider }
+                : { available: false, provider: null, isCli: false };
+        })(),
         builtAt: new Date().toISOString()
     };
 }
@@ -2613,6 +2619,7 @@ function buildDashboardHTML(sessionId) {
 </div>
 
 <div id="envBanner"></div>
+<div id="aiBanner"></div>
 
 <h2 data-i18n="direction">Direction</h2>
 <div class="card">
@@ -2925,7 +2932,9 @@ var _i18n = {
         wfeNoJobs: 'No eligible jobs',
         wfeMinScoreHint: 'Jobs scoring below this % are skipped',
         wfeTargetCountHint: 'Stop searching each platform after finding this many qualified jobs',
-        wfeMaxResultsHint: 'Max jobs to fetch per platform before moving to next'
+        wfeMaxResultsHint: 'Max jobs to fetch per platform before moving to next',
+        aiProviderOk: 'AI Provider',
+        aiProviderMissing: 'No AI provider detected. Go to AI Panel \u2192 Runtime Settings \u2192 Select a provider and click "Apply Model" to enable AI matching and self-heal.'
     },
     'zh-CN': {
         envBound: '已绑定浏览器环境', envNotBound: '未绑定浏览器环境。请前往 AI 面板 → 运行时设置 → 绑定环境，以启用登录和搜索功能。',
@@ -2963,7 +2972,9 @@ var _i18n = {
         wfeNoJobs: '无可选职位',
         wfeMinScoreHint: '低于此分数的职位将被跳过',
         wfeTargetCountHint: '每个平台找到此数量的合格职位后停止该平台搜索',
-        wfeMaxResultsHint: '每个平台最多抓取的职位数量'
+        wfeMaxResultsHint: '每个平台最多抓取的职位数量',
+        aiProviderOk: 'AI 供应商',
+        aiProviderMissing: '未检测到 AI 供应商。请前往 AI 面板 → 运行时设置 → 选择供应商并点击「应用模型」，以启用 AI 匹配和自愈修复。'
     }
 };
 var _lang = (navigator.language || 'en').startsWith('zh') ? 'zh-CN' : 'en';
@@ -3172,6 +3183,22 @@ function render(data) {
         envBanner.innerHTML = '<div class="env-banner env-banner--warn">' +
             '<span class="env-banner__icon">⚠</span>' +
             '<span class="env-banner__text">' + t('envNotBound') + '</span>' +
+            '</div>';
+    }
+
+    // AI Provider banner
+    var aiBanner = document.getElementById('aiBanner');
+    var ai = data.aiProvider || {};
+    _lastAiProvider = ai;
+    if (ai.available) {
+        aiBanner.innerHTML = '<div class="env-banner env-banner--ok">' +
+            '<span class="env-banner__icon">🤖</span>' +
+            '<span class="env-banner__text">' + t('aiProviderOk') + ': <span class="env-banner__names">' + esc(ai.provider || '') + '</span></span>' +
+            '</div>';
+    } else {
+        aiBanner.innerHTML = '<div class="env-banner env-banner--warn">' +
+            '<span class="env-banner__icon">⚠</span>' +
+            '<span class="env-banner__text">' + t('aiProviderMissing') + '</span>' +
             '</div>';
     }
 
@@ -3391,7 +3418,13 @@ var _pausePolling = false;
 var WF_API = BASE_URL + '/api/workflow/' + _wfSessionId;
 
 // wfStart now opens the Workflow Editor instead of directly starting
+// Checks AI provider availability first
+var _lastAiProvider = null; // set by render()
 async function wfStart() {
+    if (!_lastAiProvider || !_lastAiProvider.available) {
+        alert(t('aiProviderMissing'));
+        return;
+    }
     openWorkflowEditor();
 }
 
