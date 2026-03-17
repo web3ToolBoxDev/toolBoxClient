@@ -555,18 +555,79 @@ async function launchLogin(sessionId, platformId, options = {}) {
 }
 
 /**
- * Confirm login — mark platform as connected.
+ * Confirm login — verify via AI/DOM first, then mark platform as connected.
+ *
+ * When the user clicks "Confirm" after manual login, we run the same
+ * cascading verification (DOM selector → screenshot + AI) used by
+ * auto-verify.  Only if verification passes (or is unavailable for this
+ * platform) do we mark the platform as connected.
  *
  * @param {string} sessionId
  * @param {string} platformId
- * @returns {object} { success, platform? }
+ * @returns {Promise<object>} { success, verified?, method?, message? }
  */
-function confirmLogin(sessionId, platformId) {
-    const result = platformStore.updateConnectionStatus(sessionId, platformId, 'connected');
-    if (result.success) {
-        _syncToDashboard(sessionId, platformId, { cell: 'login', status: 'verified', message: 'Login confirmed manually' });
+async function confirmLogin(sessionId, platformId) {
+    const platform = platformStore.getPlatform(sessionId, platformId);
+    if (!platform) {
+        return { success: false, error: 'Platform not found' };
     }
-    return result;
+
+    // Show "verifying" state while we check
+    _syncToDashboard(sessionId, platformId, {
+        cell: 'login', status: 'verifying',
+        name: platform.name, icon: platform.icon, url: platform.url,
+        message: 'Verifying login status...'
+    });
+
+    try {
+        const verifyResult = await verifyLogin(sessionId, platformId);
+
+        if (verifyResult.status === 'logged_in') {
+            // Already marked connected inside verifyLogin — just return
+            return {
+                success: true,
+                verified: true,
+                method: verifyResult.method,
+                message: verifyResult.message
+            };
+        }
+
+        if (verifyResult.status === 'unknown') {
+            // No detector for this platform — fall back to manual trust
+            const result = platformStore.updateConnectionStatus(sessionId, platformId, 'connected');
+            if (result.success) {
+                _syncToDashboard(sessionId, platformId, {
+                    cell: 'login', status: 'verified',
+                    message: 'Login confirmed manually (no auto-detector available)'
+                });
+            }
+            return { success: true, verified: false, method: 'manual', message: verifyResult.message };
+        }
+
+        // Not logged in — tell user to actually log in first
+        _syncToDashboard(sessionId, platformId, {
+            cell: 'login', status: 'verifying',
+            name: platform.name, icon: platform.icon, url: platform.url,
+            message: 'Login not detected — please log in first'
+        });
+        return {
+            success: false,
+            verified: false,
+            method: verifyResult.method,
+            message: verifyResult.message || 'Login not detected. Please log in before confirming.'
+        };
+    } catch (err) {
+        console.error(`[platformService] confirmLogin verify error for ${platform.name}:`, err.message);
+        // Verification errored — fall back to manual trust so user isn't stuck
+        const result = platformStore.updateConnectionStatus(sessionId, platformId, 'connected');
+        if (result.success) {
+            _syncToDashboard(sessionId, platformId, {
+                cell: 'login', status: 'verified',
+                message: 'Login confirmed manually (verification unavailable)'
+            });
+        }
+        return { success: true, verified: false, method: 'manual-fallback', message: 'Verification failed: ' + err.message };
+    }
 }
 
 /**

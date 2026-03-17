@@ -370,7 +370,7 @@ function start(getState, port) {
     if (_server) return _port;
     _port = port || DASHBOARD_PORT;
 
-    _server = http.createServer((req, res) => {
+    _server = http.createServer(async (req, res) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -1365,17 +1365,22 @@ function start(getState, port) {
             return;
         }
 
-        // POST /api/platforms/:sid/:pid/confirm-login — manual confirm login
+        // POST /api/platforms/:sid/:pid/confirm-login — manual confirm login (with AI verification)
         const platConfirmMatch = url.match(/^\/api\/platforms\/([^/]+)\/([^/]+)\/confirm-login$/);
         if (platConfirmMatch && req.method === 'POST') {
             const sid = decodeURIComponent(platConfirmMatch[1]);
             const pid = decodeURIComponent(platConfirmMatch[2]);
-            const result = getPlatformService().confirmLogin(sid, pid);
-            if (result.success) {
-                updatePlatformCell(sid, pid, { cell: 'login', status: 'verified', message: 'Login confirmed manually' });
+            try {
+                const result = await getPlatformService().confirmLogin(sid, pid);
+                if (result.success && result.verified) {
+                    updatePlatformCell(sid, pid, { cell: 'login', status: 'verified', message: result.message || 'Login verified' });
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify(result));
+            } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ success: false, error: err.message }));
             }
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify(result));
         }
 
         // POST /api/platforms/:sid/:pid/bind-env — bind fingerprint env
@@ -3236,7 +3241,7 @@ function renderWfPlatform(p) {
     } else if (loginVis === 'verifying') {
         // Browser opened, waiting for user to log in — Login locked, Confirm enabled
         html += '<button class="btn btn-sm wf-btn-loading" disabled><span class="wf-spinner"></span> ' + t('launching') + '</button>';
-        html += '<button class="btn btn-sm btn-confirm-active" onclick="confirmLogin(\\''+esc(p.id)+'\\')">✓ '+t('confirm')+'</button>';
+        html += '<button class="btn btn-sm btn-confirm-active" data-confirm="'+esc(p.id)+'" onclick="confirmLogin(\\''+esc(p.id)+'\\')">✓ '+t('confirm')+'</button>';
     } else if (loginVis === 'ready') {
         // Logged in — show Re-login option
         html += '<button class="btn btn-sm" onclick="platformLogin(\\''+esc(p.id)+'\\')">'+t('relogin')+'</button>';
@@ -3244,7 +3249,7 @@ function renderWfPlatform(p) {
     } else {
         // idle / error / warning — normal Login + Confirm
         html += '<button class="btn btn-sm" onclick="platformLogin(\\''+esc(p.id)+'\\')">'+t('login')+'</button>';
-        html += '<button class="btn btn-sm" onclick="confirmLogin(\\''+esc(p.id)+'\\')">'+t('confirm')+'</button>';
+        html += '<button class="btn btn-sm" data-confirm="'+esc(p.id)+'" onclick="confirmLogin(\\''+esc(p.id)+'\\')">'+t('confirm')+'</button>';
     }
     html += '</div>';
     html += '<div class="wf-platform__cells">';
@@ -3984,14 +3989,27 @@ async function deletePlatform(platformId, platformName) {
 }
 
 async function confirmLogin(platformId) {
+    // Disable confirm button and show verifying state
+    var btn = document.querySelector('[data-confirm="' + platformId + '"]');
+    if (btn) { btn.disabled = true; btn.textContent = '⟳ Verifying...'; }
     try {
         var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId + '/' + encodeURIComponent(platformId) + '/confirm-login', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
         });
         var data = await res.json();
-        if (data.success) { refreshWorkflowStatus(); }
-        else { showAlert('Confirm', data.error || 'Confirm failed'); }
-    } catch (e) { showAlert('Error', e.message); }
+        if (data.success) {
+            refreshWorkflowStatus();
+            if (data.verified === false) {
+                showAlert('Confirm', data.message || 'Login confirmed (verification unavailable)');
+            }
+        } else {
+            showAlert('Confirm', data.message || data.error || 'Login not detected — please log in first');
+            if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
+        }
+    } catch (e) {
+        showAlert('Error', e.message);
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
+    }
 }
 
 async function bindEnv(platformId) {

@@ -326,15 +326,62 @@ describe('launchLogin', () => {
 });
 
 describe('confirmLogin', () => {
-    test('marks platform as connected', () => {
+    test('verifies login via DOM then marks connected (browser open + DOM passes)', async () => {
         const platforms = platformStore.getPlatforms(SESSION);
-        const result = platformService.confirmLogin(SESSION, platforms[0].id);
+        const linkedin = platforms.find(p => p.name === 'LinkedIn');
+        // Directly set _browserId on the platform object (like launchLogin does)
+        linkedin._browserId = 'br-confirm';
+        linkedin._pageIndex = 0;
+        toolServiceClient.executeTool.mockImplementation((tool) => {
+            if (tool === 'page_extract') {
+                return Promise.resolve({ success: true, result: { count: 1, values: ['<img class="global-nav__me-photo">'] } });
+            }
+            return Promise.resolve({ success: false });
+        });
+
+        const result = await platformService.confirmLogin(SESSION, linkedin.id);
         expect(result.success).toBe(true);
-        expect(result.platform.status).toBe('connected');
+        expect(result.verified).toBe(true);
+        expect(result.method).toBe('dom');
+        linkedin._browserId = undefined;
+        toolServiceClient.executeTool.mockReset();
     });
 
-    test('returns error for unknown platform', () => {
-        const result = platformService.confirmLogin(SESSION, 'fake');
+    test('returns failure when login not detected', async () => {
+        const platforms = platformStore.getPlatforms(SESSION);
+        const linkedin = platforms.find(p => p.name === 'LinkedIn');
+        linkedin._browserId = 'br-confirm2';
+        linkedin._pageIndex = 0;
+        // DOM check returns 0 elements and no screenshot verifier set
+        toolServiceClient.executeTool.mockImplementation((tool) => {
+            if (tool === 'page_extract') {
+                return Promise.resolve({ success: true, result: { count: 0, values: [] } });
+            }
+            return Promise.resolve({ success: false });
+        });
+
+        const result = await platformService.confirmLogin(SESSION, linkedin.id);
+        expect(result.success).toBe(false);
+        expect(result.verified).toBe(false);
+        linkedin._browserId = undefined;
+        toolServiceClient.executeTool.mockReset();
+    });
+
+    test('falls back to manual for unknown platform (no detector)', async () => {
+        platformStore.addPlatform(SESSION, {
+            name: 'UnknownSite', url: 'https://unknown-jobs.example.com', enabled: true
+        });
+        const platforms = platformStore.getPlatforms(SESSION);
+        const unknown = platforms.find(p => p.name === 'UnknownSite');
+
+        const result = await platformService.confirmLogin(SESSION, unknown.id);
+        expect(result.success).toBe(true);
+        expect(result.verified).toBe(false);
+        expect(result.method).toBe('manual');
+    });
+
+    test('returns error for unknown platform id', async () => {
+        const result = await platformService.confirmLogin(SESSION, 'fake');
         expect(result.success).toBe(false);
     });
 });
