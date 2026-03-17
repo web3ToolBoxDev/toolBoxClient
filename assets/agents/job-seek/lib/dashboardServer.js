@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('http');
+const fs = require('fs');
 const { spawn, execSync } = require('child_process');
 const path = require('path');
 
@@ -90,14 +91,36 @@ let _stateGetter = null; // function that returns current agent state
 const _cliCache = {};
 function _isCliAvailable(cmd) {
     if (_cliCache[cmd] !== undefined) return _cliCache[cmd];
+    // Method 1: where/which (system PATH)
     try {
         const check = process.platform === 'win32' ? `where ${cmd}` : `which ${cmd}`;
         execSync(check, { stdio: 'ignore', timeout: 5000 });
         _cliCache[cmd] = true;
-    } catch (_) {
-        _cliCache[cmd] = false;
+        return true;
+    } catch (_) { /* not on PATH, try fallback methods */ }
+
+    // Method 2: Try running directly (catches npm global .cmd wrappers on Windows
+    // that may not be found by 'where' in child processes with limited PATH)
+    try {
+        execSync(`${cmd} --version`, { stdio: 'ignore', timeout: 8000 });
+        _cliCache[cmd] = true;
+        return true;
+    } catch (_) { /* not directly runnable */ }
+
+    // Method 3 (Windows only): Check npm global bin directory
+    if (process.platform === 'win32') {
+        try {
+            const npmGlobal = path.join(process.env.APPDATA || '', 'npm');
+            const cmdPath = path.join(npmGlobal, `${cmd}.cmd`);
+            if (fs.existsSync(cmdPath)) {
+                _cliCache[cmd] = true;
+                return true;
+            }
+        } catch (_) { /* fallthrough */ }
     }
-    return _cliCache[cmd];
+
+    _cliCache[cmd] = false;
+    return false;
 }
 
 /**
@@ -478,8 +501,23 @@ function start(getState, port) {
             req.on('data', chunk => { body += chunk; });
             req.on('end', () => {
                 try {
-                    const { minScore, targetCount, maxResults, envId, platforms, maxSearchRounds } = JSON.parse(body);
+                    const parsed = JSON.parse(body);
+                    const { minScore, targetCount, maxResults, envId, platforms, maxSearchRounds } = parsed;
                     const state = _stateGetter ? _stateGetter() : {};
+
+                    // Apply provider/model from request body if state doesn't have them
+                    // (dashboard UI sends provider, subProvider, model from user selection)
+                    if (parsed.provider && !state.currentProvider) {
+                        state.currentProvider = parsed.provider;
+                    }
+                    if (parsed.subProvider && !state.currentSubProvider) {
+                        state.currentSubProvider = parsed.subProvider;
+                    }
+                    if (parsed.model && !state.currentModel) {
+                        state.currentModel = parsed.model;
+                    }
+                    console.log(`[pipeline:start] provider='${state.currentProvider || ''}', subProvider='${state.currentSubProvider || ''}', model='${state.currentModel || ''}', apiKey=${state.runtimeApiKey ? 'SET' : 'EMPTY'}`);
+
                     const answers = state.selectedAnswers?.[sessionId] || {};
                     const sections = state.profileSections?.[sessionId] || {};
 
@@ -496,7 +534,6 @@ function start(getState, port) {
                     };
 
                     // Build AI invoke for failure analysis (fix rule generation)
-                    console.log(`[pipeline:start] state.currentProvider='${state.currentProvider || ''}', state.runtimeApiKey=${state.runtimeApiKey ? 'SET' : 'EMPTY'}`);
                     const aiInvoke = _createAiInvoke(state);
 
                     const result = getSearchPipeline().startPipeline(
@@ -870,6 +907,17 @@ function start(getState, port) {
                     if (!ctx.skillTaxonomy && state.skillTaxonomy?.[sid]) {
                         ctx.skillTaxonomy = state.skillTaxonomy[sid];
                     }
+                    // Build AI callbacks and attach to context so workflow steps can use them
+                    ctx.aiExpander = _buildAiExpander();
+                    ctx.aiMatcher = _buildAiMatcher();
+                    ctx.aiInvoke = _createAiInvoke(state);
+                    // Attach search history for dedup
+                    ctx.searchHistory = state.searchHistory?.[sid] || {};
+                    ctx.onHistorySave = (history) => {
+                        const st = _stateGetter ? _stateGetter() : {};
+                        if (!st.searchHistory) st.searchHistory = {};
+                        st.searchHistory[sid] = history;
+                    };
                     const result = await getWorkflowEngine().start(sid, wfConfig, ctx);
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(result));
@@ -902,6 +950,16 @@ function start(getState, port) {
                     const answers = state.selectedAnswers?.[sid] || {};
                     const sections = state.profileSections?.[sid] || {};
                     const ctx = body.context || { direction: answers, profile: sections };
+                    // Build AI callbacks for resumed workflow (same as start)
+                    ctx.aiExpander = _buildAiExpander();
+                    ctx.aiMatcher = _buildAiMatcher();
+                    ctx.aiInvoke = _createAiInvoke(state);
+                    ctx.searchHistory = state.searchHistory?.[sid] || {};
+                    ctx.onHistorySave = (history) => {
+                        const st = _stateGetter ? _stateGetter() : {};
+                        if (!st.searchHistory) st.searchHistory = {};
+                        st.searchHistory[sid] = history;
+                    };
                     const result = await getWorkflowEngine().resume(sid, wfConfig, ctx);
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(result));

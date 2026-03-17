@@ -28,7 +28,13 @@ async function execute({ sessionId, config, context }) {
         maxSearchRounds: config.search?.maxSearchRounds || 3,
         envId: context.envId || null,
         platforms: searchStep?.platforms || [],
-        skillTaxonomy: context.skillTaxonomy || null  // AI-generated taxonomy for smart matching
+        skillTaxonomy: context.skillTaxonomy || null,  // AI-generated taxonomy for smart matching
+        // AI callbacks injected by dashboardServer workflow routes
+        aiExpander: context.aiExpander || null,
+        aiMatcher: context.aiMatcher || null,
+        aiInvoke: context.aiInvoke || null,
+        searchHistory: context.searchHistory || {},
+        onHistorySave: context.onHistorySave || null
     };
 
     // Start pipeline
