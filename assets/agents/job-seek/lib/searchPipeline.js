@@ -366,6 +366,7 @@ function startPipeline(sessionId, config, direction, profile) {
             maxSearchRounds: config.maxSearchRounds || 3,
             aiExpander: config.aiExpander || null,  // injected AI callback for query expansion
             aiMatcher: config.aiMatcher || null,    // injected AI callback for full-JD matching
+            aiInvoke: config.aiInvoke || null,      // injected AI callback for self-heal (analyzeFailure + healScript)
             skillTaxonomy: config.skillTaxonomy || null,  // AI-generated skill taxonomy for smart matching
             onHistorySave: config.onHistorySave || null,  // callback to persist search history
             _prevTotalRuns: config.searchHistory?.totalRuns || 0
