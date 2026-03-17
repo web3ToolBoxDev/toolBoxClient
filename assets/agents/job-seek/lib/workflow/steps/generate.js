@@ -3,6 +3,10 @@
 /**
  * Step: Generate — creates tailored resumes, cover letters, and interview prep for matched jobs.
  *
+ * Uses AI (aiInvoke from context) to generate resume + cover letter in ONE call.
+ * Falls back to templates if AI is unavailable.
+ * Interview prep always generates a coaching prompt (not AI content).
+ *
  * Respects Workflow Editor toggles: tailorResume, coverLetter, interviewPrep.
  * Respects jobIds selection: if specified, only generates for those jobs.
  */
@@ -15,11 +19,11 @@ const dashboardServer = require('../../dashboardServer');
  * @param {object} params
  * @param {string} params.sessionId
  * @param {object} params.config - Workflow config
- * @param {object} params.context - { profile }
+ * @param {object} params.context - { profile, aiInvoke, ... }
  * @returns {object} Generation results summary
  */
 async function execute({ sessionId, config, context }) {
-    const { profile } = context;
+    const { profile, aiInvoke } = context;
 
     // Read generate step config from workflow editor
     const generateStep = (config.steps || []).find(s => s.name === 'generate');
@@ -45,44 +49,30 @@ async function execute({ sessionId, config, context }) {
     }
 
     let generated = 0;
+    let aiUsed = 0;
     const errors = [];
 
     for (const job of targetJobs) {
         try {
-            let jobSuccess = false;
+            const result = await searchPipeline.generateAllDocs(sessionId, job.url, profile, {
+                aiInvoke,
+                tailorResume: opts.tailorResume,
+                coverLetter: opts.coverLetter,
+                interviewPrep: opts.interviewPrep,
+                sessionProfile: context.sessionProfile || null
+            });
 
-            // Resume
-            if (opts.tailorResume) {
-                const resumeResult = await searchPipeline.generateResume(sessionId, job.url, profile);
-                if (resumeResult.error) {
-                    errors.push(`Resume for ${job.title}: ${resumeResult.error}`);
-                } else {
-                    jobSuccess = true;
-                }
-            }
+            if (result.error) {
+                errors.push(`${job.title}: ${result.error}`);
+            } else {
+                // Check individual results for errors
+                if (result.results?.resume?.error) errors.push(`Resume for ${job.title}: ${result.results.resume.error}`);
+                if (result.results?.coverLetter?.error) errors.push(`Cover letter for ${job.title}: ${result.results.coverLetter.error}`);
+                if (result.results?.interviewPrep?.error) errors.push(`Interview prep for ${job.title}: ${result.results.interviewPrep.error}`);
 
-            // Cover letter
-            if (opts.coverLetter) {
-                const coverResult = await searchPipeline.generateCoverLetter(sessionId, job.url, profile);
-                if (coverResult.error) {
-                    errors.push(`Cover letter for ${job.title}: ${coverResult.error}`);
-                } else {
-                    jobSuccess = true;
-                }
-            }
-
-            // Interview prep
-            if (opts.interviewPrep) {
-                const prepResult = await searchPipeline.generateInterviewPrep(sessionId, job.url, profile);
-                if (prepResult.error) {
-                    errors.push(`Interview prep for ${job.title}: ${prepResult.error}`);
-                } else {
-                    jobSuccess = true;
-                }
-            }
-
-            if (jobSuccess) {
-                generated++;
+                const hasSuccess = result.results?.resume?.success || result.results?.coverLetter?.success || result.results?.interviewPrep?.success;
+                if (hasSuccess) generated++;
+                if (result.aiGenerated) aiUsed++;
             }
         } catch (err) {
             errors.push(`${job.title}: ${err.message}`);
@@ -94,11 +84,14 @@ async function execute({ sessionId, config, context }) {
     if (opts.coverLetter) parts.push('cover letters');
     if (opts.interviewPrep) parts.push('interview prep');
 
+    const aiNote = aiUsed > 0 ? ` (${aiUsed} AI-generated)` : ' (template fallback)';
+
     return {
         generated,
         total: targetJobs.length,
+        aiUsed,
         errors,
-        summary: `Generated ${parts.join(' + ')} for ${generated}/${targetJobs.length} jobs${errors.length ? ` (${errors.length} errors)` : ''}`
+        summary: `Generated ${parts.join(' + ')} for ${generated}/${targetJobs.length} jobs${aiNote}${errors.length ? ` (${errors.length} errors)` : ''}`
     };
 }
 

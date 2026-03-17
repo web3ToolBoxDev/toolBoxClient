@@ -1290,7 +1290,7 @@ async function generateCoverLetter(sessionId, jobUrl, profile) {
 }
 
 /**
- * Generate interview prep questions for a specific job.
+ * Generate interview prep prompt for a specific job.
  */
 async function generateInterviewPrep(sessionId, jobUrl, profile) {
     const cards = dashboardServer.getJobCards(sessionId);
@@ -1309,6 +1309,231 @@ async function generateInterviewPrep(sessionId, jobUrl, profile) {
     } catch (err) {
         return { error: err.message };
     }
+}
+
+/**
+ * Build the AI prompt that generates Resume + Cover Letter in one call.
+ * Returns a structured prompt with clear delimiters for parsing.
+ */
+function _buildAiDocPrompt(job, profile) {
+    const req = job.artifacts?.requirements || {};
+    const techSkills = (req.technical || []).join(', ') || 'N/A';
+    const responsibilities = (req.responsibilities || []).map(r => `- ${r}`).join('\n') || 'N/A';
+
+    const candidateLines = [];
+    if (profile) {
+        for (const [section, content] of Object.entries(profile)) {
+            if (content && typeof content === 'string' && content.trim()) {
+                candidateLines.push(`**${section}:** ${content.trim()}`);
+            } else if (content && typeof content === 'object') {
+                candidateLines.push(`**${section}:** ${JSON.stringify(content)}`);
+            }
+        }
+    }
+    const candidateSnapshot = candidateLines.length > 0 ? candidateLines.join('\n') : 'No profile provided.';
+
+    return `You are an expert career consultant. Generate TWO documents for a job application. Output them in the EXACT format below with the delimiters shown. Do NOT add any text outside the delimiters.
+
+## Target Position
+- Title: ${job.title || 'N/A'}
+- Company: ${job.company || 'N/A'}
+- Location: ${job.location || 'N/A'}
+
+## Job Requirements
+Technical Skills: ${techSkills}
+Responsibilities:
+${responsibilities}
+Education: ${req.education || 'N/A'}
+Experience: ${req.experience || 'N/A'}
+
+## Candidate Background
+${candidateSnapshot}
+
+## Match Score: ${job.matchScore || 'N/A'}%
+
+---
+
+Now generate BOTH documents below. Use Markdown formatting.
+
+===RESUME_START===
+Generate a professional, ATS-optimized resume in Markdown. Include:
+- Candidate name as H1
+- Contact info (email, phone, location) on one line
+- Professional Summary (2-3 sentences highlighting fit for THIS role)
+- Technical Skills section (emphasize skills matching the job requirements)
+- Work Experience (most relevant first, use bullet points with metrics/achievements)
+- Education
+- Certifications/Projects (if relevant)
+
+Keep it concise (1-2 pages when printed). Tailor every section to match the job requirements.
+===RESUME_END===
+
+===COVER_LETTER_START===
+Generate a professional cover letter in Markdown. Include:
+- Date and greeting (Dear Hiring Manager at {Company})
+- Opening paragraph: Express interest, mention the specific role
+- Body paragraph 1: Highlight 2-3 technical skills that match the requirements, with specific examples
+- Body paragraph 2: Demonstrate understanding of the company/role, explain why you're a great fit
+- Closing paragraph: Call to action, express enthusiasm
+- Professional sign-off
+
+Keep it under 400 words. Professional but not generic — reference specific requirements from the JD.
+===COVER_LETTER_END===`;
+}
+
+/**
+ * Parse AI response to extract resume and cover letter sections.
+ */
+function _parseAiDocResponse(raw) {
+    const result = { resume: null, coverLetter: null };
+    const resumeMatch = raw.match(/===RESUME_START===([\s\S]*?)===RESUME_END===/);
+    if (resumeMatch) result.resume = resumeMatch[1].trim();
+    const coverMatch = raw.match(/===COVER_LETTER_START===([\s\S]*?)===COVER_LETTER_END===/);
+    if (coverMatch) result.coverLetter = coverMatch[1].trim();
+    return result;
+}
+
+/**
+ * Generate all documents for a job in one AI call:
+ *  - Resume (AI-generated markdown → DOCX)
+ *  - Cover Letter (AI-generated markdown → DOCX)
+ *  - Interview Prep (prompt template, no AI needed)
+ *
+ * Falls back to templates if AI is unavailable.
+ *
+ * @param {string} sessionId
+ * @param {string} jobUrl
+ * @param {object} profile
+ * @param {object} options - { aiInvoke, tailorResume, coverLetter, interviewPrep, sessionProfile }
+ */
+async function generateAllDocs(sessionId, jobUrl, profile, options = {}) {
+    const { aiInvoke, tailorResume = true, coverLetter = true, interviewPrep = true, sessionProfile } = options;
+
+    const cards = dashboardServer.getJobCards(sessionId);
+    const job = cards.find(c => c.url === jobUrl);
+    if (!job) return { error: 'Job not found' };
+
+    const results = { resume: null, coverLetter: null, interviewPrep: null, aiGenerated: false };
+    const errors = [];
+
+    // --- Try AI-powered generation for resume + cover letter ---
+    const needAiDocs = tailorResume || coverLetter;
+    let aiResumeMd = null;
+    let aiCoverMd = null;
+
+    if (needAiDocs && aiInvoke) {
+        try {
+            console.log(`[generateAllDocs] AI generation for ${job.title} @ ${job.company}`);
+            const prompt = _buildAiDocPrompt(job, profile);
+            const raw = await aiInvoke(prompt);
+            const parsed = _parseAiDocResponse(raw);
+            aiResumeMd = parsed.resume;
+            aiCoverMd = parsed.coverLetter;
+            results.aiGenerated = true;
+            console.log(`[generateAllDocs] AI output: resume=${aiResumeMd ? aiResumeMd.length + ' chars' : 'MISS'}, cover=${aiCoverMd ? aiCoverMd.length + ' chars' : 'MISS'}`);
+        } catch (err) {
+            console.error(`[generateAllDocs] AI failed, falling back to templates: ${err.message}`);
+        }
+    }
+
+    // --- Resume ---
+    if (tailorResume) {
+        try {
+            let resumeMd = aiResumeMd;
+            // Fallback to template if AI didn't produce a resume
+            if (!resumeMd) {
+                const tmpl = resumeGenHandler({
+                    profile, sessionProfile: sessionProfile || null,
+                    jobTitle: job.title, company: job.company,
+                    requirements: job.artifacts?.requirements || {},
+                    matchResult: job.matchBreakdown ? { breakdown: job.matchBreakdown } : undefined
+                });
+                resumeMd = tmpl.markdown;
+            }
+
+            let resumeDocx = null;
+            try {
+                const { markdownToDocx } = require('./tools/docxBuilder');
+                const docxResult = await markdownToDocx(resumeMd, { type: 'Resume', company: job.company, title: job.title });
+                resumeDocx = docxResult.buffer.toString('base64');
+            } catch (docxErr) {
+                console.error('[generateAllDocs] Resume DOCX failed:', docxErr.message);
+            }
+
+            dashboardServer.upsertJobCard(sessionId, {
+                url: jobUrl, status: 'tailored',
+                artifacts: { resume: resumeMd, resumeDocx }
+            });
+
+            // Knowledge store
+            try {
+                const knowledgeClient = require('./core/knowledgeClient');
+                const crypto = require('crypto');
+                const urlHash = crypto.createHash('md5').update(jobUrl).digest('hex').slice(0, 12);
+                knowledgeClient.upsert({
+                    refId: `resume_${urlHash}`, type: 'resume_variant', scope: `session:${sessionId}`,
+                    content: resumeMd, summary: `${job.title} @ ${job.company}`,
+                    tags: ['resume', job.company || 'unknown'],
+                    metadata: { jobUrl, jobTitle: job.title, company: job.company, matchScore: job.matchScore || 0, aiGenerated: results.aiGenerated }
+                }).catch(() => {});
+            } catch (_) {}
+
+            results.resume = { success: true, markdown: resumeMd };
+        } catch (err) {
+            errors.push(`Resume: ${err.message}`);
+            results.resume = { error: err.message };
+        }
+    }
+
+    // --- Cover Letter ---
+    if (coverLetter) {
+        try {
+            let coverMd = aiCoverMd;
+            if (!coverMd) {
+                const tmpl = coverLetterHandler({
+                    profile, company: job.company, jobTitle: job.title,
+                    requirements: job.artifacts?.requirements || {}
+                });
+                coverMd = tmpl.markdown;
+            }
+
+            let coverLetterDocx = null;
+            try {
+                const { markdownToDocx } = require('./tools/docxBuilder');
+                const docxResult = await markdownToDocx(coverMd, { type: 'CoverLetter', company: job.company, title: job.title });
+                coverLetterDocx = docxResult.buffer.toString('base64');
+            } catch (docxErr) {
+                console.error('[generateAllDocs] Cover letter DOCX failed:', docxErr.message);
+            }
+
+            dashboardServer.upsertJobCard(sessionId, {
+                url: jobUrl,
+                artifacts: { coverLetter: coverMd, coverLetterDocx }
+            });
+
+            results.coverLetter = { success: true, markdown: coverMd };
+        } catch (err) {
+            errors.push(`Cover Letter: ${err.message}`);
+            results.coverLetter = { error: err.message };
+        }
+    }
+
+    // --- Interview Prep (always template — it's a prompt for the user to paste into AI) ---
+    if (interviewPrep) {
+        try {
+            const promptMd = _buildInterviewPrompt(job, profile);
+            dashboardServer.upsertJobCard(sessionId, {
+                url: jobUrl,
+                artifacts: { interviewPrep: promptMd }
+            });
+            results.interviewPrep = { success: true, markdown: promptMd };
+        } catch (err) {
+            errors.push(`Interview Prep: ${err.message}`);
+            results.interviewPrep = { error: err.message };
+        }
+    }
+
+    return { success: true, results, errors, job, aiGenerated: results.aiGenerated };
 }
 
 /**
@@ -1338,6 +1563,7 @@ module.exports = {
     generateResume,
     generateCoverLetter,
     generateInterviewPrep,
+    generateAllDocs,
     markApplied,
     getHistory,
     buildSearchQueries,
