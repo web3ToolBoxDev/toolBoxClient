@@ -86,6 +86,7 @@ function getAlertService() {
 let _port = DASHBOARD_PORT;
 let _server = null;
 let _stateGetter = null; // function that returns current agent state
+let _scheduleSave = null; // callback to trigger debounced state save
 
 // ─── CLI auto-detection (mirrors agent.js resolveProvider logic) ───
 const _cliCache = {};
@@ -391,8 +392,9 @@ function _createAiInvoke(state) {
  * @param {Function} getState - returns current agent state
  * @param {number} [port] - optional port override (for testing)
  */
-function start(getState, port) {
+function start(getState, port, options) {
     _stateGetter = getState; // Always update stateGetter even if server already running
+    if (options?.scheduleSave) _scheduleSave = options.scheduleSave;
     if (_server) return _port;
     _port = port || DASHBOARD_PORT;
 
@@ -2237,6 +2239,8 @@ function _syncJobCardsToState(sessionId) {
         obj[url] = rest;
     }
     state.jobCards[sessionId] = obj;
+    // Trigger debounced save so jobCards are persisted to disk
+    if (_scheduleSave) _scheduleSave();
 }
 
 /**

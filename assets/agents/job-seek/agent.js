@@ -2767,7 +2767,7 @@ function initWebSocket() {
         startHeartBeat();
         send({ type: 'request_task_data', data: '' });
         // Start dashboard server (idempotent — only starts once)
-        dashboardServer.start(() => state);
+        dashboardServer.start(() => state, undefined, { scheduleSave });
     });
 
     ws.on('message', (raw) => {
