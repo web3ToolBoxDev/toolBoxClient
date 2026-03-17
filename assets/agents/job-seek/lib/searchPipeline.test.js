@@ -109,6 +109,34 @@ describe('searchPipeline', () => {
             const queries = pipeline.buildSearchQueries({ jobTitle: 'QA' }, PROFILE);
             expect(queries[0].query).toBe('QA');
         });
+
+        it('rotates skill in augmented query based on totalRuns', () => {
+            const prof = { skills: 'React, Node, TypeScript' };
+            const dir = { q_job_title: 'Dev', q_location: 'Toronto' };
+
+            const run0 = pipeline.buildSearchQueries(dir, prof, { totalRuns: 0 });
+            const run1 = pipeline.buildSearchQueries(dir, prof, { totalRuns: 1 });
+            const run2 = pipeline.buildSearchQueries(dir, prof, { totalRuns: 2 });
+            const run3 = pipeline.buildSearchQueries(dir, prof, { totalRuns: 3 });
+
+            const skillQ0 = run0.find(q => q.query.includes('React'));
+            const skillQ1 = run1.find(q => q.query.includes('Node'));
+            const skillQ2 = run2.find(q => q.query.includes('TypeScript'));
+            const skillQ3 = run3.find(q => q.query.includes('React')); // wraps around
+
+            expect(skillQ0).toBeDefined();
+            expect(skillQ1).toBeDefined();
+            expect(skillQ2).toBeDefined();
+            expect(skillQ3).toBeDefined();
+        });
+
+        it('attaches pageOffset from history', () => {
+            const dir = { q_job_title: 'Dev', q_location: 'Toronto' };
+            const pageOffsets = { 'indeed|Dev|Toronto': 3 };
+            const queries = pipeline.buildSearchQueries(dir, PROFILE, { pageOffsets });
+            const indeedPrimary = queries.find(q => q.source === 'indeed' && q.query === 'Dev');
+            expect(indeedPrimary.pageOffset).toBe(3);
+        });
     });
 
     // ─── startPipeline ───

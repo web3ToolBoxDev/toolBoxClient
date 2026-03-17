@@ -298,8 +298,9 @@ function buildSearchQueries(direction, profile, options = {}) {
     const jobTitle = direction.q_job_title || direction.jobTitle || '';
     const location = direction.q_location || direction.location || '';
     const rawSkills = profile.skills || '';
-    const skills = (Array.isArray(rawSkills) ? rawSkills : rawSkills.split(/[,，\n]/)).map(s => String(s).trim()).filter(Boolean).slice(0, 3);
+    const skills = (Array.isArray(rawSkills) ? rawSkills : rawSkills.split(/[,，\n]/)).map(s => String(s).trim()).filter(Boolean).slice(0, 6);
     const pageOffsets = options.pageOffsets || {};
+    const totalRuns = options.totalRuns || 0;  // how many previous pipeline runs
 
     if (!jobTitle) return queries;
 
@@ -318,9 +319,11 @@ function buildSearchQueries(direction, profile, options = {}) {
         queries.push({ ...base, query: jobTitle, location, source: sources[1] });
     }
 
-    // Skill-augmented query on primary source
+    // Skill-augmented query on primary source — rotate skill on repeat runs
     if (skills.length > 0) {
-        queries.push({ ...base, query: `${jobTitle} ${skills[0]}`, location, source: primarySource });
+        const skillIdx = totalRuns % skills.length;
+        const chosenSkill = skills[skillIdx];
+        queries.push({ ...base, query: `${jobTitle} ${chosenSkill}`, location, source: primarySource });
     }
 
     // Broader query without location (remote jobs) on a different source
@@ -424,7 +427,25 @@ async function _runPipeline(sessionId) {
     if (!pipeline) return;
 
     const { config, direction, profile } = pipeline;
-    const initialQueries = buildSearchQueries(direction, profile, { envId: config.envId, pageOffsets: pipeline._pageOffsets });
+    const totalRuns = config._prevTotalRuns || 0;
+
+    // On repeat runs (totalRuns > 0): auto-advance pageOffset for primary queries
+    // so we fetch page 2, 3, etc. instead of always page 1
+    if (totalRuns > 0) {
+        const primaryQueries = buildSearchQueries(direction, profile, { envId: config.envId, pageOffsets: {} });
+        for (const q of primaryQueries) {
+            const key = `${q.source}|${q.query}|${q.location}`;
+            if (!pipeline._pageOffsets[key]) {
+                pipeline._pageOffsets[key] = totalRuns; // advance by number of runs
+            }
+        }
+    }
+
+    // Pre-load seen URLs for history diagnostics and overlap detection
+    const previouslySeen = _getSeenJobs(sessionId);
+    const seenUrls = new Set(previouslySeen);
+
+    const initialQueries = buildSearchQueries(direction, profile, { envId: config.envId, pageOffsets: pipeline._pageOffsets, totalRuns });
     pipeline._allQueries.push(...initialQueries); // track for adaptive dedup (append to restored history)
     const _log = (msg, meta) => {
         const entry = { time: new Date().toISOString(), msg, ...(meta || {}) };
@@ -439,7 +460,8 @@ async function _runPipeline(sessionId) {
     _log(`Starting search: "${jobTitle}" in "${location || 'any'}" via ${mode}`);
     _log(`Config: minScore=${config.minScore}, targetCount=${config.targetCount}/platform, maxResults=${config.maxResults}/platform`);
     _log(`AI: aiMatcher=${config.aiMatcher ? 'SET' : 'NULL'}, aiInvoke=${config.aiInvoke ? 'SET' : 'NULL'}, aiExpander=${config.aiExpander ? 'SET' : 'NULL'}`);
-    _log(`Queries: ${queries.map(q => `[${q.source}] "${q.query}" @ ${q.location || 'remote'}`).join(' | ')}`);
+    _log(`History: run #${totalRuns + 1}, ${previouslySeen.size} seen URLs, ${Object.keys(pipeline._pageOffsets).length} page offsets`);
+    _log(`Queries: ${queries.map(q => `[${q.source}] "${q.query}" @ ${q.location || 'remote'}${q.pageOffset ? ` (page ${q.pageOffset})` : ''}`).join(' | ')}`);
 
     if (queries.length === 0) {
         pipeline.running = false;
@@ -452,11 +474,8 @@ async function _runPipeline(sessionId) {
     // Phase 1: Search — uses platform tool scripts only (no API fallback)
     pipeline.progress.phase = 'searching';
     const allListings = [];
-    // Merge previously seen job URLs so we skip already-parsed jobs
-    const previouslySeen = _getSeenJobs(sessionId);
-    const seenUrls = new Set(previouslySeen);
     if (previouslySeen.size > 0) {
-        _log(`Loaded ${previouslySeen.size} previously seen job URLs — will skip`);
+        _log(`Loaded ${previouslySeen.size} previously seen job URLs — will filter duplicates`);
     }
 
     // Resolve available platform tools for search
@@ -669,6 +688,7 @@ async function _runPipeline(sessionId) {
                 for (const listing of listings) {
                     if (listing.url && !seenUrls.has(listing.url)) {
                         seenUrls.add(listing.url);
+                        _addSeenJob(sessionId, listing.url); // persist for cross-run overlap detection
                         allListings.push(listing);
                         _sourceResultCount[q.source] = (_sourceResultCount[q.source] || 0) + 1;
                         _log(`+ "${listing.title}" @ ${listing.company || '?'} (${listing.location || '?'})`);
