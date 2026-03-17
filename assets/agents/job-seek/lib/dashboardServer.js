@@ -3728,7 +3728,7 @@ function showDocModal(jobUrl, defaultTab) {
 }
 function _renderDocTabs(tabs) {
     document.getElementById('docTabs').innerHTML = tabs.map(function(k){
-        return '<div class="doc-tab'+(k===_docModal.activeTab?' active':'')+'" onclick="switchDocTab(\''+k+'\')">'+_docTabLabels[k]+'</div>';
+        return '<div class="doc-tab'+(k===_docModal.activeTab?' active':'')+'" onclick="switchDocTab(\\''+k+'\\')">'+_docTabLabels[k]+'</div>';
     }).join('');
 }
 function switchDocTab(key) {
@@ -3753,7 +3753,7 @@ function downloadCurrentDoc() {
 }
 function copyModalContent() {
     var sections = _docModal.docs[_docModal.activeTab] || [];
-    var text = sections.map(function(s){return '# '+s.title+'\n\n'+s.content;}).join('\n\n---\n\n');
+    var text = sections.map(function(s){return '# '+s.title+'\\n\\n'+s.content;}).join('\\n\\n---\\n\\n');
     if (!text) return;
     navigator.clipboard.writeText(text).catch(function(){
         var ta = document.createElement('textarea');
