@@ -94,4 +94,66 @@ describe('sessionStore', () => {
         expect(PERSIST_KEYS).not.toContain('runtimeApiKey');
         expect(PERSIST_KEYS).not.toContain('apiKeyConfiguredHint');
     });
+
+    it('PERSIST_KEYS includes jobCards for job list persistence', () => {
+        expect(PERSIST_KEYS).toContain('jobCards');
+    });
+
+    it('saves and loads jobCards correctly', () => {
+        const state = {
+            sessions: [{ id: 's1', name: 'Test', updatedAt: 1000 }],
+            activeSessionId: 's1',
+            jobCards: {
+                s1: {
+                    'https://example.com/job1': {
+                        url: 'https://example.com/job1',
+                        title: 'Full Stack Developer',
+                        company: 'Acme Corp',
+                        matchScore: 75,
+                        status: 'matched',
+                        updatedAt: '2026-03-17T00:00:00.000Z'
+                    },
+                    'https://example.com/job2': {
+                        url: 'https://example.com/job2',
+                        title: 'Senior Engineer',
+                        company: 'BigCo',
+                        matchScore: 82,
+                        status: 'tailored',
+                        updatedAt: '2026-03-17T01:00:00.000Z'
+                    }
+                }
+            }
+        };
+
+        save(tmpDir, state);
+        const loaded = load(tmpDir);
+
+        expect(loaded.jobCards).toBeDefined();
+        expect(loaded.jobCards.s1).toBeDefined();
+        expect(Object.keys(loaded.jobCards.s1)).toHaveLength(2);
+        expect(loaded.jobCards.s1['https://example.com/job1'].title).toBe('Full Stack Developer');
+        expect(loaded.jobCards.s1['https://example.com/job2'].matchScore).toBe(82);
+    });
+
+    it('saves and loads searchHistory correctly', () => {
+        const state = {
+            sessions: [{ id: 's1', name: 'Test', updatedAt: 1000 }],
+            activeSessionId: 's1',
+            searchHistory: {
+                s1: {
+                    seenUrls: ['https://j.com/1', 'https://j.com/2'],
+                    pageOffsets: { 'indeed|Dev|Toronto': 2 },
+                    totalRuns: 3
+                }
+            }
+        };
+
+        save(tmpDir, state);
+        const loaded = load(tmpDir);
+
+        expect(loaded.searchHistory).toBeDefined();
+        expect(loaded.searchHistory.s1.seenUrls).toHaveLength(2);
+        expect(loaded.searchHistory.s1.pageOffsets['indeed|Dev|Toronto']).toBe(2);
+        expect(loaded.searchHistory.s1.totalRuns).toBe(3);
+    });
 });

@@ -492,4 +492,124 @@ describe('searchPipeline', () => {
             expect(dupJS).toHaveLength(0);
         });
     });
+
+    // ─── aiInvoke propagation ───
+    describe('startPipeline config propagation', () => {
+        it('copies aiInvoke into pipeline.config', () => {
+            const mockAiInvoke = jest.fn();
+            const result = pipeline.startPipeline('ai-invoke-prop-1', {
+                aiInvoke: mockAiInvoke,
+                aiMatcher: jest.fn(),
+                aiExpander: jest.fn()
+            }, DIRECTION, PROFILE);
+            expect(result.config.aiInvoke).toBe(mockAiInvoke);
+        });
+
+        it('copies aiMatcher and aiExpander into pipeline.config', () => {
+            const mockMatcher = jest.fn();
+            const mockExpander = jest.fn();
+            const result = pipeline.startPipeline('ai-all-prop-1', {
+                aiInvoke: jest.fn(),
+                aiMatcher: mockMatcher,
+                aiExpander: mockExpander
+            }, DIRECTION, PROFILE);
+            expect(result.config.aiMatcher).toBe(mockMatcher);
+            expect(result.config.aiExpander).toBe(mockExpander);
+        });
+
+        it('defaults aiInvoke to null when not provided', () => {
+            const result = pipeline.startPipeline('ai-null-prop-1', {}, DIRECTION, PROFILE);
+            expect(result.config.aiInvoke).toBeNull();
+        });
+    });
+
+    // ─── self-heal on low/zero results ───
+    describe('self-heal triggers', () => {
+        beforeEach(() => {
+            mockPlatformList.length = 0;
+            mockPlatformList.push(
+                { id: 'plat_linkedin', name: 'LinkedIn', url: 'https://www.linkedin.com/jobs', tools: { search: { status: 'ready', script: 'test' } }, _browserId: 'br_mock', _pageIndex: 0 }
+            );
+            mockExecuteSearch.mockReset();
+        });
+
+        afterEach(() => {
+            mockPlatformList.length = 0;
+        });
+
+        it('triggers self-heal when results < LOW_RESULT_THRESHOLD and aiInvoke is set', async () => {
+            // Return 1 result (below threshold of 3)
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: [{ url: 'https://ln.com/1', title: 'Développeur ServiceNow', fullText: 'some text' }]
+            });
+            matchProfileHandler.mockReturnValue({ overallScore: 25 });
+
+            const mockAiInvoke = jest.fn().mockResolvedValue('{"rule": "check location filter"}');
+            // Also mock scriptBuilder.analyzeFailure and healScript
+            const scriptBuilder = require('./workflow/scriptBuilder');
+            scriptBuilder.analyzeFailure = jest.fn().mockResolvedValue({ rule: 'check location' });
+            scriptBuilder.healScript = jest.fn().mockResolvedValue({ success: false, error: 'no fix found' });
+
+            pipeline.startPipeline('heal-low-1', {
+                minScore: 60, targetCount: 10,
+                aiInvoke: mockAiInvoke,
+                platforms: ['plat_linkedin']
+            }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
+
+            await new Promise(r => setTimeout(r, 1000));
+
+            // Verify self-heal was attempted (updatePlatformCell with warning)
+            const warningCalls = dashboardServer.updatePlatformCell.mock.calls
+                .filter(c => c[2]?.status === 'warning');
+            expect(warningCalls.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('triggers self-heal on 0 results when aiInvoke is set', async () => {
+            // Return 0 results
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: []
+            });
+
+            const mockAiInvoke = jest.fn().mockResolvedValue('{"rule": "fix selectors"}');
+            const scriptBuilder = require('./workflow/scriptBuilder');
+            scriptBuilder.analyzeFailure = jest.fn().mockResolvedValue({ rule: 'fix selectors' });
+            scriptBuilder.healScript = jest.fn().mockResolvedValue({ success: false, error: 'no fix' });
+
+            pipeline.startPipeline('heal-zero-1', {
+                minScore: 60, targetCount: 10,
+                aiInvoke: mockAiInvoke,
+                platforms: ['plat_linkedin']
+            }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
+
+            await new Promise(r => setTimeout(r, 1000));
+
+            // Should trigger warning for 0 results
+            const warningCalls = dashboardServer.updatePlatformCell.mock.calls
+                .filter(c => c[2]?.status === 'warning');
+            expect(warningCalls.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('does NOT trigger self-heal when aiInvoke is null', async () => {
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: [{ url: 'https://ln.com/2', title: 'Dev', fullText: 'text' }]
+            });
+            matchProfileHandler.mockReturnValue({ overallScore: 25 });
+
+            pipeline.startPipeline('heal-null-1', {
+                minScore: 60, targetCount: 10,
+                aiInvoke: null, // explicitly null
+                platforms: ['plat_linkedin']
+            }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
+
+            await new Promise(r => setTimeout(r, 1000));
+
+            // No warning calls for self-heal
+            const warningCalls = dashboardServer.updatePlatformCell.mock.calls
+                .filter(c => c[2]?.status === 'warning' && c[2]?.message?.includes('healing'));
+            expect(warningCalls).toHaveLength(0);
+        });
+    });
 });
