@@ -2772,6 +2772,9 @@ function buildDashboardHTML(sessionId) {
   .wfe-card-toggle { background: none; border: none; color: #ef4444; font-size: 1.2rem; cursor: pointer; padding: 0 4px; line-height: 1; }
   .wfe-card-toggle:hover { color: #f87171; }
   .wfe-card-toggle.off { color: #22c55e; }
+  .wfe-card-toggle.locked { color: #6a7eff; cursor: default; font-size: 0.7rem; font-weight: 600; }
+  .wfe-card-toggle.locked:hover { color: #6a7eff; }
+  .wfe-dep-hint { color: #9da0c3; font-size: 0.75rem; text-align: center; padding: 1rem 0.5rem; font-style: italic; }
   .wfe-card-body { display: flex; flex-direction: column; gap: 0.6rem; }
 
   /* Toggle switch */
@@ -3161,6 +3164,7 @@ var _i18n = {
         wfeInterviewPrep: 'Interview Prep', wfeConfirmBeforeApply: 'Confirm Before Apply',
         wfeJobs: 'Jobs', wfeNoReadyPlatform: 'No platform with ready tool',
         wfeNoJobs: 'No eligible jobs',
+        wfeRequired: 'Required', wfeRequiresSearch: 'Requires Search', wfeRequiresGenerate: 'Requires Generate',
         wfeMinScoreHint: 'Jobs scoring below this % are skipped',
         wfeTargetCountHint: 'Stop searching each platform after finding this many qualified jobs',
         wfeMaxResultsHint: 'Max jobs to fetch per platform before moving to next',
@@ -3212,6 +3216,7 @@ var _i18n = {
         wfeInterviewPrep: '面试准备', wfeConfirmBeforeApply: '投前确认',
         wfeJobs: '职位', wfeNoReadyPlatform: '无可用平台工具',
         wfeNoJobs: '无可选职位',
+        wfeRequired: '必需', wfeRequiresSearch: '需要先启用搜索', wfeRequiresGenerate: '需要先启用生成',
         wfeMinScoreHint: '低于此分数的职位将被跳过',
         wfeTargetCountHint: '每个平台找到此数量的合格职位后停止该平台搜索',
         wfeMaxResultsHint: '每个平台最多抓取的职位数量',
@@ -3926,12 +3931,24 @@ function renderWfeCard(step, cfg, t) {
     var disabled = !step.enabled;
     var cls = 'wfe-card' + (disabled ? ' disabled' : '');
     var nameMap = { search: t.wfeSearch, generate: t.wfeGenerate, apply: t.wfeApply };
-    var toggleIcon = disabled ? '+' : '✕';
-    var toggleCls = 'wfe-card-toggle' + (disabled ? ' off' : '');
+
+    // Determine dependency state for the toggle button
+    var getStep = function(n) { return (cfg.steps || []).find(function(s) { return s.name === n; }); };
+    var searchEnabled = getStep('search')?.enabled;
+    var genEnabled = getStep('generate')?.enabled;
+
+    var toggleBtn = '';
+    if (step.name === 'search') {
+        // Search is always required — show lock badge, no click
+        toggleBtn = '<span class="wfe-card-toggle locked" title="' + t.wfeRequired + '">&#128274;</span>';
+    } else {
+        var toggleIcon = disabled ? '+' : '✕';
+        var toggleCls = 'wfe-card-toggle' + (disabled ? ' off' : '');
+        toggleBtn = '<button class="' + toggleCls + '" onclick="toggleWfStep(&quot;' + step.name + '&quot;)">' + toggleIcon + '</button>';
+    }
 
     var h = '<div class="' + cls + '" id="wfeCard_' + step.name + '">';
-    h += '<div class="wfe-card-header"><h4>' + (nameMap[step.name] || step.name) + '</h4>';
-    h += '<button class="' + toggleCls + '" onclick="toggleWfStep(&quot;' + step.name + '&quot;)">' + toggleIcon + '</button></div>';
+    h += '<div class="wfe-card-header"><h4>' + (nameMap[step.name] || step.name) + '</h4>' + toggleBtn + '</div>';
     h += '<div class="wfe-card-body">';
 
     if (step.name === 'search') {
@@ -3942,14 +3959,22 @@ function renderWfeCard(step, cfg, t) {
     }
 
     if (step.name === 'generate') {
-        h += wfeToggle('wfe_tailorResume', t.wfeTailorResume, step.tailorResume !== false);
-        h += wfeToggle('wfe_coverLetter', t.wfeCoverLetter, step.coverLetter !== false);
-        h += wfeToggle('wfe_interviewPrep', t.wfeInterviewPrep, step.interviewPrep !== false);
+        if (disabled && !searchEnabled) {
+            h += '<div class="wfe-dep-hint">' + t.wfeRequiresSearch + '</div>';
+        } else {
+            h += wfeToggle('wfe_tailorResume', t.wfeTailorResume, step.tailorResume !== false);
+            h += wfeToggle('wfe_coverLetter', t.wfeCoverLetter, step.coverLetter !== false);
+            h += wfeToggle('wfe_interviewPrep', t.wfeInterviewPrep, step.interviewPrep !== false);
+        }
     }
 
     if (step.name === 'apply') {
-        h += wfeToggle('wfe_confirmBeforeApply', t.wfeConfirmBeforeApply, step.confirmBeforeApply !== false);
-        h += wfePlatformList(step, 'apply', t);
+        if (disabled && !genEnabled) {
+            h += '<div class="wfe-dep-hint">' + t.wfeRequiresGenerate + '</div>';
+        } else {
+            h += wfeToggle('wfe_confirmBeforeApply', t.wfeConfirmBeforeApply, step.confirmBeforeApply !== false);
+            h += wfePlatformList(step, 'apply', t);
+        }
     }
 
     h += '</div></div>';
@@ -4032,36 +4057,25 @@ function wfeJobList(step, forStep, t) {
 
 function toggleWfStep(name) {
     if (!_wfeConfig || !_wfeConfig.steps) return;
+    if (name === 'search') return; // Search is always required, toggle handled by locked badge
+
     var step = _wfeConfig.steps.find(function(s) { return s.name === name; });
     if (!step) return;
 
     var getStep = function(n) { return _wfeConfig.steps.find(function(s) { return s.name === n; }); };
-    var searchStep = getStep('search');
     var genStep = getStep('generate');
     var applyStep = getStep('apply');
 
     if (step.enabled) {
-        // Disabling a step — cascade: disabling search disables generate+apply, disabling generate disables apply
-        // At least search must remain enabled
-        if (name === 'search') {
-            alert('Search is required — it cannot be disabled');
-            return;
-        }
+        // Disabling — cascade: disabling generate also disables apply
         step.enabled = false;
         if (name === 'generate' && applyStep && applyStep.enabled) {
             applyStep.enabled = false;
         }
     } else {
-        // Enabling a step — enforce prerequisites: generate needs search, apply needs generate+search
-        if (name === 'generate' && searchStep && !searchStep.enabled) {
-            alert('Search must be enabled before Generate');
-            return;
-        }
-        if (name === 'apply') {
-            if (genStep && !genStep.enabled) {
-                alert('Generate must be enabled before Apply');
-                return;
-            }
+        // Enabling — auto-enable prerequisites
+        if (name === 'apply' && genStep && !genStep.enabled) {
+            genStep.enabled = true; // auto-enable generate when enabling apply
         }
         step.enabled = true;
     }
