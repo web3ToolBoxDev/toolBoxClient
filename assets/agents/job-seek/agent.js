@@ -852,21 +852,24 @@ async function _buildDashboardAndFinish(sessionId, opts = {}) {
         workflowStore.getConfig(sessionId, location);
     }
 
-    // Remove old dashboard artifacts before adding new one
-    if (state.artifacts[sessionId]) {
-        state.artifacts[sessionId] = state.artifacts[sessionId].filter(
-            (a) => a.type !== 'dashboard'
-        );
-    }
+    // Remove old dashboard artifacts and add new one atomically
+    if (!state.artifacts[sessionId]) state.artifacts[sessionId] = [];
+    state.artifacts[sessionId] = state.artifacts[sessionId].filter(
+        (a) => a.type !== 'dashboard'
+    );
     const dashUrl = dashboardServer.getDashboardURL(sessionId);
     console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
-    appendArtifact(sessionId, {
+    const dashArtifact = {
         id: `dashboard-${sessionId}`,
         type: 'dashboard',
         title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
         url: dashUrl,
         openUrl: true
-    });
+    };
+    state.artifacts[sessionId].push(dashArtifact);
+    // Emit full replace (not append) to avoid transient duplicate in frontend
+    emit('agent_artifact_replace', { sessionId, artifacts: state.artifacts[sessionId] });
+    appendRuntimeLog(sessionId, `artifact -> ${dashArtifact.title}`, { source: 'artifact' });
 
     // Auto-finish: dashboard build is instant, mark done
     updateSubTasks(sessionId, (list) => {
@@ -2273,18 +2276,14 @@ async function checkAndCompleteOnboarding(sessionId) {
             // Auto-generate dashboard
             try {
                 buildIntentFile(sessionId);
-                if (state.artifacts[sessionId]) {
-                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(a => a.type !== 'dashboard');
-                }
+                if (!state.artifacts[sessionId]) state.artifacts[sessionId] = [];
+                state.artifacts[sessionId] = state.artifacts[sessionId].filter(a => a.type !== 'dashboard');
                 const dashUrl = dashboardServer.getDashboardURL(sessionId);
                 console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
-                appendArtifact(sessionId, {
-                    id: `dashboard-${sessionId}`,
-                    type: 'dashboard',
-                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
-                    url: dashUrl,
-                    openUrl: true
-                });
+                const dashArt = { id: `dashboard-${sessionId}`, type: 'dashboard', title: isZh() ? '求职仪表盘' : 'Job Search Dashboard', url: dashUrl, openUrl: true };
+                state.artifacts[sessionId].push(dashArt);
+                emit('agent_artifact_replace', { sessionId, artifacts: state.artifacts[sessionId] });
+                appendRuntimeLog(sessionId, `artifact -> ${dashArt.title}`, { source: 'artifact' });
             } catch (err) {
                 console.error('[agent] dashboard after seed failed:', err);
             }
@@ -2514,20 +2513,14 @@ async function extractProfileFromConversation(sessionId) {
             // Add dashboard artifact (live via dashboardServer)
             try {
                 buildIntentFile(sessionId);
-                if (state.artifacts[sessionId]) {
-                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(
-                        (a) => a.type !== 'dashboard'
-                    );
-                }
+                if (!state.artifacts[sessionId]) state.artifacts[sessionId] = [];
+                state.artifacts[sessionId] = state.artifacts[sessionId].filter(a => a.type !== 'dashboard');
                 const dashUrl = dashboardServer.getDashboardURL(sessionId);
                 console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
-                appendArtifact(sessionId, {
-                    id: `dashboard-${sessionId}`,
-                    type: 'dashboard',
-                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
-                    url: dashUrl,
-                    openUrl: true
-                });
+                const dashArt = { id: `dashboard-${sessionId}`, type: 'dashboard', title: isZh() ? '求职仪表盘' : 'Job Search Dashboard', url: dashUrl, openUrl: true };
+                state.artifacts[sessionId].push(dashArt);
+                emit('agent_artifact_replace', { sessionId, artifacts: state.artifacts[sessionId] });
+                appendRuntimeLog(sessionId, `artifact -> ${dashArt.title}`, { source: 'artifact' });
             } catch (dashErr) {
                 console.error('[agent] dashboard artifact after extraction failed:', dashErr);
             }

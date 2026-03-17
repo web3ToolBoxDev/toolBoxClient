@@ -184,6 +184,13 @@ function AgentWorkspace() {
                 setArtifacts((prev) => ({ ...prev, [sessionId]: [...(prev[sessionId] || []), ...append] }));
                 break;
             }
+            case 'agent_artifact_replace': {
+                const sessionId = info?.data?.sessionId;
+                if (!sessionId) break;
+                const list = Array.isArray(info?.data?.artifacts) ? info.data.artifacts : [];
+                setArtifacts((prev) => ({ ...prev, [sessionId]: list }));
+                break;
+            }
             case 'agent_runtime_log_update': {
                 const sessionId = info?.data?.sessionId;
                 if (!sessionId) break;
