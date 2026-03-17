@@ -58,6 +58,7 @@ function buildDefaultConfig(location, overrides = {}) {
             minScore: 60,
             targetCount: 10,
             maxResults: 30,
+            userPreferences: '',
             ...(overrides.search || {})
         },
         generate: {
@@ -107,6 +108,9 @@ function validateConfig(config) {
         }
         if (typeof config.search.targetCount === 'number' && config.search.targetCount < 1) {
             errors.push('targetCount must be >= 1');
+        }
+        if (config.search.userPreferences && typeof config.search.userPreferences === 'string' && config.search.userPreferences.length > 500) {
+            errors.push('userPreferences must be <= 500 characters');
         }
     }
 

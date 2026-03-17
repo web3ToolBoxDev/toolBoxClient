@@ -417,6 +417,7 @@ function startPipeline(sessionId, config, direction, profile) {
             onHistorySave: config.onHistorySave || null,  // callback to persist search history
             generateInline: config.generateInline || false,  // merge match + generate into one AI call
             generateOpts: config.generateOpts || {},         // { tailorResume, coverLetter, interviewPrep }
+            userPreferences: config.userPreferences || config.search?.userPreferences || '',  // user-defined match preferences
             _prevTotalRuns: config.searchHistory?.totalRuns || 0
         },
         direction,
@@ -687,7 +688,8 @@ async function _runPipeline(sessionId) {
                 try {
                     const combinedPrompt = _buildCombinedPrompt(
                         listing, profile, config.skillTaxonomy,
-                        config.generateOpts || {}
+                        config.generateOpts || {},
+                        config.userPreferences || ''
                     );
                     const raw = await config.aiInvoke(combinedPrompt);
                     const parsed = _parseCombinedResponse(raw);
@@ -706,7 +708,7 @@ async function _runPipeline(sessionId) {
             // Path B: Match-only AI (existing aiMatcher)
             if (!matchResult && config.aiMatcher && listing.fullText) {
                 try {
-                    matchResult = await config.aiMatcher(profile, listing, config.skillTaxonomy);
+                    matchResult = await config.aiMatcher(profile, listing, config.skillTaxonomy, config.userPreferences || '');
                     if (matchResult) {
                         _log(`  AI match: ${matchResult.overallScore}%`);
                     } else {
@@ -1478,7 +1480,7 @@ async function generateInterviewPrep(sessionId, jobUrl, profile) {
  * @param {object} generateOpts - { tailorResume, coverLetter }
  * @returns {string} combined prompt
  */
-function _buildCombinedPrompt(listing, profile, taxonomy, generateOpts = {}) {
+function _buildCombinedPrompt(listing, profile, taxonomy, generateOpts = {}, userPreferences = '') {
     const skills = Array.isArray(profile.skills) ? profile.skills.join(', ') : (profile.skills || '');
     const experience = Array.isArray(profile.experience) ? profile.experience.join('\n') : (profile.experience || '');
     const education = Array.isArray(profile.education) ? profile.education.join('\n') : (profile.education || '');
@@ -1519,6 +1521,7 @@ Location: ${listing.location || 'N/A'}
 ${jdText}
 
 ${taxonomySummary ? `## Skill Taxonomy (skills in same category are similar/substitutable)\n${taxonomySummary}` : ''}
+${userPreferences ? `\n## User Search Preferences\nThe candidate has specified the following preferences that MUST heavily influence scoring:\n${userPreferences}\n\nIf the job conflicts with these preferences, significantly lower the overall score. If the job aligns with these preferences, boost the score.` : ''}
 
 ---
 

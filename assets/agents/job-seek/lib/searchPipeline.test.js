@@ -575,6 +575,32 @@ describe('searchPipeline', () => {
     });
 
     // ─── aiInvoke propagation ───
+    // ─── userPreferences propagation ───
+    describe('userPreferences', () => {
+        it('passes userPreferences through pipeline config', () => {
+            const result = pipeline.startPipeline('pref-1', {
+                aiMatcher: jest.fn(),
+                userPreferences: 'Prefer Node.js backend, avoid Java'
+            }, DIRECTION, PROFILE);
+            expect(result.config.userPreferences).toBe('Prefer Node.js backend, avoid Java');
+        });
+
+        it('reads userPreferences from search sub-object', () => {
+            const result = pipeline.startPipeline('pref-2', {
+                aiMatcher: jest.fn(),
+                search: { userPreferences: 'Focus on frontend roles' }
+            }, DIRECTION, PROFILE);
+            expect(result.config.userPreferences).toBe('Focus on frontend roles');
+        });
+
+        it('defaults userPreferences to empty string', () => {
+            const result = pipeline.startPipeline('pref-3', {
+                aiMatcher: jest.fn()
+            }, DIRECTION, PROFILE);
+            expect(result.config.userPreferences).toBe('');
+        });
+    });
+
     describe('startPipeline config propagation', () => {
         it('copies aiInvoke into pipeline.config', () => {
             const mockAiInvoke = jest.fn();

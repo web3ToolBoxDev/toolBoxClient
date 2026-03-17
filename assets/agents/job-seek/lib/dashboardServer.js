@@ -238,7 +238,7 @@ Example: ["Staff Nurse ICU", "RN Critical Care", "Registered Nurse Hospital"]`;
  */
 function _buildAiMatcher() {
     let _warnedNoProvider = false;
-    return async (profile, listing, taxonomy) => {
+    return async (profile, listing, taxonomy, userPreferences) => {
         const state = _stateGetter ? _stateGetter() : {};
         if (!_warnedNoProvider) {
             console.log(`[aiMatcher] state.currentProvider='${state.currentProvider || ''}', state.runtimeApiKey=${state.runtimeApiKey ? 'SET' : 'EMPTY'}`);
@@ -261,7 +261,7 @@ function _buildAiMatcher() {
             : { taxonomy: BASE_TAXONOMY, aliases: BASE_ALIASES };
 
         const jdText = listing.fullText || listing.description || '';
-        const prompt = buildMatchPrompt(profile, jdText, listing.title || '', merged);
+        const prompt = buildMatchPrompt(profile, jdText, listing.title || '', merged, userPreferences || '');
 
         try {
             const aiInvoke = _buildAiInvoke();
@@ -3148,6 +3148,9 @@ function buildDashboardHTML(sessionId) {
       <label>Max Search Results</label>
       <div class="gs-hint" data-i18n="wfeMaxResultsHint">Max jobs to fetch per platform before moving to next</div>
       <input type="number" id="gsCfgMaxResults" min="5" max="200" step="5" value="30">
+      <label data-i18n="searchPreferences">Search & Match Preferences</label>
+      <div class="gs-hint" data-i18n="searchPreferencesHint">AI will use these preferences when scoring jobs</div>
+      <textarea id="gsCfgUserPreferences" rows="3" maxlength="500" style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.5rem 0.75rem;font-size:0.9rem;resize:vertical;font-family:inherit;" data-i18n-placeholder="searchPreferencesPlaceholder" placeholder="e.g., Prefer Node.js backend, avoid Java. Focus on full-stack roles."></textarea>
       <button class="btn btn-primary" id="saveGlobalSettings" onclick="saveGlobalSettings()" data-i18n="save">Save Settings</button>
     </div>
   </div>
@@ -3332,6 +3335,9 @@ var _i18n = {
         wfeMinScoreHint: 'Jobs scoring below this % are skipped',
         wfeTargetCountHint: 'Stop searching each platform after finding this many qualified jobs',
         wfeMaxResultsHint: 'Max jobs to fetch per platform before moving to next',
+        searchPreferences: 'Search & Match Preferences',
+        searchPreferencesHint: 'AI will use these preferences when scoring jobs',
+        searchPreferencesPlaceholder: 'e.g., Prefer Node.js backend, avoid Java. Focus on full-stack roles.',
         aiProviderOk: 'AI Provider',
         aiProviderMissing: 'No AI provider detected. Go to AI Panel \u2192 Runtime Settings \u2192 Select a provider and click "Apply Model" to enable AI matching and self-heal.',
         confirmDeleteJob: 'Remove this job from the list?',
@@ -3384,6 +3390,9 @@ var _i18n = {
         wfeMinScoreHint: '低于此分数的职位将被跳过',
         wfeTargetCountHint: '每个平台找到此数量的合格职位后停止该平台搜索',
         wfeMaxResultsHint: '每个平台最多抓取的职位数量',
+        searchPreferences: '搜索匹配偏好',
+        searchPreferencesHint: 'AI 在评分匹配时会参考此偏好',
+        searchPreferencesPlaceholder: '例如：偏好 Node.js 后端，不要 Java。聚焦全栈或前端职位。',
         aiProviderOk: 'AI 供应商',
         aiProviderMissing: '未检测到 AI 供应商。请前往 AI 面板 → 运行时设置 → 选择供应商并点击「应用模型」，以启用 AI 匹配和自愈修复。',
         confirmDeleteJob: '确定从列表中移除此职位？',
@@ -4173,6 +4182,9 @@ function renderWfeCard(step, cfg, t) {
         h += wfeNumRow('wfe_minScore', t.wfeMinScore, cfg.search ? cfg.search.minScore : 60, 0, 100, 5, t.wfeMinScoreHint);
         h += wfeNumRow('wfe_targetCount', t.wfeTargetCount, cfg.search ? cfg.search.targetCount : 10, 1, 100, 1, t.wfeTargetCountHint);
         h += wfeNumRow('wfe_maxResults', t.wfeMaxResults, cfg.search ? cfg.search.maxResults : 30, 5, 200, 5, t.wfeMaxResultsHint);
+        var prefVal = cfg.search ? (cfg.search.userPreferences || '') : '';
+        h += '<div class="wfe-num-row"><label>' + t.searchPreferences + '<span class="wfe-hint">' + t.searchPreferencesHint + '</span></label>';
+        h += '<textarea id="wfe_userPreferences" rows="2" maxlength="500" style="width:100%;background:#1a1b2e;border:1px solid #3d3f5a;border-radius:4px;color:#dfe3ff;padding:0.4rem 0.6rem;font-size:0.82rem;resize:vertical;font-family:inherit;" placeholder="' + esc(t.searchPreferencesPlaceholder || '') + '">' + esc(prefVal) + '</textarea></div>';
         h += wfePlatformList(step, 'search', t);
     }
 
@@ -4313,6 +4325,7 @@ async function confirmWorkflow() {
     el = document.getElementById('wfe_minScore'); if (el) patch.search.minScore = parseInt(el.value) || 60;
     el = document.getElementById('wfe_targetCount'); if (el) patch.search.targetCount = parseInt(el.value) || 10;
     el = document.getElementById('wfe_maxResults'); if (el) patch.search.maxResults = parseInt(el.value) || 30;
+    el = document.getElementById('wfe_userPreferences'); if (el) patch.search.userPreferences = (el.value || '').trim();
 
     // Search platforms
     if (searchStep) {
@@ -4679,6 +4692,7 @@ function openGlobalSettings() {
             document.getElementById('gsCfgMinScore').value = cfg.search.minScore || 60;
             document.getElementById('gsCfgTargetCount').value = cfg.search.targetCount || 10;
             document.getElementById('gsCfgMaxResults').value = cfg.search.maxResults || 30;
+            document.getElementById('gsCfgUserPreferences').value = cfg.search.userPreferences || '';
         }
     }).catch(() => {});
 }
@@ -4690,7 +4704,8 @@ async function saveGlobalSettings() {
     var body = { search: {
         minScore: parseInt(document.getElementById('gsCfgMinScore').value) || 60,
         targetCount: parseInt(document.getElementById('gsCfgTargetCount').value) || 10,
-        maxResults: parseInt(document.getElementById('gsCfgMaxResults').value) || 30
+        maxResults: parseInt(document.getElementById('gsCfgMaxResults').value) || 30,
+        userPreferences: (document.getElementById('gsCfgUserPreferences').value || '').trim()
     }};
     try {
         var res = await fetch(WF_API + '/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

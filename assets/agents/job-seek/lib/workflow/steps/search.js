@@ -40,6 +40,7 @@ async function execute({ sessionId, config, context }) {
         aiInvoke: context.aiInvoke || null,
         searchHistory: context.searchHistory || {},
         onHistorySave: context.onHistorySave || null,
+        userPreferences: config.search?.userPreferences || '',
         // Inline generation: merge match + doc generation into one AI call when generate step is enabled
         generateInline: generateEnabled,
         generateOpts: generateEnabled ? {

@@ -385,6 +385,30 @@ describe('match_profile tool', () => {
             expect(prompt).toContain('React');
             expect(prompt).not.toContain('Skill Taxonomy');
         });
+
+        test('includes user preferences when provided', () => {
+            const prompt = buildMatchPrompt(
+                { skills: 'React, Node.js, Java' },
+                'Java backend developer needed',
+                'Backend Dev',
+                null,
+                'Prefer Node.js backend, avoid Java backend roles'
+            );
+            expect(prompt).toContain('User Search Preferences');
+            expect(prompt).toContain('Prefer Node.js backend, avoid Java backend roles');
+            expect(prompt).toContain('MUST heavily influence scoring');
+        });
+
+        test('omits preferences section when empty', () => {
+            const prompt = buildMatchPrompt(
+                { skills: 'React' },
+                'Job description',
+                'Dev',
+                null,
+                ''
+            );
+            expect(prompt).not.toContain('User Search Preferences');
+        });
     });
 
     describe('parseMatchResponse', () => {

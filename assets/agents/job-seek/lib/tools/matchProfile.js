@@ -370,7 +370,7 @@ function handler({ profile, requirements, jobTitle, jobUrl, skillTaxonomy }) {
  * @param {object} [taxonomy] - Merged taxonomy { taxonomy: {...}, aliases: {...} }
  * @returns {string} Prompt text
  */
-function buildMatchPrompt(profile, jdFullText, jobTitle, taxonomy) {
+function buildMatchPrompt(profile, jdFullText, jobTitle, taxonomy, userPreferences) {
     const skills = Array.isArray(profile.skills) ? profile.skills.join(', ') : (profile.skills || '');
     const experience = Array.isArray(profile.experience) ? profile.experience.join('\n') : (profile.experience || '');
     const education = Array.isArray(profile.education) ? profile.education.join('\n') : (profile.education || '');
@@ -396,6 +396,7 @@ Title: ${jobTitle || 'Unknown'}
 ${jdFullText.slice(0, 4000)}
 
 ${taxonomySummary ? `## Skill Taxonomy (skills in same category are similar/substitutable)\n${taxonomySummary}` : ''}
+${userPreferences ? `\n## User Search Preferences\nThe candidate has specified the following preferences that MUST heavily influence scoring:\n${userPreferences}\n\nIf the job conflicts with these preferences, significantly lower the overall score. If the job aligns with these preferences, boost the score.` : ''}
 
 ## Scoring Rules
 - Overall = skills × 50% + experience × 30% + education × 20%
