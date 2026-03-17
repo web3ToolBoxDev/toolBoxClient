@@ -3690,7 +3690,7 @@ var _docTabLabels = { resume: 'Resume', coverLetter: 'Cover Letter', interviewPr
 
 var _sectionRenderers = {
     skills: function(s) {
-        var items = s.content.split(/[,\n•\-\*]+/).map(function(x){return x.trim();}).filter(Boolean);
+        var items = s.content.split(/[,\\n•\\-\\*]+/).map(function(x){return x.trim();}).filter(Boolean);
         return '<div class="doc-section"><h4>'+esc(s.title)+'</h4><div class="skill-tags">'+
             items.map(function(sk){return '<span class="skill-tag">'+esc(sk)+'</span>';}).join('')+'</div></div>';
     },
