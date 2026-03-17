@@ -623,24 +623,15 @@ async function _runPipeline(sessionId) {
                         }));
                         _log(`[${q.source}] Platform tool returned ${listings.length} results`);
 
-                        // ── Low/zero result anomaly: may indicate broken selectors or geo issues ──
+                        // ── Low/zero result anomaly: mark cell error so user can rebuild manually ──
                         const LOW_RESULT_THRESHOLD = 3;
-                        if (listings.length < LOW_RESULT_THRESHOLD && config.aiInvoke) {
-                            _log(`⚠ [${q.source}] Suspiciously low results (${listings.length}) — triggering self-heal...`);
+                        if (listings.length < LOW_RESULT_THRESHOLD) {
+                            _log(`⚠ [${q.source}] Suspiciously low results (${listings.length}) — marking for rebuild`);
                             dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
-                                cell: 'search', status: 'warning',
-                                message: `Low results (${listings.length}) — healing script...`
+                                cell: 'search', status: 'error',
+                                message: `Only ${listings.length} result(s) for "${q.query}" — please Rebuild search tool`
                             });
-                            const healedListings = await _selfHealAndRetry(
-                                sessionId, platformTool, q, config,
-                                `Only ${listings.length} result(s) returned for "${q.query}" @ ${q.location || 'any'} (expected 10+). ` +
-                                `Possible causes: broken selectors, page layout changed, geolocation mismatch, or anti-bot block.`,
-                                scriptResult.screenshot || null, _log
-                            );
-                            if (healedListings && healedListings.length > listings.length) {
-                                _log(`  Self-heal improved: ${listings.length} → ${healedListings.length} results`);
-                                listings = healedListings;
-                            }
+                            // Don't block other platforms — continue pipeline
                         }
                     } else {
                         const errMsg = scriptResult.error || 'unknown error';
@@ -648,25 +639,10 @@ async function _runPipeline(sessionId) {
                         _failedSources.add(q.source);
                         dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
                             cell: 'search', status: 'error',
-                            message: 'Search failed: ' + errMsg
+                            message: `Search failed: ${errMsg} — please Rebuild search tool`
                         });
                         pipeline.progress.errors.push(`[${q.source}] Search tool failed: ${errMsg}`);
-
-                        // ── Self-heal: analyze failure → heal script → retry once ──
-                        if (config.aiInvoke) {
-                            const healedListings = await _selfHealAndRetry(
-                                sessionId, platformTool, q, config,
-                                errMsg, scriptResult.failScreenshot || null, _log
-                            );
-                            if (healedListings && healedListings.length > 0) {
-                                listings = healedListings;
-                                _failedSources.delete(q.source);
-                                dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
-                                    cell: 'search', status: 'ok',
-                                    message: `Healed: ${listings.length} results after self-repair`
-                                });
-                            }
-                        }
+                        // Don't auto-heal — let user rebuild manually via dashboard
                     }
                 } else {
                     _log(`[${q.source}] No platform tool available — skipped`);

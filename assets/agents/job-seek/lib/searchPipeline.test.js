@@ -523,8 +523,8 @@ describe('searchPipeline', () => {
         });
     });
 
-    // ─── self-heal on low/zero results ───
-    describe('self-heal triggers', () => {
+    // ─── low/zero result error marking (no auto-heal, user rebuilds manually) ───
+    describe('low result error marking', () => {
         beforeEach(() => {
             mockPlatformList.length = 0;
             mockPlatformList.push(
@@ -537,7 +537,7 @@ describe('searchPipeline', () => {
             mockPlatformList.length = 0;
         });
 
-        it('triggers self-heal when results < LOW_RESULT_THRESHOLD and aiInvoke is set', async () => {
+        it('marks search cell as error when results < LOW_RESULT_THRESHOLD', async () => {
             // Return 1 result (below threshold of 3)
             mockExecuteSearch.mockResolvedValue({
                 success: true,
@@ -545,71 +545,96 @@ describe('searchPipeline', () => {
             });
             matchProfileHandler.mockReturnValue({ overallScore: 25 });
 
-            const mockAiInvoke = jest.fn().mockResolvedValue('{"rule": "check location filter"}');
-            // Also mock scriptBuilder.analyzeFailure and healScript
-            const scriptBuilder = require('./workflow/scriptBuilder');
-            scriptBuilder.analyzeFailure = jest.fn().mockResolvedValue({ rule: 'check location' });
-            scriptBuilder.healScript = jest.fn().mockResolvedValue({ success: false, error: 'no fix found' });
-
-            pipeline.startPipeline('heal-low-1', {
+            pipeline.startPipeline('low-err-1', {
                 minScore: 60, targetCount: 10,
-                aiInvoke: mockAiInvoke,
+                aiInvoke: jest.fn(),
                 platforms: ['plat_linkedin']
             }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
 
             await new Promise(r => setTimeout(r, 1000));
 
-            // Verify self-heal was attempted (updatePlatformCell with warning)
-            const warningCalls = dashboardServer.updatePlatformCell.mock.calls
-                .filter(c => c[2]?.status === 'warning');
-            expect(warningCalls.length).toBeGreaterThanOrEqual(1);
+            // Verify cell marked as error with rebuild message
+            const errorCalls = dashboardServer.updatePlatformCell.mock.calls
+                .filter(c => c[2]?.status === 'error' && c[2]?.message?.includes('Rebuild'));
+            expect(errorCalls.length).toBeGreaterThanOrEqual(1);
         });
 
-        it('triggers self-heal on 0 results when aiInvoke is set', async () => {
-            // Return 0 results
+        it('marks search cell as error on 0 results', async () => {
             mockExecuteSearch.mockResolvedValue({
                 success: true,
                 jobs: []
             });
 
-            const mockAiInvoke = jest.fn().mockResolvedValue('{"rule": "fix selectors"}');
-            const scriptBuilder = require('./workflow/scriptBuilder');
-            scriptBuilder.analyzeFailure = jest.fn().mockResolvedValue({ rule: 'fix selectors' });
-            scriptBuilder.healScript = jest.fn().mockResolvedValue({ success: false, error: 'no fix' });
-
-            pipeline.startPipeline('heal-zero-1', {
+            pipeline.startPipeline('zero-err-1', {
                 minScore: 60, targetCount: 10,
-                aiInvoke: mockAiInvoke,
+                aiInvoke: jest.fn(),
                 platforms: ['plat_linkedin']
             }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
 
             await new Promise(r => setTimeout(r, 1000));
 
-            // Should trigger warning for 0 results
-            const warningCalls = dashboardServer.updatePlatformCell.mock.calls
-                .filter(c => c[2]?.status === 'warning');
-            expect(warningCalls.length).toBeGreaterThanOrEqual(1);
+            // Should mark error for 0 results
+            const errorCalls = dashboardServer.updatePlatformCell.mock.calls
+                .filter(c => c[2]?.status === 'error' && c[2]?.message?.includes('Rebuild'));
+            expect(errorCalls.length).toBeGreaterThanOrEqual(1);
         });
 
-        it('does NOT trigger self-heal when aiInvoke is null', async () => {
+        it('marks error even when aiInvoke is null (no auto-heal dependency)', async () => {
             mockExecuteSearch.mockResolvedValue({
                 success: true,
                 jobs: [{ url: 'https://ln.com/2', title: 'Dev', fullText: 'text' }]
             });
             matchProfileHandler.mockReturnValue({ overallScore: 25 });
 
-            pipeline.startPipeline('heal-null-1', {
+            pipeline.startPipeline('low-null-1', {
                 minScore: 60, targetCount: 10,
-                aiInvoke: null, // explicitly null
+                aiInvoke: null,
                 platforms: ['plat_linkedin']
             }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
 
             await new Promise(r => setTimeout(r, 1000));
 
-            // No warning calls for self-heal
-            const warningCalls = dashboardServer.updatePlatformCell.mock.calls
-                .filter(c => c[2]?.status === 'warning' && c[2]?.message?.includes('healing'));
-            expect(warningCalls).toHaveLength(0);
+            // Should still mark error — no longer depends on aiInvoke
+            const errorCalls = dashboardServer.updatePlatformCell.mock.calls
+                .filter(c => c[2]?.status === 'error' && c[2]?.message?.includes('Rebuild'));
+            expect(errorCalls.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('does not block other platforms when one has low results', async () => {
+            // Add Indeed platform
+            mockPlatformList.push(
+                { id: 'plat_indeed', name: 'Indeed', url: 'https://ca.indeed.com/jobs', tools: { search: { status: 'ready', script: 'test' } }, _browserId: 'br_mock', _pageIndex: 1 }
+            );
+
+            let callCount = 0;
+            mockExecuteSearch.mockImplementation(async () => {
+                callCount++;
+                if (callCount <= 1) {
+                    // LinkedIn: 0 results
+                    return { success: true, jobs: [] };
+                }
+                // Indeed: normal results
+                return {
+                    success: true,
+                    jobs: [
+                        { url: 'https://indeed.com/j1', title: 'Dev', fullText: 'text' },
+                        { url: 'https://indeed.com/j2', title: 'SWE', fullText: 'text2' }
+                    ]
+                };
+            });
+            matchProfileHandler.mockReturnValue({ overallScore: 75 });
+
+            pipeline.startPipeline('noblock-1', {
+                minScore: 60, targetCount: 10,
+                platforms: ['plat_linkedin', 'plat_indeed']
+            }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
+
+            await new Promise(r => setTimeout(r, 1500));
+
+            // Indeed jobs should still be matched despite LinkedIn failure
+            const indeedJobs = dashboardServer.upsertJobCard.mock.calls
+                .filter(c => c[1]?.status === 'matched');
+            expect(indeedJobs.length).toBeGreaterThanOrEqual(1);
         });
     });
 });
