@@ -490,6 +490,57 @@ function start(getState, port, options) {
             return;
         }
 
+        // POST /api/jobs/:sessionId/bulk-status — bulk update status
+        const bulkStatusMatch = url.match(/^\/api\/jobs\/(.+)\/bulk-status$/);
+        if (bulkStatusMatch && req.method === 'POST') {
+            const sessionId = decodeURIComponent(bulkStatusMatch[1]);
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                try {
+                    const { jobUrls, status } = JSON.parse(body);
+                    if (!Array.isArray(jobUrls) || !status) throw new Error('jobUrls (array) and status required');
+                    const cards = _getJobCards(sessionId);
+                    let updated = 0;
+                    for (const jobUrl of jobUrls) {
+                        const card = cards.get(jobUrl);
+                        if (card) { card.status = status; card.updatedAt = new Date().toISOString(); updated++; }
+                    }
+                    if (updated > 0) _syncJobCardsToState(sessionId);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, updated }));
+                } catch (e) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
+        // POST /api/jobs/:sessionId/bulk-delete — bulk delete jobs
+        const bulkDeleteMatch = url.match(/^\/api\/jobs\/(.+)\/bulk-delete$/);
+        if (bulkDeleteMatch && req.method === 'POST') {
+            const sessionId = decodeURIComponent(bulkDeleteMatch[1]);
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                try {
+                    const { jobUrls } = JSON.parse(body);
+                    if (!Array.isArray(jobUrls)) throw new Error('jobUrls (array) required');
+                    const cards = _getJobCards(sessionId);
+                    let deleted = 0;
+                    for (const jobUrl of jobUrls) { if (cards.delete(jobUrl)) deleted++; }
+                    if (deleted > 0) _syncJobCardsToState(sessionId);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, deleted }));
+                } catch (e) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: e.message }));
+                }
+            });
+            return;
+        }
+
         // POST /api/jobs/:sessionId — upsert a job card
         const jobsMatch = url.match(/^\/api\/jobs\/(.+)$/);
         if (jobsMatch && req.method === 'POST') {
@@ -2477,10 +2528,44 @@ function buildDashboardHTML(sessionId) {
   .job-table .score-cell.high { color: #4ade80; }
   .job-table .score-cell.mid { color: #fbbf24; }
   .job-table .score-cell.low { color: #f87171; }
-  .job-table .actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
-  .artifact-badges { display: flex; gap: 4px; margin-top: 3px; }
-  .artifact-badge { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; background: #10b981; color: #fff; font-size: 0.65rem; font-weight: 700; cursor: pointer; }
+  .job-table .col-check { width: 40px; text-align: center; }
+  .job-table .col-check input[type="checkbox"] { width: 16px; height: 16px; accent-color: #6a7eff; cursor: pointer; }
+  .job-table .col-docs { width: 80px; text-align: center; }
+  .job-table .col-link { width: 44px; text-align: center; }
+  .job-table .col-link a { color: #8b9aff; text-decoration: none; font-size: 1rem; }
+  .job-table .col-link a:hover { color: #a5b4fc; }
+  .artifact-badges { display: flex; gap: 4px; justify-content: center; }
+  .artifact-badge { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 4px; background: #10b981; color: #fff; font-size: 0.65rem; font-weight: 700; cursor: pointer; }
   .artifact-badge:hover { background: #059669; }
+
+  /* Control panel */
+  .job-control-panel { margin-bottom: 0.75rem; }
+  .job-control-panel .filter-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .job-control-panel .filter-row select, .job-control-panel .filter-row input[type="number"] { background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 6px; color: #dfe3ff; padding: 0.35rem 0.6rem; font-size: 0.85rem; }
+  .job-control-panel .select-all-label { display: flex; align-items: center; gap: 0.35rem; color: #dfe3ff; font-size: 0.85rem; cursor: pointer; margin-right: 0.5rem; }
+  .job-control-panel .select-all-label input { width: 16px; height: 16px; accent-color: #6a7eff; cursor: pointer; }
+  .job-bulk-bar { display: none; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; padding: 0.5rem 0.75rem; background: rgba(106,126,255,0.08); border-radius: 8px; border: 1px solid rgba(106,126,255,0.2); }
+  .job-bulk-bar.visible { display: flex; }
+  .job-bulk-bar .bulk-count { color: #8b9aff; font-weight: 600; font-size: 0.85rem; margin-right: 0.5rem; white-space: nowrap; }
+  .job-bulk-bar .bulk-sep { width: 1px; height: 24px; background: #3d3f5a; margin: 0 0.25rem; }
+  .bulk-btn { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.65rem; border-radius: 6px; border: 1px solid #3d3f5a; background: #2d2f4a; color: #dfe3ff; font-size: 0.8rem; cursor: pointer; white-space: nowrap; position: relative; }
+  .bulk-btn:hover { background: #3d3f5a; }
+  .bulk-btn.primary { background: #6a7eff; border-color: #6a7eff; color: #fff; }
+  .bulk-btn.primary:hover { background: #5a6eef; }
+  .bulk-btn.success { background: #10b981; border-color: #10b981; color: #fff; }
+  .bulk-btn.success:hover { background: #059669; }
+  .bulk-btn.danger { background: #ef4444; border-color: #ef4444; color: #fff; }
+  .bulk-btn.danger:hover { background: #dc2626; }
+  .bulk-btn.warning { background: #f59e0b; border-color: #f59e0b; color: #fff; }
+  .bulk-btn.warning:hover { background: #d97706; }
+
+  /* Dropdown for generate docs */
+  .bulk-dropdown { display: none; position: absolute; top: calc(100% + 4px); left: 0; background: #1e1f36; border: 1px solid #3d3f5a; border-radius: 8px; padding: 0.75rem; z-index: 100; min-width: 200px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+  .bulk-dropdown.open { display: block; }
+  .bulk-dropdown label { display: flex; align-items: center; gap: 0.4rem; color: #dfe3ff; font-size: 0.85rem; padding: 0.25rem 0; cursor: pointer; }
+  .bulk-dropdown label input { accent-color: #6a7eff; }
+  .bulk-dropdown .dropdown-actions { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #2d2f4a; display: flex; justify-content: flex-end; }
+  .bulk-dropdown .dropdown-actions button { padding: 0.3rem 0.75rem; }
   .status-badge { font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; display: inline-block; }
   .status-badge.discovered { background: rgba(106,126,255,0.2); color: #8b9aff; }
   .status-badge.parsed { background: rgba(168,85,247,0.2); color: #a855f7; }
@@ -2609,9 +2694,7 @@ function buildDashboardHTML(sessionId) {
   .modal-form label { color: #9da0c3; font-size: 0.85rem; }
   .modal-form input, .modal-form select { background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 6px; color: #dfe3ff; padding: 0.5rem 0.75rem; font-size: 0.95rem; }
 
-  /* Filter bar */
-  .jobFilterBar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; }
-  .jobFilterBar select, .jobFilterBar input { background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 6px; color: #dfe3ff; padding: 0.35rem 0.6rem; font-size: 0.85rem; }
+  /* Filter bar (legacy — now part of .job-control-panel) */
 
   /* Pagination */
   .jobPagination { display: flex; gap: 0.5rem; align-items: center; justify-content: center; margin-top: 0.75rem; }
@@ -2734,28 +2817,48 @@ function buildDashboardHTML(sessionId) {
 </div>
 
 <div class="tab-content active" id="tab-listings">
-  <div class="jobFilterBar" id="jobFilterBar">
-    <select id="jobFilterStatus" onchange="filterJobs()">
-      <option value="">All statuses</option>
-      <option value="discovered">Discovered</option>
-      <option value="matched">Matched</option>
-      <option value="tailored">Tailored</option>
-      <option value="submitted">Submitted</option>
-      <option value="archived">Archived</option>
-    </select>
-    <input id="jobFilterMinScore" type="number" placeholder="Min score" min="0" max="100" style="width:80px;" onchange="filterJobs()">
-    <button class="btn btn-sm btn-primary" onclick="filterJobs()" data-i18n="filter">Filter</button>
-    <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="refreshJobRecords()" data-i18n="refresh">Refresh</button>
+  <div class="job-control-panel">
+    <div class="filter-row">
+      <label class="select-all-label"><input type="checkbox" id="selectAllJobs" onchange="toggleSelectAll()"> <span data-i18n="selectAll">Select All</span></label>
+      <select id="jobFilterStatus" onchange="filterJobs()">
+        <option value="">All statuses</option>
+        <option value="discovered">Discovered</option>
+        <option value="matched">Matched</option>
+        <option value="tailored">Tailored</option>
+        <option value="submitted">Submitted</option>
+        <option value="archived">Archived</option>
+      </select>
+      <input id="jobFilterMinScore" type="number" placeholder="Min score" min="0" max="100" style="width:80px;" onchange="filterJobs()">
+      <button class="btn btn-sm btn-primary" onclick="filterJobs()" data-i18n="filter">Filter</button>
+      <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="refreshJobRecords()" data-i18n="refresh">Refresh</button>
+    </div>
+    <div class="job-bulk-bar" id="bulkBar">
+      <span class="bulk-count" id="bulkCount">0 selected</span>
+      <span class="bulk-sep"></span>
+      <button class="bulk-btn primary" onclick="toggleGenDropdown(event)" data-i18n="generateDocs">Generate Docs</button>
+      <div class="bulk-dropdown" id="genDropdown">
+        <label><input type="checkbox" id="genResumeCb" checked> <span data-i18n="resume">Resume</span></label>
+        <label><input type="checkbox" id="genCoverCb" checked> <span data-i18n="coverLetter">Cover Letter</span></label>
+        <label><input type="checkbox" id="genPrepCb" checked> <span data-i18n="interviewPrep">Interview Prep</span></label>
+        <div class="dropdown-actions"><button class="bulk-btn primary" onclick="bulkGenerateDocs()" data-i18n="generateBtn">Generate</button></div>
+      </div>
+      <button class="bulk-btn success" onclick="bulkAutoApply()" data-i18n="autoApply">Auto Apply</button>
+      <button class="bulk-btn warning" onclick="bulkMarkApplied()" data-i18n="markApplied">Mark Applied</button>
+      <button class="bulk-btn" onclick="bulkArchive()" data-i18n="archiveJobs">Archive</button>
+      <button class="bulk-btn danger" onclick="bulkDelete()" data-i18n="bulkDelete">Delete</button>
+    </div>
   </div>
   <table class="job-table" id="jobTable">
     <thead>
       <tr>
+        <th class="col-check"></th>
         <th>Job</th>
         <th>Location</th>
         <th>Salary</th>
         <th>Score</th>
         <th>Status</th>
-        <th>Actions</th>
+        <th class="col-docs" data-i18n="docs">Docs</th>
+        <th class="col-link" data-i18n="link">Link</th>
       </tr>
     </thead>
     <tbody id="jobTableBody"></tbody>
@@ -3008,7 +3111,17 @@ var _i18n = {
         wfeMaxResultsHint: 'Max jobs to fetch per platform before moving to next',
         aiProviderOk: 'AI Provider',
         aiProviderMissing: 'No AI provider detected. Go to AI Panel \u2192 Runtime Settings \u2192 Select a provider and click "Apply Model" to enable AI matching and self-heal.',
-        confirmDeleteJob: 'Remove this job from the list?'
+        confirmDeleteJob: 'Remove this job from the list?',
+        selectAll: 'Select All', selectedCount: '{n} selected',
+        generateDocs: 'Generate Docs', autoApply: 'Auto Apply',
+        markApplied: 'Mark Applied', archiveJobs: 'Archive',
+        bulkDelete: 'Delete', confirmBulkDelete: 'Delete {n} selected job(s)?',
+        confirmBulkApply: 'Auto-apply to {n} selected job(s)?',
+        confirmMarkApplied: 'Mark {n} job(s) as applied?',
+        confirmArchive: 'Archive {n} selected job(s)?',
+        noJobsSelected: 'No jobs selected',
+        generateBtn: 'Generate', docs: 'Docs', link: 'Link',
+        resume: 'Resume', coverLetter: 'Cover Letter', interviewPrep: 'Interview Prep'
     },
     'zh-CN': {
         envBound: '已绑定浏览器环境', envNotBound: '未绑定浏览器环境。请前往 AI 面板 → 运行时设置 → 绑定环境，以启用登录和搜索功能。',
@@ -3049,7 +3162,17 @@ var _i18n = {
         wfeMaxResultsHint: '每个平台最多抓取的职位数量',
         aiProviderOk: 'AI 供应商',
         aiProviderMissing: '未检测到 AI 供应商。请前往 AI 面板 → 运行时设置 → 选择供应商并点击「应用模型」，以启用 AI 匹配和自愈修复。',
-        confirmDeleteJob: '确定从列表中移除此职位？'
+        confirmDeleteJob: '确定从列表中移除此职位？',
+        selectAll: '全选', selectedCount: '已选 {n} 项',
+        generateDocs: '生成文档', autoApply: '自动投递',
+        markApplied: '标记已投递', archiveJobs: '归档',
+        bulkDelete: '删除', confirmBulkDelete: '确定删除 {n} 个选中职位？',
+        confirmBulkApply: '确定自动投递 {n} 个选中职位？',
+        confirmMarkApplied: '确定将 {n} 个职位标记为已投递？',
+        confirmArchive: '确定归档 {n} 个选中职位？',
+        noJobsSelected: '未选择职位',
+        generateBtn: '生成', docs: '文档', link: '链接',
+        resume: '简历', coverLetter: '求职信', interviewPrep: '面试准备'
     }
 };
 var _lang = (navigator.language || 'en').startsWith('zh') ? 'zh-CN' : 'en';
@@ -3181,6 +3304,135 @@ async function deleteJob(jobUrl) {
     } catch (e) { alert(e.message); }
 }
 
+// ─── Bulk actions (Control Panel) ───
+
+function getSelectedJobs() {
+    var urls = [];
+    document.querySelectorAll('.job-select:checked').forEach(function(cb) { urls.push(cb.value); });
+    return urls;
+}
+
+function toggleSelectAll() {
+    var checked = document.getElementById('selectAllJobs').checked;
+    document.querySelectorAll('.job-select').forEach(function(cb) { cb.checked = checked; });
+    updateBulkBar();
+}
+
+function updateBulkBar() {
+    var selected = getSelectedJobs();
+    var bar = document.getElementById('bulkBar');
+    var countEl = document.getElementById('bulkCount');
+    if (selected.length > 0) {
+        bar.classList.add('visible');
+        countEl.textContent = t('selectedCount').replace('{n}', selected.length);
+    } else {
+        bar.classList.remove('visible');
+    }
+    // Sync select-all checkbox
+    var allCbs = document.querySelectorAll('.job-select');
+    var allChecked = allCbs.length > 0 && selected.length === allCbs.length;
+    document.getElementById('selectAllJobs').checked = allChecked;
+}
+
+function toggleGenDropdown(e) {
+    e.stopPropagation();
+    var dd = document.getElementById('genDropdown');
+    dd.classList.toggle('open');
+    // Close on outside click
+    if (dd.classList.contains('open')) {
+        setTimeout(function() {
+            document.addEventListener('click', function _close(ev) {
+                if (!dd.contains(ev.target)) { dd.classList.remove('open'); document.removeEventListener('click', _close); }
+            });
+        }, 0);
+    }
+}
+
+async function bulkGenerateDocs() {
+    var urls = getSelectedJobs();
+    if (urls.length === 0) { alert(t('noJobsSelected')); return; }
+    var doResume = document.getElementById('genResumeCb').checked;
+    var doCover = document.getElementById('genCoverCb').checked;
+    var doPrep = document.getElementById('genPrepCb').checked;
+    if (!doResume && !doCover && !doPrep) return;
+    document.getElementById('genDropdown').classList.remove('open');
+    try {
+        // Configure workflow: disable search + apply, enable generate with selected jobs
+        await fetch(BASE + '/api/workflow/' + encodeURIComponent(SID) + '/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                steps: {
+                    search: { enabled: false },
+                    generate: { enabled: true, tailorResume: doResume, coverLetter: doCover, interviewPrep: doPrep, jobIds: urls },
+                    apply: { enabled: false }
+                }
+            })
+        });
+        // Start workflow
+        await fetch(BASE + '/api/workflow/' + encodeURIComponent(SID) + '/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+    } catch (e) { alert(e.message); }
+}
+
+async function bulkAutoApply() {
+    var urls = getSelectedJobs();
+    if (urls.length === 0) { alert(t('noJobsSelected')); return; }
+    if (!confirm(t('confirmBulkApply').replace('{n}', urls.length))) return;
+    try {
+        await fetch(PIPE_URL + '/apply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobUrls: urls })
+        });
+    } catch (e) { alert(e.message); }
+}
+
+async function bulkMarkApplied() {
+    var urls = getSelectedJobs();
+    if (urls.length === 0) { alert(t('noJobsSelected')); return; }
+    if (!confirm(t('confirmMarkApplied').replace('{n}', urls.length))) return;
+    try {
+        await fetch(BASE + '/api/jobs/' + encodeURIComponent(SID) + '/bulk-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobUrls: urls, status: 'submitted' })
+        });
+        refreshJobRecords();
+    } catch (e) { alert(e.message); }
+}
+
+async function bulkArchive() {
+    var urls = getSelectedJobs();
+    if (urls.length === 0) { alert(t('noJobsSelected')); return; }
+    if (!confirm(t('confirmArchive').replace('{n}', urls.length))) return;
+    try {
+        await fetch(BASE + '/api/jobs/' + encodeURIComponent(SID) + '/bulk-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobUrls: urls, status: 'archived' })
+        });
+        refreshJobRecords();
+    } catch (e) { alert(e.message); }
+}
+
+async function bulkDelete() {
+    var urls = getSelectedJobs();
+    if (urls.length === 0) { alert(t('noJobsSelected')); return; }
+    if (!confirm(t('confirmBulkDelete').replace('{n}', urls.length))) return;
+    try {
+        await fetch(BASE + '/api/jobs/' + encodeURIComponent(SID) + '/bulk-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobUrls: urls })
+        });
+        refreshJobRecords();
+    } catch (e) { alert(e.message); }
+}
+
 // ─── Modal ───
 function showModal(title, content, jobUrl, docType) {
     document.getElementById('modalTitle').textContent = title;
@@ -3210,25 +3462,20 @@ function renderJobRow(job) {
     var url = esc(job.url || '');
     var safeUrl = url.replace(/'/g, "\\\\'");
     var arts = job.artifacts || {};
-    // Artifact badges
+    // Artifact badges (docs column)
     var badges = '';
-    if (arts.resume && arts.resume !== 'generated' && arts.resume.length > 10) badges += '<span class="artifact-badge" title="Resume generated" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'resume\\')">R</span>';
-    if (arts.coverLetter && arts.coverLetter !== 'generated' && arts.coverLetter.length > 10) badges += '<span class="artifact-badge" title="Cover Letter generated" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'coverLetter\\')">C</span>';
-    if (arts.interviewPrep && arts.interviewPrep !== 'generated' && arts.interviewPrep.length > 10) badges += '<span class="artifact-badge" title="Interview Prep generated" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'interviewPrep\\')">P</span>';
+    if (arts.resume && arts.resume !== 'generated' && arts.resume.length > 10) badges += '<span class="artifact-badge" title="Resume" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'resume\\')">R</span>';
+    if (arts.coverLetter && arts.coverLetter !== 'generated' && arts.coverLetter.length > 10) badges += '<span class="artifact-badge" title="Cover Letter" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'coverLetter\\')">C</span>';
+    if (arts.interviewPrep && arts.interviewPrep !== 'generated' && arts.interviewPrep.length > 10) badges += '<span class="artifact-badge" title="Interview Prep" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'interviewPrep\\')">P</span>';
     return '<tr>' +
-        '<td class="title-cell"><a href="' + url + '" target="_blank">' + esc(job.title || 'Untitled') + '</a><span class="company">' + esc(job.company || '') + '</span>' + (badges ? '<div class="artifact-badges">' + badges + '</div>' : '') + '</td>' +
+        '<td class="col-check"><input type="checkbox" class="job-select" value="' + url + '" onchange="updateBulkBar()"></td>' +
+        '<td class="title-cell"><a href="' + url + '" target="_blank">' + esc(job.title || 'Untitled') + '</a><span class="company">' + esc(job.company || '') + '</span></td>' +
         '<td>' + esc(job.location || '') + '</td>' +
         '<td>' + esc(job.salary || '—') + '</td>' +
         '<td class="' + scCls + '">' + scVal + '</td>' +
         '<td><span class="' + statusCls + '">' + esc(job.status || 'discovered') + '</span></td>' +
-        '<td class="actions">' +
-            '<button class="btn btn-primary btn-sm" onclick="genResume(\\'' + safeUrl + '\\')">Resume</button>' +
-            '<button class="btn btn-warning btn-sm" onclick="genCoverLetter(\\'' + safeUrl + '\\')">Cover Letter</button>' +
-            '<button class="btn btn-sm" style="background:#8b5cf6;color:#fff" onclick="genInterviewPrep(\\'' + safeUrl + '\\')">Prep</button>' +
-            '<button class="btn btn-success btn-sm" onclick="markApplied(\\'' + safeUrl + '\\')">Applied</button>' +
-            '<button class="btn btn-sm" style="background:#6366f1;color:#fff" onclick="openJob(\\'' + safeUrl + '\\')">Link</button>' +
-            '<button class="btn btn-sm" style="background:#ef4444;color:#fff" onclick="deleteJob(\\'' + safeUrl + '\\')" title="Remove this job">✕</button>' +
-        '</td>' +
+        '<td class="col-docs"><div class="artifact-badges">' + (badges || '—') + '</div></td>' +
+        '<td class="col-link"><a href="' + url + '" target="_blank" title="Open job page">&#128279;</a></td>' +
     '</tr>';
 }
 
