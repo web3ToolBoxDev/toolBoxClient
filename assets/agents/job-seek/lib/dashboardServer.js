@@ -2964,7 +2964,7 @@ function buildDashboardHTML(sessionId) {
   <div class="grid-2" id="profile"></div>
 </div>
 
-<h2 data-i18n="workflowGrid">Workflow Grid</h2>
+<h2 data-i18n="workflowGrid">Platform Management</h2>
 <div class="card">
   <div class="wf-status-grid" id="wfGrid">
     <div style="color:#9da0c3;text-align:center;grid-column:1/-1;" data-i18n="noPlatforms">No platforms configured yet.</div>
@@ -3261,7 +3261,7 @@ var _i18n = {
     en: {
         envBound: 'Environment bound', envNotBound: 'No browser environment bound. Please go to AI Panel → Runtime Settings → Bind an environment to enable login and search.',
         direction: 'Direction', profile: 'Profile', workflowProgress: 'Workflow Progress',
-        workflowGrid: 'Workflow Grid',
+        workflowGrid: 'Platform Management',
         statsOverview: 'Stats Overview', applicationPipeline: 'Application Pipeline', jobRecords: 'Job Records',
         startWorkflow: 'Start Workflow', stop: 'Stop', settings: 'Settings',
         addWebsite: '+ Add Website', login: 'Login', confirm: 'Confirm',
@@ -3313,7 +3313,7 @@ var _i18n = {
     'zh-CN': {
         envBound: '已绑定浏览器环境', envNotBound: '未绑定浏览器环境。请前往 AI 面板 → 运行时设置 → 绑定环境，以启用登录和搜索功能。',
         direction: '求职方向', profile: '个人资料', workflowProgress: '工作流进度',
-        workflowGrid: '工作流网格',
+        workflowGrid: '平台管理',
         statsOverview: '统计概览', applicationPipeline: '申请流水线', jobRecords: '职位记录',
         startWorkflow: '启动工作流', stop: '停止', settings: '设置',
         addWebsite: '+ 添加网站', login: '登录', confirm: '确认',
