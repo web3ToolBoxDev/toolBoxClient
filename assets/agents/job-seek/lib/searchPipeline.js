@@ -16,6 +16,7 @@ const { handler: coverLetterHandler } = require('./tools/coverLetter');
 const { handler: mockInterviewHandler } = require('./tools/mockInterview');
 const { getSourcesForLocation } = require('./sources/locationSources');
 const dashboardServer = require('./dashboardServer');
+const alertService = require('./workflow/alertService');
 
 // Lazy-loaded to avoid circular deps
 let _scriptBuilder = null;
@@ -814,7 +815,15 @@ async function _runPipeline(sessionId) {
                     matchScore: score,
                     status: 'matched',
                     artifacts: requirements ? { requirements } : {},
-                    matchBreakdown: matchResult.breakdown || null
+                    matchBreakdown: matchResult.breakdown || null,
+                    taskLog: {
+                        search: {
+                            status: 'ok',
+                            at: new Date().toISOString(),
+                            source: listing.source || listing.platform || '',
+                            aiMatched: !!matchResult.aiMatched
+                        }
+                    }
                 });
                 pipeline.progress.qualified++;
                 _sourceQualified[listing.source] = (_sourceQualified[listing.source] || 0) + 1;
@@ -825,6 +834,21 @@ async function _runPipeline(sessionId) {
         } catch (err) {
             _log(`ERROR matching "${listing.title}": ${err.message}`);
             pipeline.progress.errors.push(`Match error (${listing.url}): ${err.message}`);
+            // Record search error on job card for interrupted workflow tracking
+            dashboardServer.upsertJobCard(sessionId, {
+                url: listing.url,
+                title: listing.title || '',
+                company: listing.company || '',
+                status: 'discovered',
+                taskLog: {
+                    search: {
+                        status: 'error',
+                        at: new Date().toISOString(),
+                        error: err.message,
+                        source: listing.source || listing.platform || ''
+                    }
+                }
+            });
         }
     }
 
@@ -963,7 +987,15 @@ async function _runPipeline(sessionId) {
                                 matchScore: score,
                                 status: 'matched',
                                 artifacts: requirements ? { requirements } : {},
-                                matchBreakdown: matchResult.breakdown || null
+                                matchBreakdown: matchResult.breakdown || null,
+                                taskLog: {
+                                    search: {
+                                        status: 'ok',
+                                        at: new Date().toISOString(),
+                                        source: listing.source || listing.platform || '',
+                                        aiMatched: !!matchResult.aiMatched
+                                    }
+                                }
                             });
                             pipeline.progress.qualified++;
                             _sourceQualified[listing.source] = (_sourceQualified[listing.source] || 0) + 1;
@@ -972,6 +1004,20 @@ async function _runPipeline(sessionId) {
                     } catch (err) {
                         _log(`ERROR matching "${listing.title}": ${err.message}`);
                         pipeline.progress.errors.push(`Match error (${listing.url}): ${err.message}`);
+                        dashboardServer.upsertJobCard(sessionId, {
+                            url: listing.url,
+                            title: listing.title || '',
+                            company: listing.company || '',
+                            status: 'discovered',
+                            taskLog: {
+                                search: {
+                                    status: 'error',
+                                    at: new Date().toISOString(),
+                                    error: err.message,
+                                    source: listing.source || listing.platform || ''
+                                }
+                            }
+                        });
                     }
                 }
             }
@@ -1531,6 +1577,41 @@ async function generateAllDocs(sessionId, jobUrl, profile, options = {}) {
             errors.push(`Interview Prep: ${err.message}`);
             results.interviewPrep = { error: err.message };
         }
+    }
+
+    // --- Record per-job taskLog for generate phase ---
+    const docOutcomes = {};
+    if (tailorResume)  docOutcomes.resume = { ok: !!results.resume?.success, source: results.aiGenerated && aiResumeMd ? 'ai' : 'template' };
+    if (coverLetter)   docOutcomes.coverLetter = { ok: !!results.coverLetter?.success, source: results.aiGenerated && aiCoverMd ? 'ai' : 'template' };
+    if (interviewPrep) docOutcomes.interviewPrep = { ok: !!results.interviewPrep?.success, source: 'template' };
+
+    const allOk = Object.values(docOutcomes).every(d => d.ok);
+    const anyOk = Object.values(docOutcomes).some(d => d.ok);
+
+    dashboardServer.upsertJobCard(sessionId, {
+        url: jobUrl,
+        taskLog: {
+            generate: {
+                status: allOk ? 'ok' : anyOk ? 'partial' : 'error',
+                at: new Date().toISOString(),
+                error: errors.length > 0 ? errors.join('; ') : null,
+                aiGenerated: !!results.aiGenerated,
+                docs: docOutcomes
+            }
+        }
+    });
+
+    // Dispatch alert for generate failures
+    if (!allOk) {
+        try {
+            alertService.dispatch(sessionId, {
+                type: 'failure',
+                stepName: 'generate',
+                title: `Generate ${anyOk ? 'partial' : 'failed'}: ${job.title}`,
+                message: errors.join('; '),
+                meta: { url: jobUrl, company: job.company, aiGenerated: results.aiGenerated }
+            });
+        } catch (_) {}
     }
 
     return { success: true, results, errors, job, aiGenerated: results.aiGenerated };

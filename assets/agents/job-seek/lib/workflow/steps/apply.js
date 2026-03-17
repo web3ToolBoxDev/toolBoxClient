@@ -158,6 +158,15 @@ async function execute({ sessionId, config, context }) {
                         applyScreenshot: applyResult.screenshotBase64 || null,
                         applySteps: applyResult.steps,
                         applyPlatform: applyResult.platform
+                    },
+                    taskLog: {
+                        apply: {
+                            status: 'ok',
+                            at: new Date().toISOString(),
+                            platform: applyResult.platform || null,
+                            attempts: (job.taskLog?.apply?.attempts || 0) + 1,
+                            screenshot: !!applyResult.screenshotBase64
+                        }
                     }
                 });
                 submittedCount++;
@@ -195,6 +204,15 @@ async function execute({ sessionId, config, context }) {
                         applyScreenshot: applyResult.screenshotBase64 || null,
                         applySteps: applyResult.steps,
                         applyAttemptedAt: new Date().toISOString()
+                    },
+                    taskLog: {
+                        apply: {
+                            status: 'error',
+                            at: new Date().toISOString(),
+                            error: applyResult.message,
+                            platform: applyResult?.platform || null,
+                            attempts: (job.taskLog?.apply?.attempts || 0) + 1
+                        }
                     }
                 });
                 failedCount++;
@@ -243,6 +261,14 @@ async function execute({ sessionId, config, context }) {
                     ...(job.artifacts || {}),
                     applyError: err.message,
                     applyAttemptedAt: new Date().toISOString()
+                },
+                taskLog: {
+                    apply: {
+                        status: 'error',
+                        at: new Date().toISOString(),
+                        error: err.message,
+                        attempts: (job.taskLog?.apply?.attempts || 0) + 1
+                    }
                 }
             });
 

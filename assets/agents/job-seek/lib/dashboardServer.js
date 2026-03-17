@@ -905,6 +905,15 @@ function start(getState, port, options) {
             return res.end(JSON.stringify(result));
         }
 
+        // GET /api/pipeline/:sessionId/interrupted — get jobs with taskLog errors
+        const interruptedMatch = url.match(/^\/api\/pipeline\/(.+)\/interrupted$/);
+        if (interruptedMatch && req.method === 'GET') {
+            const sessionId = decodeURIComponent(interruptedMatch[1]);
+            const result = getInterruptedJobs(sessionId);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(result));
+        }
+
         // ─── Workflow Status API routes ───
 
         // GET /api/workflow-status/:sessionId — get all platform cell statuses
@@ -2315,9 +2324,22 @@ function _syncJobCardsToState(sessionId) {
 }
 
 /**
+ * Deep-merge taskLog at phase-key level so setting apply doesn't erase search.
+ */
+function _mergeTaskLog(existing, incoming) {
+    if (!incoming) return existing || {};
+    if (!existing) return incoming;
+    const merged = { ...existing };
+    for (const [phase, data] of Object.entries(incoming)) {
+        merged[phase] = { ...(existing[phase] || {}), ...data };
+    }
+    return merged;
+}
+
+/**
  * Add or update a job workflow card.
  * @param {string} sessionId
- * @param {object} job - { url, title, company, location, salary, matchScore, status, artifacts }
+ * @param {object} job - { url, title, company, location, salary, matchScore, status, artifacts, taskLog }
  */
 function upsertJobCard(sessionId, job) {
     if (!job || !job.url) return;
@@ -2333,6 +2355,7 @@ function upsertJobCard(sessionId, job) {
         matchScore: job.matchScore ?? existing.matchScore ?? null,
         status: job.status || existing.status || 'discovered',
         artifacts: { ...(existing.artifacts || {}), ...(job.artifacts || {}) },
+        taskLog: _mergeTaskLog(existing.taskLog, job.taskLog),
         matchBreakdown: job.matchBreakdown || existing.matchBreakdown || null,
         fullText: job.fullText || existing.fullText || '',
         updatedAt: new Date().toISOString(),
@@ -2383,6 +2406,22 @@ function getJobCards(sessionId) {
         if (a.matchScore !== null) return -1;
         if (b.matchScore !== null) return 1;
         return new Date(b.updatedAt) - new Date(a.updatedAt);
+    });
+}
+
+/**
+ * Get jobs with errors or partial failures in any taskLog phase.
+ * Used for interrupted workflow display and notification foundation.
+ * @param {string} sessionId
+ * @returns {Array} Job cards with taskLog errors
+ */
+function getInterruptedJobs(sessionId) {
+    const cards = getJobCards(sessionId);
+    return cards.filter(c => {
+        const log = c.taskLog || {};
+        return log.search?.status === 'error' ||
+               log.generate?.status === 'error' || log.generate?.status === 'partial' ||
+               log.apply?.status === 'error';
     });
 }
 
@@ -2537,6 +2576,21 @@ function buildDashboardHTML(sessionId) {
   .artifact-badges { display: flex; gap: 4px; justify-content: center; }
   .artifact-badge { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 4px; background: #10b981; color: #fff; font-size: 0.65rem; font-weight: 700; cursor: pointer; }
   .artifact-badge:hover { background: #059669; }
+  .artifact-badge.ai-badge { background: #7c3aed; font-size: 0.55rem; width: 20px; height: 20px; }
+  .artifact-badge.ai-badge:hover { background: #6d28d9; }
+
+  /* Phase dots (S/G/A task status indicators) */
+  .phase-dots { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; }
+  .phase-dot { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 0.55rem; font-weight: 700; color: #fff; cursor: default; }
+  .phase-dot.phase-ok { background: rgba(74,222,128,0.85); }
+  .phase-dot.phase-error { background: rgba(239,68,68,0.85); }
+  .phase-dot.phase-partial { background: rgba(251,191,36,0.85); }
+  .phase-dot.phase-skipped { background: rgba(100,100,100,0.45); color: rgba(255,255,255,0.5); }
+
+  /* Task error section in modal */
+  .task-errors { margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; }
+  .task-errors .error-title { color: #ef4444; font-weight: 600; font-size: 0.8rem; margin-bottom: 0.3rem; }
+  .task-errors .error-item { color: #fca5a5; font-size: 0.75rem; margin: 0.15rem 0; }
 
   /* Control panel */
   .job-control-panel { margin-bottom: 0.75rem; }
@@ -3503,8 +3557,18 @@ function renderJobRow(job) {
     var url = esc(job.url || '');
     var safeUrl = url.replace(/'/g, "\\\\'");
     var arts = job.artifacts || {};
+    var log = job.taskLog || {};
+
+    // Phase dots (S/G/A task status indicators)
+    var dots = '';
+    if (log.search) dots += '<span class="phase-dot phase-' + log.search.status + '" title="Search: ' + esc(log.search.error || 'OK') + '">S</span>';
+    if (log.generate) dots += '<span class="phase-dot phase-' + log.generate.status + '" title="Generate: ' + esc(log.generate.error || 'OK') + '">G</span>';
+    if (log.apply) dots += '<span class="phase-dot phase-' + log.apply.status + '" title="Apply: ' + esc(log.apply.error || 'OK') + '">A</span>';
+    var phaseDots = dots ? '<span class="phase-dots">' + dots + '</span>' : '';
+
     // Artifact badges (docs column)
     var badges = '';
+    if (log.generate?.aiGenerated) badges += '<span class="artifact-badge ai-badge" title="AI-generated documents">AI</span>';
     if (arts.resume && arts.resume !== 'generated' && arts.resume.length > 10) badges += '<span class="artifact-badge" title="Resume" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'resume\\')">R</span>';
     if (arts.coverLetter && arts.coverLetter !== 'generated' && arts.coverLetter.length > 10) badges += '<span class="artifact-badge" title="Cover Letter" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'coverLetter\\')">C</span>';
     if (arts.interviewPrep && arts.interviewPrep !== 'generated' && arts.interviewPrep.length > 10) badges += '<span class="artifact-badge" title="Interview Prep" onclick="downloadDoc(\\'' + safeUrl + '\\', \\'interviewPrep\\')">P</span>';
@@ -3514,7 +3578,7 @@ function renderJobRow(job) {
         '<td>' + esc(job.location || '') + '</td>' +
         '<td>' + esc(job.salary || '—') + '</td>' +
         '<td class="' + scCls + '">' + scVal + '</td>' +
-        '<td><span class="' + statusCls + '">' + esc(job.status || 'discovered') + '</span></td>' +
+        '<td><span class="' + statusCls + '">' + esc(job.status || 'discovered') + '</span>' + phaseDots + '</td>' +
         '<td class="col-docs"><div class="artifact-badges">' + (badges || '—') + '</div></td>' +
         '<td class="col-link"><a href="' + url + '" target="_blank" title="Open job page">&#128279;</a></td>' +
     '</tr>';
@@ -4686,7 +4750,7 @@ function getDashboardURL(sessionId) {
 module.exports = {
     start, stop, getDashboardURL, DASHBOARD_PORT,
     // Job workflow
-    upsertJobCard, updateJobStatus, deleteJobCard, getJobCards, getJobStats,
+    upsertJobCard, updateJobStatus, deleteJobCard, getJobCards, getJobStats, getInterruptedJobs,
     // Platform workflow status
     updatePlatformCell, getWorkflowStatus, computeCellVisual,
     clearPlatformStatuses, removePlatformStatus,
