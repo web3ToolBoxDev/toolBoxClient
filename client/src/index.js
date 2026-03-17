@@ -1,6 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.scss';
+import router from './router';
+import {RouterProvider} from 'react-router-dom';
+import './i18n'; // Import i18n configuration
+import reportWebVitals from './reportWebVitals';
 
 // Electron focus fix: native alert()/confirm() steal focus from webContents
 // on Windows, causing keyboard input to stop working (Electron bug #20821).
@@ -21,12 +25,6 @@ window.confirm = function patchedConfirm(message) {
     }
     return _origConfirm.call(window, message);
 };
-
-import router from './router';
-import {RouterProvider} from 'react-router-dom';
-import './i18n'; // Import i18n configuration
-
-import reportWebVitals from './reportWebVitals';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
