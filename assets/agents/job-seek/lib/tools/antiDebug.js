@@ -30,6 +30,26 @@ async function _toolCall(name, params, timeout) {
     return res.result !== undefined ? res.result : res;
 }
 
+// ─── Helpers ───
+
+/**
+ * Robustly parse page_evaluate result — handles string, JSON, wrapped parens, or direct object.
+ */
+function _parseEvalResult(raw, fallback) {
+    if (raw == null) return fallback;
+    if (typeof raw === 'object' && !Array.isArray(raw)) {
+        // Already an object (e.g. { hasTraps: true, details: [] })
+        if (Object.keys(raw).length > 0) return raw;
+    }
+    if (typeof raw === 'string') {
+        let s = raw.trim();
+        // Strip wrapping parens: ({"key":...}) → {"key":...}
+        if (s.startsWith('(') && s.endsWith(')')) s = s.slice(1, -1);
+        try { return JSON.parse(s); } catch (_) {}
+    }
+    return fallback;
+}
+
 // ─── Detection ───
 
 const _detectScript = `(function() {
@@ -57,7 +77,7 @@ const _detectScript = `(function() {
     if (elapsed > 100) {
         traps.push('eval-delayed-' + Math.round(elapsed) + 'ms');
     }
-    return { hasTraps: traps.length > 0, details: traps };
+    return JSON.stringify({ hasTraps: traps.length > 0, details: traps });
 })()`;
 
 /**
@@ -68,8 +88,8 @@ const _detectScript = `(function() {
  */
 async function detectDebugTraps(browserId, pageIndex) {
     try {
-        const result = await _toolCall('page_evaluate', { browserId, pageIndex, expression: _detectScript }, 15000);
-        const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+        const raw = await _toolCall('page_evaluate', { browserId, pageIndex, expression: _detectScript }, 15000);
+        const parsed = _parseEvalResult(raw, { hasTraps: false, details: [] });
         console.log(`[anti-debug] detect: hasTraps=${parsed.hasTraps}, details=[${(parsed.details || []).join(', ')}]`);
         return parsed;
     } catch (err) {
@@ -87,7 +107,7 @@ async function detectDebugTraps(browserId, pageIndex) {
 // ─── Injection ───
 
 const _injectScript = `(function() {
-    if (window.__antiDebugPatched) return { injected: false, alreadyPatched: true };
+    if (window.__antiDebugPatched) return JSON.stringify({ injected: false, alreadyPatched: true });
     window.__antiDebugPatched = true;
     var origSI = window.setInterval, origST = window.setTimeout;
     function hasTrap(fn) {
@@ -113,7 +133,7 @@ const _injectScript = `(function() {
         };
         window.Function.prototype = OF.prototype;
     } catch(e) {}
-    return { injected: true, alreadyPatched: false };
+    return JSON.stringify({ injected: true, alreadyPatched: false });
 })()`;
 
 /**
@@ -124,8 +144,8 @@ const _injectScript = `(function() {
  */
 async function injectAntiDebug(browserId, pageIndex) {
     try {
-        const result = await _toolCall('page_evaluate', { browserId, pageIndex, expression: _injectScript }, 15000);
-        const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+        const raw = await _toolCall('page_evaluate', { browserId, pageIndex, expression: _injectScript }, 15000);
+        const parsed = _parseEvalResult(raw, { injected: false, alreadyPatched: false });
         if (parsed.injected) {
             console.log('[anti-debug] inject: patches applied successfully');
         } else {
