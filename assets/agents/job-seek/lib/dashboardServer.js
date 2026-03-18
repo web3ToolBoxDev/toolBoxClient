@@ -2857,9 +2857,9 @@ function buildDashboardHTML(sessionId) {
   .wfe-modal { background: #242640; border: 1px solid #2d2f4a; border-radius: 12px; padding: 1.5rem 2rem; max-width: 960px; width: 95%; max-height: 85vh; overflow-y: auto; }
   .wfe-modal h3 { color: #8b9aff; margin: 0 0 1rem 0; display: flex; align-items: center; justify-content: space-between; }
   .wfe-modal h3 .close-btn { background: none; border: none; color: #9da0c3; font-size: 1.5rem; cursor: pointer; }
-  .wfe-pipeline { display: flex; align-items: flex-start; gap: 0; justify-content: center; flex-wrap: wrap; }
-  .wfe-arrow { display: flex; align-items: center; padding-top: 2.5rem; color: #6a7eff; font-size: 1.5rem; font-weight: 700; margin: 0 0.3rem; }
-  .wfe-card { background: #1a1b2e; border: 1px solid #3d3f5a; border-radius: 10px; padding: 1rem; min-width: 240px; max-width: 280px; flex: 1; position: relative; transition: opacity 0.3s; }
+  .wfe-pipeline { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+  .wfe-arrow { display: flex; align-items: center; justify-content: center; color: #6a7eff; font-size: 1.2rem; font-weight: 700; padding: 0.25rem 0; }
+  .wfe-card { background: #1a1b2e; border: 1px solid #3d3f5a; border-radius: 10px; padding: 1rem; width: 100%; position: relative; transition: opacity 0.3s; }
   .wfe-card.disabled { opacity: 0.35; pointer-events: none; }
   .wfe-card.disabled .wfe-card-toggle { pointer-events: auto; opacity: 1; }
   .wfe-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; border-bottom: 1px solid #2d2f4a; padding-bottom: 0.5rem; }
@@ -2883,11 +2883,18 @@ function buildDashboardHTML(sessionId) {
   .wfe-switch input:checked + .slider::before { transform: translateX(22px); }
 
   /* Number inputs in cards */
-  .wfe-num-row { display: flex; align-items: center; justify-content: space-between; }
-  .wfe-num-row label { color: #9da0c3; font-size: 0.82rem; flex: 1; }
-  .wfe-num-row input { width: 60px; background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 4px; color: #dfe3ff; padding: 0.2rem 0.4rem; font-size: 0.85rem; text-align: center; }
+  .wfe-num-row { display: flex; flex-direction: column; gap: 0.15rem; }
+  .wfe-num-row label { color: #9da0c3; font-size: 0.82rem; }
+  .wfe-num-row input { width: 100%; background: #2d2f4a; border: 1px solid #3d3f5a; border-radius: 4px; color: #dfe3ff; padding: 0.35rem 0.6rem; font-size: 0.85rem; }
+  .wfe-num-row input:focus { border-color: #6366f1; outline: none; }
   .wfe-hint { display: block; font-size: 0.72rem; color: #666; font-weight: 400; margin-top: 1px; }
-  .gs-hint { font-size: 0.72rem; color: #666; margin: -0.2rem 0 0.3rem 0; }
+  /* Global Settings field cards */
+  .gs-hint { font-size: 0.72rem; color: #666; margin: 0 0 0.4rem 0; }
+  .gs-field { background: rgba(255,255,255,0.03); border-left: 3px solid #6366f1; border-radius: 0 6px 6px 0; padding: 0.65rem 1rem; }
+  .gs-field label { font-weight: 600; color: #dfe3ff; font-size: 0.88rem; display: block; margin-bottom: 2px; }
+  .gs-field input[type="number"] { width: 100%; }
+  .gs-field textarea:focus, .gs-field input:focus { border-color: #6366f1; outline: none; }
+  .gs-divider { border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 0.3rem 0; }
 
   /* Platform / Job checkboxes */
   .wfe-list-title { color: #6a7eff; font-size: 0.78rem; font-weight: 600; margin-top: 0.3rem; text-transform: uppercase; }
@@ -2902,11 +2909,7 @@ function buildDashboardHTML(sessionId) {
   /* Bottom buttons */
   .wfe-actions { display: flex; gap: 0.75rem; justify-content: center; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #2d2f4a; }
 
-  @media (max-width: 700px) {
-    .wfe-pipeline { flex-direction: column; align-items: center; }
-    .wfe-arrow { transform: rotate(90deg); padding: 0.5rem 0; }
-    .wfe-card { max-width: 100%; min-width: auto; }
-  }
+  /* Pipeline is always vertical — no mobile override needed */
 </style>
 </head>
 <body>
@@ -3085,19 +3088,28 @@ function buildDashboardHTML(sessionId) {
     <button class="close-btn" onclick="closeGlobalSettings()">&times;</button>
     <h3 data-i18n="globalSettings">Global Settings</h3>
     <div class="modal-form">
-      <label>Min Match Score (%)</label>
-      <div class="gs-hint" data-i18n="wfeMinScoreHint">Jobs scoring below this % are skipped</div>
-      <input type="number" id="gsCfgMinScore" min="0" max="100" step="5" value="60">
-      <label>Target Matches</label>
-      <div class="gs-hint" data-i18n="wfeTargetCountHint">Stop searching each platform after finding this many qualified jobs</div>
-      <input type="number" id="gsCfgTargetCount" min="1" max="100" value="10">
-      <label>Max Search Results</label>
-      <div class="gs-hint" data-i18n="wfeMaxResultsHint">Max jobs to fetch per platform before moving to next</div>
-      <input type="number" id="gsCfgMaxResults" min="5" max="200" step="5" value="30">
-      <label data-i18n="searchPreferences">Search & Match Preferences</label>
-      <div class="gs-hint" data-i18n="searchPreferencesHint">AI will use these preferences when scoring jobs</div>
-      <textarea id="gsCfgUserPreferences" rows="3" maxlength="500" style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.5rem 0.75rem;font-size:0.9rem;resize:vertical;font-family:inherit;" data-i18n-placeholder="searchPreferencesPlaceholder" placeholder="e.g., Prefer Node.js backend, avoid Java. Focus on full-stack roles."></textarea>
-      <button class="btn btn-primary" id="saveGlobalSettings" onclick="saveGlobalSettings()" data-i18n="save">Save Settings</button>
+      <div class="gs-field">
+        <label data-i18n="wfeMinScore">Min Match Score (%)</label>
+        <div class="gs-hint" data-i18n="wfeMinScoreHint">Jobs scoring below this % are skipped</div>
+        <input type="number" id="gsCfgMinScore" min="0" max="100" step="5" value="60">
+      </div>
+      <div class="gs-field">
+        <label data-i18n="wfeTargetCount">Target Matches</label>
+        <div class="gs-hint" data-i18n="wfeTargetCountHint">Stop searching each platform after finding this many qualified jobs</div>
+        <input type="number" id="gsCfgTargetCount" min="1" max="100" value="10">
+      </div>
+      <div class="gs-field">
+        <label data-i18n="wfeMaxResults">Max Search Results</label>
+        <div class="gs-hint" data-i18n="wfeMaxResultsHint">Max jobs to fetch per platform before moving to next</div>
+        <input type="number" id="gsCfgMaxResults" min="5" max="200" step="5" value="30">
+      </div>
+      <hr class="gs-divider">
+      <div class="gs-field">
+        <label data-i18n="searchPreferences">Search & Match Preferences</label>
+        <div class="gs-hint" data-i18n="searchPreferencesHint">AI will use these preferences when scoring jobs</div>
+        <textarea id="gsCfgUserPreferences" rows="4" maxlength="500" style="width:100%;background:#2d2f4a;border:1px solid #3d3f5a;border-radius:6px;color:#dfe3ff;padding:0.5rem 0.75rem;font-size:0.9rem;resize:vertical;font-family:inherit;" data-i18n-placeholder="searchPreferencesPlaceholder" placeholder="e.g., Prefer Node.js backend, avoid Java. Focus on full-stack roles."></textarea>
+      </div>
+      <button class="btn btn-primary" style="width:100%;padding:0.6rem;" id="saveGlobalSettings" onclick="saveGlobalSettings()" data-i18n="save">Save Settings</button>
     </div>
   </div>
 </div>
@@ -4098,7 +4110,7 @@ function renderWorkflowEditor() {
     var html = '';
 
     steps.forEach(function(step, idx) {
-        if (idx > 0) html += '<div class="wfe-arrow">⇒</div>';
+        if (idx > 0) html += '<div class="wfe-arrow">⇓</div>';
         html += renderWfeCard(step, cfg, t);
     });
 
