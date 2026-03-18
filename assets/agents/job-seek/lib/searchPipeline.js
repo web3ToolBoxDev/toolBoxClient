@@ -917,6 +917,7 @@ async function _runPipeline(sessionId) {
                 status = allOk ? 'tailored' : 'matched'; // partial/error → stay matched
                 // Generate displayJson for in-page preview
                 artifacts.displayJson = {
+                    jd:            listing.fullText ? [{ type: 'text', title: 'Job Description', content: listing.fullText }] : null,
                     resume:        _markdownToSections(artifacts.resume, 'resume'),
                     coverLetter:   _markdownToSections(artifacts.coverLetter, 'coverLetter'),
                     interviewPrep: _markdownToSections(artifacts.interviewPrep, 'interviewPrep')
@@ -1942,10 +1943,12 @@ async function generateAllDocs(sessionId, jobUrl, profile, options = {}) {
     {
         const updatedJob = (dashboardServer.getJobCards(sessionId) || []).find(c => c.url === jobUrl);
         const arts = updatedJob?.artifacts || {};
+        const jdText = updatedJob?.fullText || '';
         dashboardServer.upsertJobCard(sessionId, {
             url: jobUrl,
             artifacts: {
                 displayJson: {
+                    jd:            jdText ? [{ type: 'text', title: 'Job Description', content: jdText }] : null,
                     resume:        _markdownToSections(arts.resume, 'resume'),
                     coverLetter:   _markdownToSections(arts.coverLetter, 'coverLetter'),
                     interviewPrep: _markdownToSections(arts.interviewPrep, 'interviewPrep')
