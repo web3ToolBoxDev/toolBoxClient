@@ -139,8 +139,8 @@ const artifactRenderer = require('./lib/artifactRenderer');
 artifactRenderer.registerAll();
 
 // ─── Start ───
-const server = app.listen(PORT, () => {
-    console.log(`[toolService] running on :${PORT}`);
+const server = app.listen(PORT, '127.0.0.1', () => {
+    console.log(`[toolService] running on 127.0.0.1:${PORT}`);
     console.log(`[toolService] chromePath=${CHROME_PATH || '(not set)'}`);
     console.log(`[toolService] savePath=${SAVE_PATH || '(not set)'}`);
 });

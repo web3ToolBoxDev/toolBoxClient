@@ -53,7 +53,7 @@ app.use('/api/dashboard', (req, res) => {
   });
 });
 
-app.listen(port, async () => {
+app.listen(port, '127.0.0.1', async () => {
   console.log(`服务器已启动，监听端口 ${port}`);
   webService.initialize(app);
 
