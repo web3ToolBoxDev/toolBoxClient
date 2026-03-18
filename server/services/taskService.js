@@ -818,6 +818,7 @@ class TaskService {
             case 'agent_conversation_update':
             case 'agent_subtask_update':
             case 'agent_artifact_update':
+            case 'agent_artifact_replace':
             case 'agent_error': {
                 this.webSocketService.sendToFront({
                     ...data,

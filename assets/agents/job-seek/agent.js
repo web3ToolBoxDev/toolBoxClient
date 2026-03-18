@@ -825,6 +825,15 @@ function moveSubTaskForward(sessionId) {
  */
 async function _buildDashboardAndFinish(sessionId, opts = {}) {
     const { clearFirst = false } = opts;
+
+    // Mark dashboard subtask as running so the UI shows progress
+    updateSubTasks(sessionId, (list) => {
+        const d = list.find(i => i.key === 'dashboard');
+        if (d && d.status !== 'done') { d.status = 'running'; d.updatedAt = now(); }
+        return list;
+    });
+    sendSnapshot();
+
     try { buildIntentFile(sessionId); } catch (e) {
         console.error('[agent] buildIntentFile on dashboard build failed:', e.message);
     }
