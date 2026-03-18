@@ -52,7 +52,7 @@ const JD_VERIFY_MAX_RETRIES = 3;
 
 const DOM_EXTRACT_SELECTOR = 'input, button, select, a[href], form, textarea, [role="search"], [role="listbox"]';
 
-const SEARCH_OUTPUT_SCHEMA = '{ jobs: [{ title, company, url, location, salary, description, fullText }] }';
+const SEARCH_OUTPUT_SCHEMA = '{ jobs: [{ title, company, url, location, salary, description, fullText }] }  // salary = compensation/pay (e.g. "$80K-$120K", "CA$90,000/yr"), NOT job type. Leave empty string if no salary shown.';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -643,6 +643,8 @@ Return ONLY a JavaScript code block (no imports, no browser creation). The code 
    e. Store the extracted text as job.fullText (string).
    f. Wrap each iteration in try/catch — if detail extraction fails, set fullText to '' and continue.
    g. The final output for each job: { title, company, url, location, salary, description (snippet), fullText (complete JD) }.
+      IMPORTANT: salary must be the compensation/pay range (e.g. "$80K-$120K", "CA$90,000/yr").
+      Do NOT put job type (Full-time, Part-time, Contract) in salary — leave salary as empty string if not shown.
 
 DOM structure of the page:
 ${domSummary}
