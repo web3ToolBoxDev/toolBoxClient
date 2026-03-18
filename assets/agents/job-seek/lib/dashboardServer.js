@@ -450,6 +450,34 @@ function start(getState, port, options) {
             return res.end(JSON.stringify(data));
         }
 
+        // PUT /api/direction/:sessionId — update direction fields (auto-save from dashboard)
+        const dirMatch = url.match(/^\/api\/direction\/(.+)$/);
+        if (dirMatch && req.method === 'PUT') {
+            const sessionId = decodeURIComponent(dirMatch[1]);
+            _readBody(req, (body) => {
+                const state = _stateGetter ? _stateGetter() : {};
+                if (!state.selectedAnswers) state.selectedAnswers = {};
+                if (!state.selectedAnswers[sessionId]) state.selectedAnswers[sessionId] = {};
+                const ans = state.selectedAnswers[sessionId];
+                // Map direction display keys to selectedAnswers keys
+                const keyMap = { jobTitle: 'q_job_title', location: 'q_location', workMode: 'q_work_mode', salary: 'q_salary' };
+                let changed = false;
+                for (const [dKey, aKey] of Object.entries(keyMap)) {
+                    if (body[dKey] !== undefined && body[dKey] !== ans[aKey]) {
+                        ans[aKey] = body[dKey];
+                        changed = true;
+                    }
+                }
+                if (changed && _scheduleSave) _scheduleSave();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true }));
+            }, (err) => {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: err.message }));
+            });
+            return;
+        }
+
         // POST /api/jobs/:sessionId/status — update job status (must come before /api/jobs/:sessionId)
         const statusMatch = url.match(/^\/api\/jobs\/(.+)\/status$/);
         if (statusMatch && req.method === 'POST') {
@@ -2584,6 +2612,11 @@ function buildDashboardHTML(sessionId) {
   .item .val { font-size: 1.05rem; font-weight: 500; white-space: pre-wrap; }
   .item .val.empty { color: #555; font-style: italic; }
   .item.full-width { grid-column: 1 / -1; }
+  .val-edit-wrap { display: flex; align-items: center; gap: 0.4rem; }
+  .val-edit { width: 100%; background: #1e1f38; border: 1px solid #3d3f5a; border-radius: 4px; color: #dfe3ff; font-size: 1rem; font-weight: 500; padding: 0.35rem 0.5rem; font-family: inherit; transition: border-color 0.2s; }
+  .val-edit:focus { border-color: #6366f1; outline: none; }
+  .val-edit-status { font-size: 0.75rem; color: #22c55e; white-space: nowrap; opacity: 0; transition: opacity 0.3s; min-width: 1.2em; }
+  .val-edit-status.show { opacity: 1; }
   .grid-profile { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
   .grid-profile .item { background: rgba(255,255,255,0.04); border-radius: 8px; padding: 0.75rem 1rem; min-height: 80px; }
   .grid-profile .item.full-width { grid-column: 1 / -1; }
@@ -3392,10 +3425,52 @@ const esc = (s) => {
 };
 const statusIcon = (s) => s === 'done' ? '&#x2705;' : s === 'running' ? '&#x25B6;&#xFE0F;' : s === 'failed' ? '&#x274C;' : '&#x23F3;';
 
-function renderItem(label, value, fullWidth) {
+function renderItem(label, value, fullWidth, editKey) {
     const cls = fullWidth ? 'item full-width' : 'item';
+    if (editKey) {
+        // Editable input with auto-save on blur
+        return '<div class="' + cls + '"><label>' + esc(label) + '</label>' +
+            '<div class="val-edit-wrap">' +
+            '<input type="text" class="val-edit" data-dir-key="' + esc(editKey) + '" value="' + esc(value || '') + '" ' +
+            'onblur="autoSaveDirection(this)" onkeydown="if(event.key===\'Enter\'){this.blur();}">' +
+            '<span class="val-edit-status"></span>' +
+            '</div></div>';
+    }
     const valCls = value ? 'val' : 'val empty';
     return '<div class="' + cls + '"><label>' + esc(label) + '</label><div class="' + valCls + '">' + esc(value || '\\u2014') + '</div></div>';
+}
+
+// ─── Direction auto-save ───
+var _dirSaveTimers = {};
+function autoSaveDirection(inputEl) {
+    var key = inputEl.getAttribute('data-dir-key');
+    if (!key) return;
+    var value = inputEl.value.trim();
+    var statusEl = inputEl.nextElementSibling;
+    // Debounce: cancel previous timer for this key
+    if (_dirSaveTimers[key]) clearTimeout(_dirSaveTimers[key]);
+    _dirSaveTimers[key] = setTimeout(function() {
+        var payload = {};
+        payload[key] = value;
+        fetch(BASE_URL + '/api/direction/' + _wfSessionId, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(function(res) {
+            if (res.ok && statusEl) {
+                statusEl.textContent = '\\u2713';
+                statusEl.classList.add('show');
+                setTimeout(function() { statusEl.classList.remove('show'); }, 1500);
+            }
+        }).catch(function() {
+            if (statusEl) {
+                statusEl.textContent = '!';
+                statusEl.style.color = '#ef4444';
+                statusEl.classList.add('show');
+                setTimeout(function() { statusEl.classList.remove('show'); statusEl.style.color = '#22c55e'; }, 2000);
+            }
+        });
+    }, 300);
 }
 
 const STAGES = ['discovered','fetched','parsed','matched','tailored','reviewed','submitted','followed_up','archived'];
@@ -3907,11 +3982,15 @@ function render(data) {
     }
 
     var d = data.direction || {};
-    document.getElementById('direction').innerHTML =
-        renderItem('Job Title', d.jobTitle) +
-        renderItem('Location', d.location) +
-        renderItem('Work Mode', d.workMode) +
-        renderItem('Target Salary', d.salary ? d.salary + 'K' : '');
+    // Skip direction re-render if user is currently editing a field
+    var _activeEdit = document.activeElement && document.activeElement.classList.contains('val-edit');
+    if (!_activeEdit) {
+        document.getElementById('direction').innerHTML =
+            renderItem('Job Title', d.jobTitle, false, 'jobTitle') +
+            renderItem('Location', d.location, false, 'location') +
+            renderItem('Work Mode', d.workMode, false, 'workMode') +
+            renderItem('Target Salary', d.salary, false, 'salary');
+    }
 
     var p = data.profile || {};
     var profileHtml =

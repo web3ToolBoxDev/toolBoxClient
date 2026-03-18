@@ -38,6 +38,53 @@ function getPlatformService() {
 // Active pipeline runs: sessionId → PipelineState
 const _pipelines = new Map();
 
+// ─── Cloudflare Detection ───
+const _CLOUDFLARE_SIGNATURES = [
+    'cloudflare', 'just a moment', 'checking your browser',
+    'cf-browser-verification', 'attention required',
+    'ray id', 'blocked by anti-bot'
+];
+
+/**
+ * Check if an error message indicates a Cloudflare challenge/block.
+ * @param {string} errorMsg - Error message from script execution
+ * @returns {boolean}
+ */
+function _isCloudflareError(errorMsg) {
+    if (!errorMsg) return false;
+    const lower = errorMsg.toLowerCase();
+    return _CLOUDFLARE_SIGNATURES.some(sig => lower.includes(sig));
+}
+
+/**
+ * Check if page content (HTML/text) matches known Cloudflare challenge patterns.
+ * Use this to detect Cloudflare blocks from raw page content returned by search scripts.
+ * @param {string} pageContent - Raw HTML or text content from a page
+ * @returns {boolean}
+ */
+function _isCloudflareChallenge(pageContent) {
+    if (!pageContent || typeof pageContent !== 'string') return false;
+    const lower = pageContent.toLowerCase();
+    // Check for Cloudflare-specific markers
+    const cfMarkers = [
+        'cf-browser-verification',
+        'cf-challenge-running',
+        'cf_chl_opt',
+        'challenges.cloudflare.com',
+        'cdn-cgi/challenge-platform',
+        'checking if the site connection is secure'
+    ];
+    const titleMarkers = ['just a moment', 'attention required'];
+    // Title check: look for <title>Just a moment...</title>
+    const titleMatch = lower.match(/<title[^>]*>(.*?)<\/title>/);
+    if (titleMatch && titleMarkers.some(m => titleMatch[1].includes(m))) return true;
+    // Body marker check
+    return cfMarkers.some(m => lower.includes(m));
+}
+
+// Track Cloudflare-blocked platforms per pipeline run
+const _cloudflareBlocked = new Map(); // sessionId → Set<source>
+
 // ─── Markdown → Display JSON ───
 /**
  * Parse markdown into structured sections for in-page display.
@@ -1145,41 +1192,67 @@ async function _runPipeline(sessionId) {
                         }
                     } else {
                         const errMsg = scriptResult.error || 'unknown error';
-                        _log(`✗ [${q.source}] Platform tool failed: ${errMsg}`);
 
-                        // ── Self-heal: attempt AI-driven script repair + retry ──
-                        let healed = false;
-                        if (config.aiInvoke && !(pipeline._selfHealAttempts?.[q.source] >= 2)) {
-                            pipeline._selfHealAttempts = pipeline._selfHealAttempts || {};
-                            pipeline._selfHealAttempts[q.source] = (pipeline._selfHealAttempts[q.source] || 0) + 1;
-                            _log(`🔧 [${q.source}] Self-heal attempt ${pipeline._selfHealAttempts[q.source]}/2...`);
+                        // ── Cloudflare challenge detection (skip self-heal for CF blocks) ──
+                        if (_isCloudflareError(errMsg)) {
+                            _log(`🛡 [pipeline] Cloudflare challenge detected on ${q.source} (${platformTool.name})`);
+                            if (!_cloudflareBlocked.has(sessionId)) _cloudflareBlocked.set(sessionId, new Set());
+                            _cloudflareBlocked.get(sessionId).add(q.source);
+                            _failedSources.add(q.source);
+                            dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                                cell: 'search', status: 'error',
+                                message: `Cloudflare challenge — please open ${platformTool.name} manually and solve the challenge`
+                            });
+                            dashboardServer.updatePipelineProgress(sessionId, {
+                                phase: 'taskFailed',
+                                title: `${platformTool.name} — Cloudflare blocked`,
+                                company: '', platform: q.source, failPhase: 'search',
+                                error: `Cloudflare anti-bot challenge. Open ${platformTool.name} in your browser and solve it manually, then retry.`,
+                                at: new Date().toISOString(), currentJob: null
+                            });
+                            alertService.dispatch(sessionId, {
+                                type: 'failure',
+                                title: `Cloudflare Block — ${platformTool.name}`,
+                                message: `${platformTool.name} is blocked by Cloudflare anti-bot protection. Please open it manually to solve the challenge before retrying.`,
+                                stepName: 'search',
+                                meta: { platform: q.source, cloudflareBlocked: true }
+                            });
+                            pipeline.progress.errors.push(`[${q.source}] Cloudflare challenge — manual intervention required`);
+                        } else {
+                            _log(`✗ [${q.source}] Platform tool failed: ${errMsg}`);
 
-                            // Try to get a screenshot for better AI diagnosis
-                            let screenshot = null;
-                            try {
-                                const platform = getPlatformStore().getPlatform(sessionId, platformTool.id);
-                                if (platform?._browserId) {
-                                    const toolClient = require('./core/toolServiceClient');
-                                    const ssResult = await toolClient.executeTool('page_screenshot', {
-                                        browserId: platform._browserId, pageIndex: platform._pageIndex || 0
-                                    });
-                                    screenshot = ssResult?.screenshot || ssResult?.result || null;
+                            // ── Self-heal: attempt AI-driven script repair + retry ──
+                            let healed = false;
+                            if (config.aiInvoke && !(pipeline._selfHealAttempts?.[q.source] >= 2)) {
+                                pipeline._selfHealAttempts = pipeline._selfHealAttempts || {};
+                                pipeline._selfHealAttempts[q.source] = (pipeline._selfHealAttempts[q.source] || 0) + 1;
+                                _log(`🔧 [${q.source}] Self-heal attempt ${pipeline._selfHealAttempts[q.source]}/2...`);
+
+                                let screenshot = null;
+                                try {
+                                    const platform = getPlatformStore().getPlatform(sessionId, platformTool.id);
+                                    if (platform?._browserId) {
+                                        const toolClient = require('./core/toolServiceClient');
+                                        const ssResult = await toolClient.executeTool('page_screenshot', {
+                                            browserId: platform._browserId, pageIndex: platform._pageIndex || 0
+                                        });
+                                        screenshot = ssResult?.screenshot || ssResult?.result || null;
+                                    }
+                                } catch (_) { /* screenshot is optional */ }
+
+                                const healedListings = await _selfHealAndRetry(
+                                    sessionId, platformTool, q, config, errMsg, screenshot, _log
+                                );
+                                if (healedListings && healedListings.length > 0) {
+                                    healed = true;
+                                    listings = healedListings;
+                                    _log(`✓ [${q.source}] Self-heal succeeded: ${healedListings.length} results after repair`);
+                                } else {
+                                    _log(`✗ [${q.source}] Self-heal failed — marking source as failed`);
                                 }
-                            } catch (_) { /* screenshot is optional */ }
-
-                            const healedListings = await _selfHealAndRetry(
-                                sessionId, platformTool, q, config, errMsg, screenshot, _log
-                            );
-                            if (healedListings && healedListings.length > 0) {
-                                healed = true;
-                                listings = healedListings;
-                                _log(`✓ [${q.source}] Self-heal succeeded: ${healedListings.length} results after repair`);
-                            } else {
-                                _log(`✗ [${q.source}] Self-heal failed — marking source as failed`);
                             }
-                        }
 
-                        if (!healed) {
+                            if (!healed) {
                             _failedSources.add(q.source);
                             dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
                                 cell: 'search', status: 'error',
@@ -1194,7 +1267,8 @@ async function _runPipeline(sessionId) {
                             });
                             pipeline.progress.errors.push(`[${q.source}] Search tool failed: ${errMsg}`);
                         }
-                    }
+                    } // end else (non-Cloudflare)
+                    } // end if/else Cloudflare
                 } else {
                     _log(`[${q.source}] No platform tool available — skipped`);
                     continue;
@@ -1353,6 +1427,9 @@ function _finishPipeline(sessionId, reason) {
     pipeline.running = false;
     pipeline.progress.phase = reason;
     pipeline.stoppedAt = new Date().toISOString();
+
+    // Clean up Cloudflare tracking for this session
+    _cloudflareBlocked.delete(sessionId);
 
     // ── Persist search history for next run ──
     if (typeof pipeline.config.onHistorySave === 'function') {
@@ -2199,5 +2276,8 @@ module.exports = {
     // Exported for testing
     _analyzeGap,
     _expandQueries,
-    _parseSkills
+    _parseSkills,
+    // Cloudflare detection utilities
+    _isCloudflareError,
+    _isCloudflareChallenge
 };
