@@ -9,10 +9,13 @@ jest.mock('./tools/jobSearch', () => ({
     handler: jest.fn()
 }));
 jest.mock('./tools/parseListing', () => ({
-    handler: jest.fn()
+    handler: jest.fn(),
+    extractRequirements: jest.fn()
 }));
 jest.mock('./tools/matchProfile', () => ({
-    handler: jest.fn()
+    handler: jest.fn(),
+    buildMatchPrompt: jest.fn(() => 'mock match prompt'),
+    parseMatchResponse: jest.fn(() => ({ overallScore: 75, breakdown: {}, interviewPrep: [] }))
 }));
 jest.mock('./tools/resumeGen', () => ({
     handler: jest.fn()
@@ -20,10 +23,31 @@ jest.mock('./tools/resumeGen', () => ({
 jest.mock('./tools/coverLetter', () => ({
     handler: jest.fn()
 }));
+jest.mock('./tools/mockInterview', () => ({
+    handler: jest.fn()
+}));
 jest.mock('./dashboardServer', () => ({
     upsertJobCard: jest.fn(),
     updateJobStatus: jest.fn(),
+    updatePlatformCell: jest.fn(),
+    updatePipelineProgress: jest.fn(),
     getJobCards: jest.fn(() => [])
+}));
+
+// Mock platform infrastructure for pipeline execution
+const mockPlatformList = [];
+jest.mock('./workflow/platformStore', () => ({
+    getPlatforms: jest.fn(() => mockPlatformList),
+    getPlatform: jest.fn((sid, pid) => mockPlatformList.find(p => p.id === pid) || null)
+}));
+jest.mock('./workflow/platformService', () => ({
+    adoptSharedBrowser: jest.fn().mockResolvedValue({ success: true, pageIndex: 0 }),
+    verifyLogin: jest.fn().mockResolvedValue({ success: true, status: 'logged_in' }),
+    launchLogin: jest.fn().mockResolvedValue({ success: true, browserId: 'br_mock' })
+}));
+const mockExecuteSearch = jest.fn();
+jest.mock('./workflow/scriptBuilder', () => ({
+    executeSearchScript: mockExecuteSearch
 }));
 
 const { handler: jobSearchHandler } = require('./tools/jobSearch');
@@ -88,6 +112,34 @@ describe('searchPipeline', () => {
             const queries = pipeline.buildSearchQueries({ jobTitle: 'QA' }, PROFILE);
             expect(queries[0].query).toBe('QA');
         });
+
+        it('rotates skill in augmented query based on totalRuns', () => {
+            const prof = { skills: 'React, Node, TypeScript' };
+            const dir = { q_job_title: 'Dev', q_location: 'Toronto' };
+
+            const run0 = pipeline.buildSearchQueries(dir, prof, { totalRuns: 0 });
+            const run1 = pipeline.buildSearchQueries(dir, prof, { totalRuns: 1 });
+            const run2 = pipeline.buildSearchQueries(dir, prof, { totalRuns: 2 });
+            const run3 = pipeline.buildSearchQueries(dir, prof, { totalRuns: 3 });
+
+            const skillQ0 = run0.find(q => q.query.includes('React'));
+            const skillQ1 = run1.find(q => q.query.includes('Node'));
+            const skillQ2 = run2.find(q => q.query.includes('TypeScript'));
+            const skillQ3 = run3.find(q => q.query.includes('React')); // wraps around
+
+            expect(skillQ0).toBeDefined();
+            expect(skillQ1).toBeDefined();
+            expect(skillQ2).toBeDefined();
+            expect(skillQ3).toBeDefined();
+        });
+
+        it('attaches pageOffset from history', () => {
+            const dir = { q_job_title: 'Dev', q_location: 'Toronto' };
+            const pageOffsets = { 'indeed|Dev|Toronto': 3 };
+            const queries = pipeline.buildSearchQueries(dir, PROFILE, { pageOffsets });
+            const indeedPrimary = queries.find(q => q.source === 'indeed' && q.query === 'Dev');
+            expect(indeedPrimary.pageOffset).toBe(3);
+        });
     });
 
     // ─── startPipeline ───
@@ -102,8 +154,8 @@ describe('searchPipeline', () => {
 
         it('prevents duplicate pipeline runs', () => {
             jobSearchHandler.mockResolvedValue(new Promise(() => {})); // Never resolves
-            pipeline.startPipeline('dup-test-1', {}, DIRECTION, PROFILE);
-            const dup = pipeline.startPipeline('dup-test-1', {}, DIRECTION, PROFILE);
+            pipeline.startPipeline('dup-test-1', { aiMatcher: jest.fn() }, DIRECTION, PROFILE);
+            const dup = pipeline.startPipeline('dup-test-1', { aiMatcher: jest.fn() }, DIRECTION, PROFILE);
             expect(dup.error).toMatch(/already running/i);
         });
 
@@ -126,7 +178,7 @@ describe('searchPipeline', () => {
 
         it('returns progress for active session', () => {
             jobSearchHandler.mockResolvedValue(new Promise(() => {}));
-            pipeline.startPipeline('status-test-1', {}, DIRECTION, PROFILE);
+            pipeline.startPipeline('status-test-1', { aiMatcher: jest.fn() }, DIRECTION, PROFILE);
             const status = pipeline.getPipelineStatus('status-test-1');
             expect(status.running).toBe(true);
             expect(status.progress).toBeDefined();
@@ -143,7 +195,7 @@ describe('searchPipeline', () => {
 
         it('stops a running pipeline', () => {
             jobSearchHandler.mockResolvedValue(new Promise(() => {}));
-            pipeline.startPipeline('stop-test-1', {}, DIRECTION, PROFILE);
+            pipeline.startPipeline('stop-test-1', { aiMatcher: jest.fn() }, DIRECTION, PROFILE);
             const result = pipeline.stopPipeline('stop-test-1');
             expect(result.stopped).toBe(true);
         });
@@ -151,39 +203,56 @@ describe('searchPipeline', () => {
 
     // ─── _runPipeline (integration via startPipeline) ───
     describe('pipeline execution', () => {
-        it('records discovered jobs to dashboard', async () => {
-            jobSearchHandler.mockResolvedValue({
-                listings: [
-                    { url: 'https://j.com/1', title: 'Dev', company: 'Acme' },
-                    { url: 'https://j.com/2', title: 'SWE', company: 'BigCo' }
+        // Set up mock platforms with ready search tools so the pipeline can run
+        beforeEach(() => {
+            mockPlatformList.length = 0;
+            mockPlatformList.push(
+                { id: 'plat_indeed', name: 'Indeed', url: 'https://ca.indeed.com/jobs', tools: { search: { status: 'ready', script: 'test' } }, _browserId: 'br_mock', _pageIndex: 0 },
+                { id: 'plat_linkedin', name: 'LinkedIn', url: 'https://www.linkedin.com/jobs', tools: { search: { status: 'ready', script: 'test' } }, _browserId: 'br_mock', _pageIndex: 1 },
+                { id: 'plat_jobbank', name: 'Job Bank', url: 'https://www.jobbank.gc.ca/jobsearch', tools: { search: { status: 'ready', script: 'test' } }, _browserId: 'br_mock', _pageIndex: 2 }
+            );
+            mockExecuteSearch.mockReset();
+        });
+
+        afterEach(() => {
+            mockPlatformList.length = 0;
+        });
+
+        it('records matched jobs to dashboard', async () => {
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: [
+                    { url: 'https://j.com/1', title: 'Dev', company: 'Acme', fullText: 'Full stack developer needed' },
+                    { url: 'https://j.com/2', title: 'SWE', company: 'BigCo', fullText: 'Software engineer position' }
                 ]
             });
             matchProfileHandler.mockReturnValue({ overallScore: 75 });
 
-            pipeline.startPipeline('exec-test-1', { minScore: 50, targetCount: 5 }, DIRECTION, PROFILE);
+            pipeline.startPipeline('exec-test-1', { minScore: 50, targetCount: 5, aiMatcher: matchProfileHandler }, DIRECTION, PROFILE);
             // Wait for async pipeline
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 500));
 
             expect(dashboardServer.upsertJobCard).toHaveBeenCalledWith('exec-test-1',
-                expect.objectContaining({ url: 'https://j.com/1', status: 'discovered' })
+                expect.objectContaining({ url: 'https://j.com/1', status: 'matched' })
             );
         });
 
         it('deduplicates listings by URL', async () => {
-            jobSearchHandler.mockResolvedValue({
-                listings: [
-                    { url: 'https://dup.com/1', title: 'Dev' },
-                    { url: 'https://dup.com/1', title: 'Dev duplicate' }
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: [
+                    { url: 'https://dup.com/1', title: 'Dev', fullText: 'Developer role' },
+                    { url: 'https://dup.com/1', title: 'Dev duplicate', fullText: 'Developer role' }
                 ]
             });
             matchProfileHandler.mockReturnValue({ overallScore: 80 });
 
-            pipeline.startPipeline('dedup-test-1', { minScore: 50 }, DIRECTION, PROFILE);
-            await new Promise(r => setTimeout(r, 200));
+            pipeline.startPipeline('dedup-test-1', { minScore: 50, aiMatcher: matchProfileHandler }, DIRECTION, PROFILE);
+            await new Promise(r => setTimeout(r, 500));
 
-            const discoveredCalls = dashboardServer.upsertJobCard.mock.calls
-                .filter(c => c[1]?.url === 'https://dup.com/1' && c[1]?.status === 'discovered');
-            expect(discoveredCalls).toHaveLength(1);
+            const matchedCalls = dashboardServer.upsertJobCard.mock.calls
+                .filter(c => c[1]?.url === 'https://dup.com/1' && c[1]?.status === 'matched');
+            expect(matchedCalls).toHaveLength(1);
         });
 
         it('handles error in job title gracefully', async () => {
@@ -197,15 +266,15 @@ describe('searchPipeline', () => {
         });
 
         it('stops early when targetCount qualified reached', async () => {
-            const listings = [];
+            const jobs = [];
             for (let i = 0; i < 20; i++) {
-                listings.push({ url: `https://target.com/${i}`, title: `Job ${i}` });
+                jobs.push({ url: `https://target.com/${i}`, title: `Job ${i}`, fullText: `Job description ${i}` });
             }
-            jobSearchHandler.mockResolvedValue({ listings });
+            mockExecuteSearch.mockResolvedValue({ success: true, jobs });
             matchProfileHandler.mockReturnValue({ overallScore: 90 });
 
-            pipeline.startPipeline('target-test-1', { minScore: 50, targetCount: 3 }, DIRECTION, PROFILE);
-            await new Promise(r => setTimeout(r, 500));
+            pipeline.startPipeline('target-test-1', { minScore: 50, targetCount: 3, aiMatcher: matchProfileHandler }, DIRECTION, PROFILE);
+            await new Promise(r => setTimeout(r, 1000));
 
             const status = pipeline.getPipelineStatus('target-test-1');
             expect(status.progress.qualified).toBeGreaterThanOrEqual(3);
@@ -213,10 +282,13 @@ describe('searchPipeline', () => {
         });
 
         it('handles search errors without crashing', async () => {
-            jobSearchHandler.mockRejectedValue(new Error('Network timeout'));
+            mockExecuteSearch.mockResolvedValue({
+                success: false,
+                error: 'Network timeout'
+            });
 
-            pipeline.startPipeline('err-test-1', {}, DIRECTION, PROFILE);
-            await new Promise(r => setTimeout(r, 200));
+            pipeline.startPipeline('err-test-1', { aiMatcher: matchProfileHandler }, DIRECTION, PROFILE);
+            await new Promise(r => setTimeout(r, 500));
 
             const status = pipeline.getPipelineStatus('err-test-1');
             expect(status.running).toBe(false);
@@ -224,13 +296,14 @@ describe('searchPipeline', () => {
         });
 
         it('handles match errors without crashing', async () => {
-            jobSearchHandler.mockResolvedValue({
-                listings: [{ url: 'https://matcherr.com/1', title: 'Dev' }]
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: [{ url: 'https://matcherr.com/1', title: 'Dev', fullText: 'Developer role description' }]
             });
             matchProfileHandler.mockImplementation(() => { throw new Error('AI unavailable'); });
 
-            pipeline.startPipeline('matcherr-test-1', {}, DIRECTION, PROFILE);
-            await new Promise(r => setTimeout(r, 200));
+            pipeline.startPipeline('matcherr-test-1', { aiMatcher: matchProfileHandler }, DIRECTION, PROFILE);
+            await new Promise(r => setTimeout(r, 500));
 
             const status = pipeline.getPipelineStatus('matcherr-test-1');
             expect(status.progress.errors.some(e => e.includes('AI unavailable'))).toBe(true);
@@ -290,6 +363,56 @@ describe('searchPipeline', () => {
         });
     });
 
+    // ─── generateAllDocs ───
+    describe('generateAllDocs', () => {
+        it('generates displayJson with sections for resume and cover letter', async () => {
+            const resumeMd = '## Summary\n\nGreat engineer.\n\n## Key Skills\n\nReact, Node.js, TypeScript';
+            const coverMd = '## Opening\n\nDear Hiring Manager.\n\n## Body\n\nI am interested.';
+            dashboardServer.getJobCards
+                .mockReturnValueOnce([{ url: 'https://dl.com/1', title: 'Dev', company: 'Acme', artifacts: {} }])
+                .mockReturnValue([{ url: 'https://dl.com/1', title: 'Dev', company: 'Acme', artifacts: { resume: resumeMd, coverLetter: coverMd } }]);
+            resumeGenHandler.mockReturnValue({ markdown: resumeMd });
+            coverLetterHandler.mockReturnValue({ markdown: coverMd });
+
+            await pipeline.generateAllDocs('docjson-1', 'https://dl.com/1', PROFILE, {
+                tailorResume: true, coverLetter: true, interviewPrep: false
+            });
+
+            // displayJson upsert should be called with section arrays
+            const displayJsonCall = dashboardServer.upsertJobCard.mock.calls.find(c =>
+                c[0] === 'docjson-1' && c[1]?.artifacts?.displayJson
+            );
+            expect(displayJsonCall).toBeTruthy();
+            const dj = displayJsonCall[1].artifacts.displayJson;
+            expect(Array.isArray(dj.resume)).toBe(true);
+            expect(dj.resume.length).toBeGreaterThan(0);
+            expect(dj.resume[0]).toHaveProperty('title');
+            expect(dj.resume[0]).toHaveProperty('content');
+            expect(dj.resume[0]).toHaveProperty('type');
+        });
+
+        it('marks skills section type correctly', async () => {
+            const resumeMd = '## Key Skills\n\nReact, Node.js, TypeScript\n\n## Experience\n\nWorked at Acme.';
+            dashboardServer.getJobCards
+                .mockReturnValueOnce([{ url: 'https://dl.com/2', title: 'Dev', company: 'Acme', artifacts: {} }])
+                .mockReturnValue([{ url: 'https://dl.com/2', title: 'Dev', company: 'Acme', artifacts: { resume: resumeMd } }]);
+            resumeGenHandler.mockReturnValue({ markdown: resumeMd });
+
+            await pipeline.generateAllDocs('docjson-2', 'https://dl.com/2', PROFILE, {
+                tailorResume: true, coverLetter: false, interviewPrep: false
+            });
+
+            const displayJsonCall = dashboardServer.upsertJobCard.mock.calls.find(c =>
+                c[0] === 'docjson-2' && c[1]?.artifacts?.displayJson
+            );
+            const sections = displayJsonCall?.[1].artifacts.displayJson.resume || [];
+            const skillsSection = sections.find(s => s.title.toLowerCase().includes('skills'));
+            expect(skillsSection?.type).toBe('skills');
+            const expSection = sections.find(s => s.title.toLowerCase().includes('experience'));
+            expect(expSection?.type).toBe('experience');
+        });
+    });
+
     // ─── markApplied ───
     describe('markApplied', () => {
         it('marks job as submitted with note', () => {
@@ -328,6 +451,299 @@ describe('searchPipeline', () => {
         it('returns empty for no history', () => {
             dashboardServer.getJobCards.mockReturnValue([]);
             expect(pipeline.getHistory('empty-hist')).toEqual([]);
+        });
+    });
+
+    // ─── _parseSkills ───
+    describe('_parseSkills', () => {
+        it('parses comma-separated skills', () => {
+            expect(pipeline._parseSkills('React, Node, TypeScript')).toEqual(['React', 'Node', 'TypeScript']);
+        });
+        it('parses newline-separated skills', () => {
+            expect(pipeline._parseSkills('React\nNode\nTS')).toEqual(['React', 'Node', 'TS']);
+        });
+        it('handles arrays', () => {
+            expect(pipeline._parseSkills(['React', 'Node'])).toEqual(['React', 'Node']);
+        });
+        it('strips bullet prefixes', () => {
+            expect(pipeline._parseSkills('- React\n• Node\n* TS')).toEqual(['React', 'Node', 'TS']);
+        });
+        it('returns empty for falsy input', () => {
+            expect(pipeline._parseSkills(null)).toEqual([]);
+            expect(pipeline._parseSkills('')).toEqual([]);
+        });
+    });
+
+    // ─── _analyzeGap ───
+    describe('_analyzeGap', () => {
+        it('returns empty when no pipeline exists', () => {
+            const gap = pipeline._analyzeGap(new Map(), 'no-exist');
+            expect(gap).toEqual({});
+        });
+
+        it('identifies sources below target', () => {
+            const pipelines = new Map();
+            pipelines.set('gap-test', {
+                config: { targetCount: 10 },
+                _sourceQualified: { indeed: 3, linkedin: 10 },
+                _sourceResultCount: { indeed: 15, linkedin: 20 }
+            });
+            const gap = pipeline._analyzeGap(pipelines, 'gap-test');
+            expect(gap.indeed).toBeDefined();
+            expect(gap.indeed.deficit).toBe(7);
+            expect(gap.linkedin).toBeUndefined();
+        });
+
+        it('handles sources with zero qualified', () => {
+            const pipelines = new Map();
+            pipelines.set('gap-zero', {
+                config: { targetCount: 5 },
+                _sourceQualified: {},
+                _sourceResultCount: { indeed: 10 }
+            });
+            const gap = pipeline._analyzeGap(pipelines, 'gap-zero');
+            expect(gap.indeed.qualified).toBe(0);
+            expect(gap.indeed.deficit).toBe(5);
+        });
+    });
+
+    // ─── _expandQueries ───
+    describe('_expandQueries', () => {
+        it('generates skill rotation queries', async () => {
+            const direction = { q_job_title: 'Frontend Engineer', q_location: 'Toronto' };
+            const prof = { skills: 'React, Node, TypeScript, Vue' };
+            const gap = { indeed: { qualified: 2, target: 10, deficit: 8 } };
+            const prev = [{ query: 'Frontend Engineer' }, { query: 'Frontend Engineer React' }];
+
+            const result = await pipeline._expandQueries(direction, prof, gap, prev, null);
+            // Should generate skill rotation with Node or TypeScript (not React, already used)
+            const skillQueries = result.filter(q => q.query.includes('Node') || q.query.includes('TypeScript'));
+            expect(skillQueries.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('drops seniority prefix as fallback', async () => {
+            const direction = { q_job_title: 'Senior QA Engineer', q_location: 'Vancouver' };
+            const prof = { skills: 'Selenium, Python' };
+            const gap = { indeed: { qualified: 1, target: 5, deficit: 4 } };
+            const prev = [{ query: 'Senior QA Engineer' }];
+
+            const result = await pipeline._expandQueries(direction, prof, gap, prev, null);
+            const broader = result.find(q => q.query === 'QA Engineer');
+            expect(broader).toBeDefined();
+        });
+
+        it('uses AI expander when provided', async () => {
+            const direction = { q_job_title: 'Nurse', q_location: 'Calgary' };
+            const prof = { skills: 'Patient Care, Triage', highlights: 'Emergency nursing' };
+            const gap = { indeed: { qualified: 0, target: 5, deficit: 5 } };
+            const prev = [{ query: 'Nurse' }];
+
+            const mockAi = jest.fn().mockResolvedValue(['RN', 'Registered Nurse', 'Staff Nurse ICU']);
+            const result = await pipeline._expandQueries(direction, prof, gap, prev, mockAi);
+
+            expect(mockAi).toHaveBeenCalledWith(expect.objectContaining({
+                jobTitle: 'Nurse',
+                location: 'Calgary'
+            }));
+            const aiQueries = result.filter(q => ['RN', 'Registered Nurse', 'Staff Nurse ICU'].includes(q.query));
+            expect(aiQueries.length).toBe(3);
+        });
+
+        it('handles AI expander failure gracefully', async () => {
+            const direction = { q_job_title: 'Chef', q_location: '' };
+            const prof = { skills: 'French cuisine, Pastry' };
+            const gap = { indeed: { qualified: 0, target: 5, deficit: 5 } };
+            const prev = [{ query: 'Chef' }];
+
+            const failingAi = jest.fn().mockRejectedValue(new Error('API error'));
+            const result = await pipeline._expandQueries(direction, prof, gap, prev, failingAi);
+            // Should still return deterministic results (skill rotation)
+            expect(result.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('deduplicates against previous queries', async () => {
+            const direction = { q_job_title: 'Dev', q_location: '' };
+            const prof = { skills: 'JS, Python' };
+            const gap = { indeed: { qualified: 0, target: 5, deficit: 5 } };
+            const prev = [{ query: 'Dev' }, { query: 'Dev JS' }];
+
+            const result = await pipeline._expandQueries(direction, prof, gap, prev, null);
+            // 'Dev JS' already in previous, should not appear again
+            const dupJS = result.filter(q => q.query.toLowerCase() === 'dev js');
+            expect(dupJS).toHaveLength(0);
+        });
+    });
+
+    // ─── aiInvoke propagation ───
+    // ─── userPreferences propagation ───
+    describe('userPreferences', () => {
+        it('passes userPreferences through pipeline config', () => {
+            const result = pipeline.startPipeline('pref-1', {
+                aiMatcher: jest.fn(),
+                userPreferences: 'Prefer Node.js backend, avoid Java'
+            }, DIRECTION, PROFILE);
+            expect(result.config.userPreferences).toBe('Prefer Node.js backend, avoid Java');
+        });
+
+        it('reads userPreferences from search sub-object', () => {
+            const result = pipeline.startPipeline('pref-2', {
+                aiMatcher: jest.fn(),
+                search: { userPreferences: 'Focus on frontend roles' }
+            }, DIRECTION, PROFILE);
+            expect(result.config.userPreferences).toBe('Focus on frontend roles');
+        });
+
+        it('defaults userPreferences to empty string', () => {
+            const result = pipeline.startPipeline('pref-3', {
+                aiMatcher: jest.fn()
+            }, DIRECTION, PROFILE);
+            expect(result.config.userPreferences).toBe('');
+        });
+    });
+
+    describe('startPipeline config propagation', () => {
+        it('copies aiInvoke into pipeline.config', () => {
+            const mockAiInvoke = jest.fn();
+            const result = pipeline.startPipeline('ai-invoke-prop-1', {
+                aiInvoke: mockAiInvoke,
+                aiMatcher: jest.fn(),
+                aiExpander: jest.fn()
+            }, DIRECTION, PROFILE);
+            expect(result.config.aiInvoke).toBe(mockAiInvoke);
+        });
+
+        it('copies aiMatcher and aiExpander into pipeline.config', () => {
+            const mockMatcher = jest.fn();
+            const mockExpander = jest.fn();
+            const result = pipeline.startPipeline('ai-all-prop-1', {
+                aiInvoke: jest.fn(),
+                aiMatcher: mockMatcher,
+                aiExpander: mockExpander
+            }, DIRECTION, PROFILE);
+            expect(result.config.aiMatcher).toBe(mockMatcher);
+            expect(result.config.aiExpander).toBe(mockExpander);
+        });
+
+        it('defaults aiInvoke to null when not provided', () => {
+            const result = pipeline.startPipeline('ai-null-prop-1', {}, DIRECTION, PROFILE);
+            expect(result.config.aiInvoke).toBeNull();
+        });
+    });
+
+    // ─── low/zero result error marking (no auto-heal, user rebuilds manually) ───
+    describe('low result error marking', () => {
+        beforeEach(() => {
+            mockPlatformList.length = 0;
+            mockPlatformList.push(
+                { id: 'plat_linkedin', name: 'LinkedIn', url: 'https://www.linkedin.com/jobs', tools: { search: { status: 'ready', script: 'test' } }, _browserId: 'br_mock', _pageIndex: 0 }
+            );
+            mockExecuteSearch.mockReset();
+        });
+
+        afterEach(() => {
+            mockPlatformList.length = 0;
+        });
+
+        it('marks search cell as error when results < LOW_RESULT_THRESHOLD', async () => {
+            // Return 1 result (below threshold of 3)
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: [{ url: 'https://ln.com/1', title: 'Développeur ServiceNow', fullText: 'some text' }]
+            });
+            matchProfileHandler.mockReturnValue({ overallScore: 25 });
+
+            pipeline.startPipeline('low-err-1', {
+                minScore: 60, targetCount: 10,
+                aiInvoke: jest.fn(),
+                platforms: ['plat_linkedin']
+            }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
+
+            await new Promise(r => setTimeout(r, 1000));
+
+            // Verify cell marked as error with rebuild message
+            const errorCalls = dashboardServer.updatePlatformCell.mock.calls
+                .filter(c => c[2]?.status === 'error' && c[2]?.message?.includes('Rebuild'));
+            expect(errorCalls.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('marks search cell as error on 0 results', async () => {
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: []
+            });
+
+            pipeline.startPipeline('zero-err-1', {
+                minScore: 60, targetCount: 10,
+                aiInvoke: jest.fn(),
+                platforms: ['plat_linkedin']
+            }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
+
+            await new Promise(r => setTimeout(r, 1000));
+
+            // Should mark error for 0 results
+            const errorCalls = dashboardServer.updatePlatformCell.mock.calls
+                .filter(c => c[2]?.status === 'error' && c[2]?.message?.includes('Rebuild'));
+            expect(errorCalls.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('marks error even when aiInvoke is null (no auto-heal dependency)', async () => {
+            mockExecuteSearch.mockResolvedValue({
+                success: true,
+                jobs: [{ url: 'https://ln.com/2', title: 'Dev', fullText: 'text' }]
+            });
+            matchProfileHandler.mockReturnValue({ overallScore: 25 });
+
+            pipeline.startPipeline('low-null-1', {
+                minScore: 60, targetCount: 10,
+                aiInvoke: null,
+                aiMatcher: matchProfileHandler,
+                platforms: ['plat_linkedin']
+            }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
+
+            await new Promise(r => setTimeout(r, 1000));
+
+            // Should still mark error — no longer depends on aiInvoke
+            const errorCalls = dashboardServer.updatePlatformCell.mock.calls
+                .filter(c => c[2]?.status === 'error' && c[2]?.message?.includes('Rebuild'));
+            expect(errorCalls.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('does not block other platforms when one has low results', async () => {
+            // Add Indeed platform
+            mockPlatformList.push(
+                { id: 'plat_indeed', name: 'Indeed', url: 'https://ca.indeed.com/jobs', tools: { search: { status: 'ready', script: 'test' } }, _browserId: 'br_mock', _pageIndex: 1 }
+            );
+
+            let callCount = 0;
+            mockExecuteSearch.mockImplementation(async () => {
+                callCount++;
+                if (callCount <= 1) {
+                    // LinkedIn: 0 results
+                    return { success: true, jobs: [] };
+                }
+                // Indeed: normal results
+                return {
+                    success: true,
+                    jobs: [
+                        { url: 'https://indeed.com/j1', title: 'Dev', fullText: 'Developer role description text' },
+                        { url: 'https://indeed.com/j2', title: 'SWE', fullText: 'Software engineer role description text2' }
+                    ]
+                };
+            });
+            matchProfileHandler.mockReturnValue({ overallScore: 75 });
+
+            pipeline.startPipeline('noblock-1', {
+                minScore: 60, targetCount: 10,
+                aiMatcher: matchProfileHandler,
+                platforms: ['plat_linkedin', 'plat_indeed']
+            }, { q_job_title: 'Fullstack', q_location: 'Ontario' }, PROFILE);
+
+            await new Promise(r => setTimeout(r, 1500));
+
+            // Indeed jobs should still be matched despite LinkedIn failure
+            const indeedJobs = dashboardServer.upsertJobCard.mock.calls
+                .filter(c => c[1]?.status === 'matched');
+            expect(indeedJobs.length).toBeGreaterThanOrEqual(1);
         });
     });
 });

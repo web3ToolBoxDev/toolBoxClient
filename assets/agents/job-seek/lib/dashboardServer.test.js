@@ -12,7 +12,7 @@ const dashboardServer = require('./dashboardServer');
  * that the live JSON endpoint returns the updated data.
  */
 
-const TEST_PORT = 30099; // Use a different port to avoid conflicts with running app
+const TEST_PORT = 30098; // Use a different port to avoid conflicts with other E2E tests on 30099
 const SESSION_ID = 'test-session-abc';
 let stateRef;
 
@@ -366,9 +366,9 @@ describe('dashboardServer', () => {
                 expect(result.tip).toContain('timeout');
             });
 
-            it('returns running for verifying login', () => {
+            it('returns verifying for verifying login', () => {
                 const result = computeCellVisual('login', { login: { status: 'verifying' } });
-                expect(result.visual).toBe('running');
+                expect(result.visual).toBe('verifying');
             });
 
             it('returns idle for search when not built', () => {

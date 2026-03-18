@@ -1,22 +1,28 @@
 @import '../../index.scss';
 
 .custom-modal {
+  .modal-dialog {
+    display: flex;
+    align-items: center;
+    min-height: calc(100vh - 1rem);
+  }
   .modal-content {
     background: #fff;
     border-radius: 12px;
     border: 1px solid $clr-sidebar-border;
-    box-shadow: 0 2px 12px 0 rgba(0,0,0,0.08);
+    box-shadow: 0 4px 24px 0 rgba(0,0,0,0.12);
   }
   .modal-header {
     background: $clr-page-bg;
     border-bottom: 1px solid $clr-sidebar-border;
     border-top-left-radius: 12px;
     border-top-right-radius: 12px;
+    padding: 0.85rem 1.25rem;
     .modal-title {
       color: $clr-page-text;
       font-weight: 600;
-      font-size: 1.15rem;
-      letter-spacing: 0.5px;
+      font-size: 1.1rem;
+      letter-spacing: 0.3px;
     }
     .btn-close {
       filter: invert(0.7);
@@ -25,47 +31,76 @@
   .modal-body {
     color: $clr-page-text;
     font-size: 1rem;
-    padding: 1.5rem 1.2rem 1.2rem 1.2rem;
+    padding: 1.5rem 1.5rem 1.25rem;
     max-height: 60vh;
     overflow-y: auto;
   }
+
+  // --- Row / Col alignment ---
+  .row {
+    margin-bottom: 0.6rem !important;
+    align-items: center;
+    &:last-child {
+      margin-bottom: 0 !important;
+    }
+  }
+  .col,
+  [class*="col-"] {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  // --- Form elements ---
   .form-label {
     color: $clr-link-text;
-    font-size: 1rem;
+    font-size: 0.95rem;
     font-weight: 500;
-    margin-bottom: 0.3rem;
+    margin-bottom: 0;           // remove default bottom margin so label aligns with input
+    white-space: nowrap;
+    line-height: 1.4;
   }
   .form-text {
     color: $clr-link-text;
-    font-size: 0.97rem;
-    margin-bottom: 0.2rem;
+    font-size: 0.95rem;
+    margin-bottom: 0;
     line-height: 1.5;
     display: block;
   }
   .form-control, .form-select {
     border-radius: 6px;
     border: 1px solid $clr-sidebar-border;
-    font-size: 1rem;
-    padding: 0.45rem 0.75rem;
+    font-size: 0.95rem;
+    padding: 0.4rem 0.75rem;
+    height: 38px;               // uniform height for inputs
     &:focus {
       border-color: $clr-btn-primary;
       box-shadow: 0 0 0 2px rgba(90,103,216,0.1);
     }
   }
+
+  // --- Buttons ---
   .btn {
     background: $clr-btn-primary;
     color: #fff;
     border: none;
-    border-radius: 4px;
-    font-size: 0.9rem;
-    padding: 0.4rem 1.2rem;
-    margin-top: 0.5rem;
+    border-radius: 6px;
+    font-size: 0.92rem;
+    font-weight: 500;
+    padding: 0.4rem 1.25rem;
+    height: 38px;               // same height as inputs for alignment
+    margin-top: 0;              // remove default margin-top so it centres with row
     min-width: 80px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     transition: background 0.2s;
     &:hover {
       background: $clr-btn-primary-hover;
     }
   }
+
+  // --- Overflow text ---
   .overflow-text {
     display: inline-block;
     max-width: 100%;
@@ -75,26 +110,52 @@
     vertical-align: middle;
     cursor: pointer;
   }
-  .row {
-    margin-bottom: 0.3rem !important;
-    align-items: center;
-  }
-  .col {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    min-width: 0;
+
+  // --- Detail view (label + text rows) ---
+  &.detail-modal {
+    .modal-body {
+      padding: 0.75rem 1.25rem;
+    }
+    .row {
+      margin-bottom: 0 !important;
+      padding: 0.55rem 0;
+      border-bottom: 1px solid #f0f0f0;
+      flex-wrap: nowrap;
+      &:last-child {
+        border-bottom: none;
+      }
+    }
+    .form-label {
+      color: $clr-link-text;
+      font-size: 0.9rem;
+      font-weight: 600;
+      white-space: nowrap;
+      flex-shrink: 0;
+      margin-right: 0.75rem;
+    }
+    .form-text,
+    .overflow-text {
+      font-size: 0.88rem;
+      color: $clr-page-text;
+      word-break: break-all;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: unset;
+      line-height: 1.45;
+      cursor: text;
+      user-select: text;
+    }
   }
 
-  // 多选组件样式
+  // --- Multiple select ---
   .multiple-select-container {
     border: 1px solid $clr-sidebar-border;
     border-radius: 6px;
     padding: 8px;
-    height: 150px; // 固定高度
+    height: 150px;
     overflow-y: auto;
     background: #fff;
-    
+
     &:focus-within {
       border-color: $clr-btn-primary;
       box-shadow: 0 0 0 2px rgba(90,103,216,0.1);
@@ -109,7 +170,7 @@
     border-radius: 4px;
     background-color: transparent;
     margin-bottom: 2px;
-    height: 36px; // 固定选项高度
+    height: 36px;
     transition: all 0.2s ease;
     cursor: pointer;
     user-select: none;
@@ -122,11 +183,11 @@
     &.selected {
       background-color: #e3f2fd;
       border: 1px solid #2196f3;
-      
+
       &:hover {
         background-color: #bbdefb;
       }
-      
+
       &::before {
         content: '✓';
         color: #1976d2;
@@ -149,7 +210,6 @@
       text-overflow: ellipsis;
     }
 
-    // 未选中状态的指示
     &:not(.selected)::before {
       content: '';
       width: 16px;
@@ -180,20 +240,18 @@
     border-radius: 4px;
     background-color: #f8f9fa;
     border: 1px solid #e9ecef;
-    
+
     &:hover {
       background-color: #e9ecef;
       border-color: #ced4da;
     }
-    
+
     strong {
       color: $clr-page-text;
     }
 
-    // 空状态样式
     &:empty {
       display: none;
     }
   }
 }
-

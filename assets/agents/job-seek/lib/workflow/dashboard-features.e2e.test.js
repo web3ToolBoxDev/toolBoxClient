@@ -405,7 +405,6 @@ describe('Dashboard HTML', () => {
         expect(res.body).toContain('controlBar');
         expect(res.body).toContain('wfBtnStart');
         expect(res.body).toContain('wfBtnStop');
-        expect(res.body).toContain('asyncToggle');
     });
 
     test('HTML contains global settings modal', async () => {
@@ -451,5 +450,34 @@ describe('Dashboard HTML', () => {
         const res = await request('GET', `/dashboard/${TEST_SID}`);
         expect(res.body).toContain('jobPagination');
         expect(res.body).toContain('goJobPage');
+    });
+
+    test('HTML contains workflow progress offcanvas', async () => {
+        const res = await request('GET', `/dashboard/${TEST_SID}`);
+        expect(res.body).toContain('progressOffcanvas');
+        expect(res.body).toContain('progressBackdrop');
+        expect(res.body).toContain('btnWorkflowProgress');
+        expect(res.body).toContain('toggleProgressOffcanvas');
+        expect(res.body).toContain('wfLogArea');
+        expect(res.body).toContain('stepTimelineList');
+        expect(res.body).toContain('wfProgressBadge');
+    });
+
+    test('HTML contains offcanvas CSS and pulse animation', async () => {
+        const res = await request('GET', `/dashboard/${TEST_SID}`);
+        expect(res.body).toContain('offcanvas');
+        expect(res.body).toContain('wfBtnPulse');
+        expect(res.body).toContain('wf-running');
+        expect(res.body).toContain('step-timeline');
+        expect(res.body).toContain('wf-log-area');
+    });
+
+    test('HTML contains offcanvas JS functions', async () => {
+        const res = await request('GET', `/dashboard/${TEST_SID}`);
+        expect(res.body).toContain('openProgressOffcanvas');
+        expect(res.body).toContain('closeProgressOffcanvas');
+        expect(res.body).toContain('addWfLog');
+        expect(res.body).toContain('renderStepTimeline');
+        expect(res.body).toContain('renderWfLogs');
     });
 });

@@ -221,7 +221,8 @@ describe('Workflow API E2E', () => {
         expect(data[1].url).toContain('linkedin.com');
         expect(data[2].url).toContain('jobbank.gc.ca');
         expect(data.every(p => p.preset === true)).toBe(true);
-        expect(data.every(p => p.tools.search.status === 'not_built')).toBe(true);
+        // tools.search.status may be 'not_built' or 'ready' if cached scripts were restored
+        expect(data.every(p => ['not_built', 'ready'].includes(p.tools.search.status))).toBe(true);
     });
 
     test('POST /api/platforms/:sessionId — add a custom platform', async () => {

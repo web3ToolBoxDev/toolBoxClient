@@ -2,7 +2,7 @@
     {
         "taskName": "openChrome",
         "scriptPath": "openChrome.js",
-        "taskType": "execByOrder",
+        "taskType": "execByAsync",
         "defaultTask": true
     },
     {

@@ -21,6 +21,9 @@ const browserLauncher = require('./lib/core/browserLauncher');
 const memoryPack = require('./lib/memoryPack');
 const markerParser = require('./lib/markerParser');
 const dashboardServer = require('./lib/dashboardServer');
+const userStore = require('./lib/core/userStore');
+const masterProfileClient = require('./lib/core/masterProfileClient');
+const tailorProfile = require('./lib/tools/tailorProfile');
 
 // Register domain pack at startup (before any upsert can happen).
 // Retries on failure since dbservice may not be ready yet.
@@ -149,7 +152,10 @@ const state = {
     savePath: '',
     walletExtensionPath: '',
     resumeProfile: '',
-    intentFiles: {}
+    intentFiles: {},
+    masterProfile: {},
+    activeUserId: '',
+    resumeHashes: {}
 };
 
 // Track active browser instances (not persisted)
@@ -179,10 +185,18 @@ function restoreState() {
             state.prompts[sid] = _buildPresetPrompt(state.selectedAnswers[sid] || {});
         }
         // Migrate subtasks: remove deprecated keys (match, resume, coverLetter)
-        const VALID_SUBTASK_KEYS = new Set(['onboarding', 'profile', 'search']);
+        // and rename 'search' → 'dashboard'
+        const VALID_SUBTASK_KEYS = new Set(['onboarding', 'profile', 'dashboard', 'search']);
         if (Array.isArray(state.subtasks[sid])) {
             const before = state.subtasks[sid].length;
             state.subtasks[sid] = state.subtasks[sid].filter((t) => VALID_SUBTASK_KEYS.has(t.key));
+            // Migrate old 'search' key → 'dashboard'
+            for (const t of state.subtasks[sid]) {
+                if (t.key === 'search') {
+                    t.key = 'dashboard';
+                    console.log(`[agent] Migrated subtask key 'search' → 'dashboard' for session ${sid}`);
+                }
+            }
             if (state.subtasks[sid].length !== before) {
                 console.log(`[agent] Migrated subtasks for ${sid}: ${before} -> ${state.subtasks[sid].length}`);
             }
@@ -198,6 +212,34 @@ function saveState() {
 
 // Restore on startup
 restoreState();
+
+// Initialize multi-user store and migrate existing data
+(function initUserStore() {
+    const { users, activeUserId } = userStore.init(_dataDir);
+    if (!state.activeUserId) {
+        state.activeUserId = activeUserId;
+    }
+    // Migration: if masterProfile is empty but we have session profileSections,
+    // find the richest session and promote it as the master for the active user.
+    if (state.activeUserId && (!state.masterProfile || Object.keys(state.masterProfile).length === 0)) {
+        let bestSid = null;
+        let bestCount = 0;
+        for (const [sid, sections] of Object.entries(state.profileSections || {})) {
+            const count = Object.values(sections || {}).filter(v => v && v.trim()).length;
+            if (count > bestCount) {
+                bestCount = count;
+                bestSid = sid;
+            }
+        }
+        if (bestSid && bestCount > 0) {
+            state.masterProfile = { ...state.profileSections[bestSid] };
+            console.log(`[agent:migration] Promoted session ${bestSid.slice(0, 8)} profile (${bestCount} sections) as master for ${state.activeUserId}`);
+            // Async: persist to knowledge store
+            masterProfileClient.saveAllSections(state.activeUserId, state.masterProfile)
+                .catch(err => console.error('[agent:migration] Failed to save master to knowledge store:', err.message));
+        }
+    }
+})();
 
 // Debounced auto-save: triggers after state mutations, avoids excessive writes
 let _saveTimer = null;
@@ -314,14 +356,56 @@ async function seedProfileFromKnowledge(sessionId) {
         await ensurePack(); // lazy re-register if startup failed
 
         let seededCount = 0;
-        const profileDocs = await knowledgeClient.findFresh('profile', 'agent:job-seek', 30);
-        console.log(`[agent:seed] findFresh returned ${profileDocs.length} docs`);
-        for (const doc of profileDocs) {
-            const subType = doc.subType || doc.sub_type;
-            const content = doc.content;
-            if (subType && content) {
-                state.profileSections[sessionId][subType] = content;
-                seededCount++;
+        const userId = state.activeUserId;
+
+        // Priority 1: load from master profile (user-scoped, no staleness window)
+        if (userId) {
+            const master = await masterProfileClient.loadMaster(userId);
+            const masterKeys = Object.keys(master).filter(k => master[k] && master[k].trim());
+            if (masterKeys.length > 0) {
+                state.masterProfile = master;
+
+                // Auto-tailor for target direction if available
+                const direction = state.selectedAnswers[sessionId] || {};
+                const targetRole = direction.q_job_title;
+                if (targetRole) {
+                    const { tailoredSections, droppedItems } = tailorProfile.handler({
+                        masterProfile: master,
+                        targetRole,
+                        targetLocation: direction.q_location || '',
+                        workMode: direction.q_work_mode || '',
+                        salaryRange: direction.q_salary || ''
+                    });
+                    for (const [key, val] of Object.entries(tailoredSections)) {
+                        if (val) {
+                            state.profileSections[sessionId][key] = val;
+                            seededCount++;
+                        }
+                    }
+                    console.log(`[agent:seed] auto-tailored ${seededCount} sections for "${targetRole}" (dropped: ${droppedItems.length})`);
+                    appendRuntimeLog(sessionId, `profile_tailored -> ${seededCount} sections for "${targetRole}", dropped ${droppedItems.length} items`, { source: 'tailoring' });
+                } else {
+                    // No direction yet — copy master as-is
+                    for (const key of masterKeys) {
+                        state.profileSections[sessionId][key] = master[key];
+                        seededCount++;
+                    }
+                    console.log(`[agent:seed] seeded ${seededCount} sections from master (no direction yet)`);
+                }
+            }
+        }
+
+        // Priority 2: fall back to agent-scoped fresh docs (legacy behavior)
+        if (seededCount === 0) {
+            const profileDocs = await knowledgeClient.findFresh('profile', 'agent:job-seek', 30);
+            console.log(`[agent:seed] findFresh returned ${profileDocs.length} docs`);
+            for (const doc of profileDocs) {
+                const subType = doc.subType || doc.sub_type;
+                const content = doc.content;
+                if (subType && content) {
+                    state.profileSections[sessionId][subType] = content;
+                    seededCount++;
+                }
             }
         }
 
@@ -338,7 +422,8 @@ async function seedProfileFromKnowledge(sessionId) {
                 pr.status = 'done';
                 pr.updatedAt = now();
             }
-            const sr = list.find(t => t.key === 'search');
+            // Set dashboard to running so _buildDashboardAndFinish can find & finish it
+            const sr = list.find(t => t.key === 'dashboard');
             if (sr && sr.status === 'pending') {
                 sr.status = 'running';
                 sr.updatedAt = now();
@@ -346,11 +431,11 @@ async function seedProfileFromKnowledge(sessionId) {
             return list;
         });
 
-        const daysAgo = profileDocs.length > 0
-            ? Math.round((Date.now() - new Date(profileDocs[0].updatedAt || profileDocs[0].updated_at || 0).getTime()) / 86400000)
-            : '?';
-        console.log(`[agent:seed] seeded ${seededCount} profile sections (${daysAgo}d ago)`);
-        appendRuntimeLog(sessionId, `profile_seeded -> ${seededCount} sections (${daysAgo}d ago)`, { source: 'knowledge' });
+        console.log(`[agent:seed] seeded ${seededCount} profile sections`);
+        appendRuntimeLog(sessionId, `profile_seeded -> ${seededCount} sections`, { source: 'knowledge' });
+
+        // Build dashboard + seed platforms + auto-finish search subtask
+        await _buildDashboardAndFinish(sessionId);
         return true;
     } catch (err) {
         console.error('[agent:seed] profile seeding failed:', err.message);
@@ -729,6 +814,142 @@ function moveSubTaskForward(sessionId) {
     });
 }
 
+// --------------- Build Dashboard helper (shared by profile-finish & search-start) ---------------
+
+/**
+ * Seed platforms, build dashboard artifact, and auto-finish the 'dashboard' subtask.
+ * Called when profile finishes OR when user explicitly starts/restarts the dashboard subtask.
+ * @param {string} sessionId
+ * @param {object} [opts]
+ * @param {boolean} [opts.clearFirst=false] - Clear existing platforms before re-seeding (restart)
+ */
+async function _buildDashboardAndFinish(sessionId, opts = {}) {
+    const { clearFirst = false } = opts;
+
+    // Mark dashboard subtask as running so the UI shows progress
+    updateSubTasks(sessionId, (list) => {
+        const d = list.find(i => i.key === 'dashboard');
+        if (d && d.status !== 'done') { d.status = 'running'; d.updatedAt = now(); }
+        return list;
+    });
+    sendSnapshot();
+
+    try { buildIntentFile(sessionId); } catch (e) {
+        console.error('[agent] buildIntentFile on dashboard build failed:', e.message);
+    }
+
+    // Seed platforms from location (e.g. Ontario → canada → Indeed + LinkedIn + Job Bank)
+    const platformStore = require('./lib/workflow/platformStore');
+    const workflowStore = require('./lib/workflow/workflowStore');
+    const location = (state.selectedAnswers[sessionId] || {}).q_location || '';
+
+    if (clearFirst) {
+        platformStore.clearSession(sessionId);
+        dashboardServer.clearPlatformStatuses(sessionId);
+    }
+
+    const platforms = platformStore.initWithPresets(sessionId, location);
+    for (const plat of platforms) {
+        dashboardServer.updatePlatformCell(sessionId, plat.id, {
+            name: plat.name, icon: plat.icon, url: plat.url
+        });
+    }
+    console.log(`[agent] Seeded ${platforms.length} platforms for location "${location}": ${platforms.map(p => p.name).join(', ')}`);
+
+    // Seed workflow config if not yet created
+    if (!workflowStore.getConfig(sessionId)) {
+        workflowStore.getConfig(sessionId, location);
+    }
+
+    // Remove old dashboard artifacts and add new one atomically
+    if (!state.artifacts[sessionId]) state.artifacts[sessionId] = [];
+    state.artifacts[sessionId] = state.artifacts[sessionId].filter(
+        (a) => a.type !== 'dashboard'
+    );
+    const dashUrl = dashboardServer.getDashboardURL(sessionId);
+    console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
+    const dashArtifact = {
+        id: `dashboard-${sessionId}`,
+        type: 'dashboard',
+        title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
+        url: dashUrl,
+        openUrl: true
+    };
+    state.artifacts[sessionId].push(dashArtifact);
+    // Emit full replace (not append) to avoid transient duplicate in frontend
+    emit('agent_artifact_replace', { sessionId, artifacts: state.artifacts[sessionId] });
+    appendRuntimeLog(sessionId, `artifact -> ${dashArtifact.title}`, { source: 'artifact' });
+
+    // Auto-finish: dashboard build is instant, mark done
+    updateSubTasks(sessionId, (list) => {
+        const idx = list.findIndex(i => i.key === 'dashboard');
+        if (idx >= 0) {
+            list[idx].status = 'done';
+            list[idx].updatedAt = now();
+        }
+        return list;
+    });
+
+    appendSubtaskLog(sessionId, 'dashboard',
+        isZh() ? '仪表盘已构建，平台已添加' : 'Dashboard built, platforms seeded',
+        { level: 'info' }
+    );
+    appendConversation(sessionId, 'assistant', isZh()
+        ? `仪表盘已构建完成，已根据目标地区（${location}）自动添加 ${platforms.length} 个平台：${platforms.map(p => p.name).join('、')}。\n搜索、生成简历、投递等功能请在仪表盘内操作。`
+        : `Dashboard built successfully. ${platforms.length} platforms seeded for "${location}": ${platforms.map(p => p.name).join(', ')}.\nSearch, resume generation, and apply are available in the dashboard.`);
+
+    // ── AI-generated skill taxonomy (async, non-blocking) ──
+    // Generate personalized taxonomy based on user profile + direction for smarter job matching.
+    // Stored in state.skillTaxonomy[sessionId], used by matchProfile during workflow search.
+    try {
+        const { provider: activeProvider } = resolveProvider();
+        if (activeProvider === 'api-key') {
+            const { buildTaxonomyPrompt, parseTaxonomyResponse } = require('./lib/tools/skillTaxonomy');
+            const profile = state.profileSections[sessionId] || {};
+            const direction = state.selectedAnswers[sessionId] || {};
+            const prompt = buildTaxonomyPrompt(profile, direction);
+            const subProvider = state.currentSubProvider || 'openai';
+            const apiKey = getRawApiKey();
+            if (apiKey) {
+                const result = await callAPI({
+                    subProvider,
+                    apiKey,
+                    model: state.currentModel,
+                    conversationHistory: [{ role: 'user', text: prompt }]
+                });
+                const responseText = result.text || result.content || (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) || '';
+                const taxonomy = parseTaxonomyResponse(responseText);
+                if (taxonomy) {
+                    if (!state.skillTaxonomy) state.skillTaxonomy = {};
+                    state.skillTaxonomy[sessionId] = taxonomy;
+                    console.log(`[agent] AI skill taxonomy generated: ${Object.keys(taxonomy.taxonomy || {}).length} categories, ${Object.keys(taxonomy.aliases || {}).length} aliases`);
+                } else {
+                    console.log('[agent] AI taxonomy response could not be parsed — will use fallback');
+                }
+            }
+        } else if (activeProvider === 'claude-code' || activeProvider === 'codex-cli') {
+            // CLI mode: use spawn to generate taxonomy
+            const { buildTaxonomyPrompt, parseTaxonomyResponse } = require('./lib/tools/skillTaxonomy');
+            const profile = state.profileSections[sessionId] || {};
+            const direction = state.selectedAnswers[sessionId] || {};
+            const prompt = buildTaxonomyPrompt(profile, direction);
+            try {
+                const cliResult = await invokeCliAsync(activeProvider, prompt, '', state.currentModel);
+                const taxonomy = parseTaxonomyResponse(cliResult || '');
+                if (taxonomy) {
+                    if (!state.skillTaxonomy) state.skillTaxonomy = {};
+                    state.skillTaxonomy[sessionId] = taxonomy;
+                    console.log(`[agent] AI skill taxonomy generated (CLI): ${Object.keys(taxonomy.taxonomy || {}).length} categories`);
+                }
+            } catch (cliErr) {
+                console.log('[agent] CLI taxonomy generation failed:', cliErr.message);
+            }
+        }
+    } catch (err) {
+        console.log('[agent] AI taxonomy generation failed (will use fallback):', err.message);
+    }
+}
+
 // --------------- subtask actions (start / restart) ---------------
 
 async function handleSubtaskAction(payload = {}) {
@@ -791,26 +1012,8 @@ async function handleSubtaskAction(payload = {}) {
                     console.error('[agent] profile extraction on finish failed:', exErr.message);
                 }
             }
-            try {
-                buildIntentFile(sessionId);
-                // Remove old dashboard artifacts before adding new one
-                if (state.artifacts[sessionId]) {
-                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(
-                        (a) => a.type !== 'dashboard'
-                    );
-                }
-                const dashUrl = dashboardServer.getDashboardURL(sessionId);
-                appendArtifact(sessionId, {
-                    id: `dashboard-${sessionId}`,
-                    type: 'dashboard',
-                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
-                    url: dashUrl,
-                    openUrl: true
-                });
-            } catch (err) {
-                console.error('[agent] dashboard artifact failed:', err);
-                appendRuntimeLog(sessionId, `dashboard_error -> ${err.message}`, { source: 'error' });
-            }
+            // Build dashboard + seed platforms + auto-finish search subtask
+            await _buildDashboardAndFinish(sessionId);
             // Story 4.2: sync profile milestone to mem0
             syncProfileToMem0(sessionId);
         }
@@ -841,6 +1044,14 @@ async function handleSubtaskAction(payload = {}) {
     // so the AI uses the profile collection prompt with marker instructions.
     if (subtaskKey === 'profile') {
         state.profileCollectionMode[sessionId] = true;
+    }
+
+    // When (re)starting the search subtask, seed platforms + build dashboard + auto-finish
+    if (subtaskKey === 'dashboard') {
+        await _buildDashboardAndFinish(sessionId, { clearFirst: isRestart });
+        sendSnapshot();
+        scheduleSave();
+        return;  // early return — skip generic start/restart messages below
     }
 
     appendSubtaskLog(sessionId, subtaskKey,
@@ -1105,9 +1316,13 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default',
         child.on('close', (code) => {
             if (code === 0) {
                 resolve(stdout.trim());
+            } else if (code === null && stdout.trim().length > 50) {
+                // Process killed by signal (e.g. timeout SIGTERM) but produced valid output
+                console.log(`[agent:cli] ${bin} exited with signal (code=null) but stdout has ${stdout.trim().length} chars — treating as success`);
+                resolve(stdout.trim());
             } else {
                 const cliName = provider === 'codex-cli' ? 'codex' : 'claude';
-                reject(new Error(`${cliName} exited with code ${code}: ${stderr.trim()}`));
+                reject(new Error(`${cliName} exited with code ${code}: ${stderr.trim().slice(0, 500)}`));
             }
         });
         child.on('error', (err) => {
@@ -1780,8 +1995,30 @@ async function extractResumeFromAttachments(sessionId, attachments) {
     const { provider: activeProvider } = resolveProvider();
     if (!activeProvider) return;
 
+    const userId = state.activeUserId || 'default';
+
     for (const attachment of attachments) {
         try {
+            // MD5 dedup: skip re-parsing if same file was uploaded before
+            const fileHash = fileParser.computeHash(attachment.contentBase64);
+            if (!state.resumeHashes) state.resumeHashes = {};
+            if (!state.resumeHashes[userId]) state.resumeHashes[userId] = {};
+            const cached = state.resumeHashes[userId][fileHash];
+            if (cached && cached.sections) {
+                console.log(`[agent:resume] MD5 match (${fileHash.slice(0, 8)}) — reusing cached sections from ${cached.fileName}`);
+                appendRuntimeLog(sessionId, `resume_dedup -> ${attachment.name} matches cached ${cached.fileName} (${fileHash.slice(0, 8)})`, { source: 'extraction' });
+                appendConversation(sessionId, 'assistant', isZh()
+                    ? `♻️ 检测到相同文件 ${attachment.name}，复用之前的解析结果。`
+                    : `♻️ Detected same file ${attachment.name}, reusing previous parse results.`,
+                    { _system: true });
+                // Apply cached sections to session + master
+                state.profileSections[sessionId] = { ...(state.profileSections[sessionId] || {}), ...cached.sections };
+                state.masterProfile = masterProfileClient.mergeMaster(state.masterProfile || {}, cached.sections);
+                masterProfileClient.saveAllSections(userId, state.masterProfile).catch(() => {});
+                scheduleSave();
+                continue;
+            }
+
             const parsed = await fileParser.extractText(
                 attachment.contentBase64,
                 attachment.mimeType,
@@ -1893,6 +2130,19 @@ async function extractResumeFromAttachments(sessionId, attachments) {
                         if (result?.success) stored++;
                         console.log(`[agent:knowledge] Stored profile/${subType} (${content.length} chars)`);
                     }
+
+                    // Also store in master profile (user-scoped, persists across sessions)
+                    state.masterProfile = masterProfileClient.mergeMaster(state.masterProfile || {}, sections);
+                    masterProfileClient.saveAllSections(userId, state.masterProfile).catch(e =>
+                        console.error('[agent:knowledge] master profile save error:', e.message));
+
+                    // Cache MD5 hash for dedup on re-upload
+                    if (!state.resumeHashes[userId]) state.resumeHashes[userId] = {};
+                    state.resumeHashes[userId][fileHash] = {
+                        fileName: attachment.name,
+                        parsedAt: Date.now(),
+                        sections
+                    };
 
                     // Also store a summary in mem0 for semantic search (lightweight pointer)
                     const ns = getMemoryNamespace();
@@ -2035,17 +2285,14 @@ async function checkAndCompleteOnboarding(sessionId) {
             // Auto-generate dashboard
             try {
                 buildIntentFile(sessionId);
-                if (state.artifacts[sessionId]) {
-                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(a => a.type !== 'dashboard');
-                }
+                if (!state.artifacts[sessionId]) state.artifacts[sessionId] = [];
+                state.artifacts[sessionId] = state.artifacts[sessionId].filter(a => a.type !== 'dashboard');
                 const dashUrl = dashboardServer.getDashboardURL(sessionId);
-                appendArtifact(sessionId, {
-                    id: `dashboard-${sessionId}`,
-                    type: 'dashboard',
-                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
-                    url: dashUrl,
-                    openUrl: true
-                });
+                console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
+                const dashArt = { id: `dashboard-${sessionId}`, type: 'dashboard', title: isZh() ? '求职仪表盘' : 'Job Search Dashboard', url: dashUrl, openUrl: true };
+                state.artifacts[sessionId].push(dashArt);
+                emit('agent_artifact_replace', { sessionId, artifacts: state.artifacts[sessionId] });
+                appendRuntimeLog(sessionId, `artifact -> ${dashArt.title}`, { source: 'artifact' });
             } catch (err) {
                 console.error('[agent] dashboard after seed failed:', err);
             }
@@ -2077,23 +2324,48 @@ async function applyMarkers(sessionId, markers) {
     let directionChanged = false;
 
     // Separate profile markers from PROFILE_COMPLETE to avoid conflict
-    const profileMarkers = markers.filter(m => m.type === 'profile');
+    const profileMarkers = markers.filter(m => m.type === 'profile' || m.type === 'master_profile');
     const hasProfileComplete = markers.some(m => m.type === 'profile_complete');
     const hasExplicitProfileOps = profileMarkers.length > 0;
 
+    // Sections that should propagate additive ops to master profile
+    const ADDITIVE_SECTIONS = new Set(['skills', 'certifications', 'projects', 'publications', 'languages', 'volunteering']);
+    let masterChanged = false;
+
     for (const m of markers) {
         if (m.type === 'profile') {
+            // PROFILE_* markers update session profile
             const prev = sections[m.field] || '';
             if (m.op === 'SET') {
                 sections[m.field] = m.value;
             } else if (m.op === 'ADD') {
                 sections[m.field] = markerParser.applyAdd(prev, m.value);
+                // Propagate additive ops to master for list-like sections
+                if (ADDITIVE_SECTIONS.has(m.field) && state.masterProfile) {
+                    const masterPrev = state.masterProfile[m.field] || '';
+                    state.masterProfile[m.field] = markerParser.applyAdd(masterPrev, m.value);
+                    masterChanged = true;
+                }
             } else if (m.op === 'REMOVE') {
                 sections[m.field] = markerParser.applyRemove(prev, m.value);
             }
             profileChanged = true;
             console.log(`[agent:marker-debug] PROFILE_${m.op} ${m.field}: "${prev}" -> "${sections[m.field]}"`);
             appendRuntimeLog(sessionId, `marker_apply -> PROFILE_${m.op} ${m.field}="${sections[m.field]}"`, { source: 'knowledge' });
+        } else if (m.type === 'master_profile') {
+            // MASTER_* markers update master profile directly
+            if (!state.masterProfile) state.masterProfile = {};
+            const prev = state.masterProfile[m.field] || '';
+            if (m.op === 'SET') {
+                state.masterProfile[m.field] = m.value;
+            } else if (m.op === 'ADD') {
+                state.masterProfile[m.field] = markerParser.applyAdd(prev, m.value);
+            } else if (m.op === 'REMOVE') {
+                state.masterProfile[m.field] = markerParser.applyRemove(prev, m.value);
+            }
+            masterChanged = true;
+            console.log(`[agent:marker-debug] MASTER_${m.op} ${m.field}: "${prev}" -> "${state.masterProfile[m.field]}"`);
+            appendRuntimeLog(sessionId, `marker_apply -> MASTER_${m.op} ${m.field}="${state.masterProfile[m.field]}"`, { source: 'knowledge' });
         } else if (m.type === 'direction' || m.type === 'answer') {
             // Both DIRECTION and ANSWER markers update selectedAnswers (onboarding direction fields)
             if (!state.selectedAnswers[sessionId]) state.selectedAnswers[sessionId] = {};
@@ -2138,6 +2410,13 @@ async function applyMarkers(sessionId, markers) {
         appendSubtaskLog(sessionId, 'profile', isZh()
             ? `档案已更新：${Object.keys(sections).join('、')}`
             : `Profile updated: ${Object.keys(sections).join(', ')}`);
+    }
+
+    // Persist master profile changes to knowledge store
+    if (masterChanged && state.activeUserId && state.masterProfile) {
+        masterProfileClient.saveAllSections(state.activeUserId, state.masterProfile).catch(err => {
+            console.error('[agent:marker] master profile save failed:', err.message);
+        });
     }
 
     // Persist direction changes to knowledge store
@@ -2243,19 +2522,14 @@ async function extractProfileFromConversation(sessionId) {
             // Add dashboard artifact (live via dashboardServer)
             try {
                 buildIntentFile(sessionId);
-                if (state.artifacts[sessionId]) {
-                    state.artifacts[sessionId] = state.artifacts[sessionId].filter(
-                        (a) => a.type !== 'dashboard'
-                    );
-                }
+                if (!state.artifacts[sessionId]) state.artifacts[sessionId] = [];
+                state.artifacts[sessionId] = state.artifacts[sessionId].filter(a => a.type !== 'dashboard');
                 const dashUrl = dashboardServer.getDashboardURL(sessionId);
-                appendArtifact(sessionId, {
-                    id: `dashboard-${sessionId}`,
-                    type: 'dashboard',
-                    title: isZh() ? '求职仪表盘' : 'Job Search Dashboard',
-                    url: dashUrl,
-                    openUrl: true
-                });
+                console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
+                const dashArt = { id: `dashboard-${sessionId}`, type: 'dashboard', title: isZh() ? '求职仪表盘' : 'Job Search Dashboard', url: dashUrl, openUrl: true };
+                state.artifacts[sessionId].push(dashArt);
+                emit('agent_artifact_replace', { sessionId, artifacts: state.artifacts[sessionId] });
+                appendRuntimeLog(sessionId, `artifact -> ${dashArt.title}`, { source: 'artifact' });
             } catch (dashErr) {
                 console.error('[agent] dashboard artifact after extraction failed:', dashErr);
             }
@@ -2495,7 +2769,7 @@ function initWebSocket() {
         startHeartBeat();
         send({ type: 'request_task_data', data: '' });
         // Start dashboard server (idempotent — only starts once)
-        dashboardServer.start(() => state);
+        dashboardServer.start(() => state, undefined, { scheduleSave });
     });
 
     ws.on('message', (raw) => {

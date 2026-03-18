@@ -44,7 +44,10 @@ describe('workflowStore', () => {
             const run = store.initRun(SESSION, cfg);
             expect(run.status).toBe('idle');
             expect(run.steps).toHaveLength(4);
-            expect(run.steps.every(s => s.status === 'idle')).toBe(true);
+            // apply step defaults to enabled:false (locked for this version) → skipped
+            const nonApply = run.steps.filter(s => s.name !== 'apply');
+            expect(nonApply.every(s => s.status === 'idle')).toBe(true);
+            expect(run.steps.find(s => s.name === 'apply').status).toBe('skipped');
         });
 
         test('disabled steps are skipped', () => {

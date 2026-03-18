@@ -55,7 +55,7 @@ function _loadToolCache() {
 /**
  * Save a platform's tool script to disk (keyed by URL for cross-session matching).
  */
-function _saveToolScript(platformUrl, toolType, script, version) {
+function _saveToolScript(platformUrl, toolType, script, version, jdVerified) {
     try {
         const dir = _dataDir();
         fs.mkdirSync(dir, { recursive: true });
@@ -72,6 +72,7 @@ function _saveToolScript(platformUrl, toolType, script, version) {
         data[platformUrl][toolType] = {
             script,
             version: version || 1,
+            jdVerified: jdVerified || false,
             savedAt: new Date().toISOString()
         };
 
@@ -83,21 +84,193 @@ function _saveToolScript(platformUrl, toolType, script, version) {
 }
 
 /**
- * Restore saved tool scripts onto a platform object (matched by URL).
+ * Add an AI-generated fix rule for a platform tool (learned from failure analysis).
+ * Rules are persisted across rebuilds — they represent permanent lessons.
+ * @param {string} platformUrl - Platform URL key
+ * @param {string} toolType - 'search' or 'apply'
+ * @param {string} rule - One-sentence imperative rule
+ */
+function addFixRule(platformUrl, toolType, rule) {
+    try {
+        const dir = _dataDir();
+        fs.mkdirSync(dir, { recursive: true });
+        const filePath = path.join(dir, TOOLS_FILE);
+
+        let data = {};
+        try {
+            if (fs.existsSync(filePath)) {
+                data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {};
+            }
+        } catch (_) { /* start fresh */ }
+
+        if (!data[platformUrl]) data[platformUrl] = {};
+        if (!data[platformUrl][toolType]) data[platformUrl][toolType] = {};
+        const toolData = data[platformUrl][toolType];
+        if (!Array.isArray(toolData.fixRules)) toolData.fixRules = [];
+
+        // Dedup: skip if a very similar rule already exists (>60% word overlap)
+        const ruleWords = new Set(rule.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+        const isDuplicate = toolData.fixRules.some(existing => {
+            const existWords = new Set(existing.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+            const overlap = [...ruleWords].filter(w => existWords.has(w)).length;
+            return ruleWords.size > 0 && overlap / ruleWords.size > 0.6;
+        });
+        if (isDuplicate) {
+            console.log(`[platformStore] Fix rule skipped (duplicate): ${rule.slice(0, 80)}...`);
+            return;
+        }
+
+        toolData.fixRules.push(rule);
+
+        // Rolling cap: keep max 5 rules
+        while (toolData.fixRules.length > 5) {
+            toolData.fixRules.shift();
+        }
+
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+        console.log(`[platformStore] Added fix rule for ${platformUrl}/${toolType}: ${rule.slice(0, 80)}...`);
+    } catch (err) {
+        console.error('[platformStore] Failed to add fix rule:', err.message);
+    }
+}
+
+/**
+ * Get AI-generated fix rules for a platform tool.
+ * @param {string} platformUrl - Platform URL key
+ * @param {string} toolType - 'search' or 'apply'
+ * @returns {string[]} Array of rule strings
+ */
+function getFixRules(platformUrl, toolType) {
+    const cache = _loadToolCache();
+
+    let entry = cache[platformUrl];
+    // Fuzzy match by domain (same as _restoreTools)
+    if (!entry) {
+        try {
+            const platHost = new URL(platformUrl).hostname;
+            const platBase = platHost.split('.').slice(-2).join('.');
+            for (const [cachedUrl, cachedData] of Object.entries(cache)) {
+                const cachedHost = new URL(cachedUrl).hostname;
+                const cachedBase = cachedHost.split('.').slice(-2).join('.');
+                if (cachedBase === platBase) { entry = cachedData; break; }
+            }
+        } catch (_) {}
+    }
+
+    if (!entry || !entry[toolType]) return [];
+    return Array.isArray(entry[toolType].fixRules) ? entry[toolType].fixRules : [];
+}
+
+/**
+ * Restore saved tool scripts onto a platform object.
+ * Matches by exact URL first, then falls back to domain-based matching
+ * (e.g. ca.indeed.com matches saved script for www.indeed.com).
  */
 function _restoreTools(platform) {
     const cache = _loadToolCache();
-    const saved = cache[platform.url];
+    let saved = cache[platform.url];
+
+    // Fuzzy match: find a cached entry whose domain shares the same base
+    // e.g. ca.indeed.com/jobs → indeed.com, www.indeed.com → indeed.com
+    if (!saved) {
+        try {
+            const platHost = new URL(platform.url).hostname;
+            const platBase = platHost.split('.').slice(-2).join('.');
+            for (const [cachedUrl, cachedData] of Object.entries(cache)) {
+                const cachedHost = new URL(cachedUrl).hostname;
+                const cachedBase = cachedHost.split('.').slice(-2).join('.');
+                if (cachedBase === platBase) { saved = cachedData; break; }
+            }
+        } catch (_) { /* ignore parse errors */ }
+    }
+
     if (!saved) return;
 
     for (const toolType of ['search', 'apply']) {
         if (saved[toolType] && saved[toolType].script) {
             platform.tools[toolType].script = saved[toolType].script;
             platform.tools[toolType].version = saved[toolType].version || 1;
+            platform.tools[toolType].jdVerified = saved[toolType].jdVerified || false;
             platform.tools[toolType].status = 'ready';
-            console.log(`[platformStore] Restored ${toolType} tool for ${platform.name} (v${platform.tools[toolType].version})`);
+            console.log(`[platformStore] Restored ${toolType} tool for ${platform.name} (v${platform.tools[toolType].version}, jdVerified=${platform.tools[toolType].jdVerified})`);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Login status persistence
+// Keyed by platformUrl → { envId, verifiedAt }
+// Stored in the same data dir as tools.
+// ---------------------------------------------------------------------------
+
+const LOGIN_FILE = 'platform-login.json';
+
+function _loadLoginCache() {
+    try {
+        const filePath = path.join(_dataDir(), LOGIN_FILE);
+        if (!fs.existsSync(filePath)) return {};
+        return JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {};
+    } catch (_) {
+        return {};
+    }
+}
+
+/**
+ * Record that a platform+env login succeeded (cookies persisted in fingerprint browser).
+ * @param {string} platformUrl
+ * @param {string} envId
+ */
+function saveLoginStatus(platformUrl, envId) {
+    try {
+        const dir = _dataDir();
+        fs.mkdirSync(dir, { recursive: true });
+        const filePath = path.join(dir, LOGIN_FILE);
+
+        let data = {};
+        try { if (fs.existsSync(filePath)) data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {}; } catch (_) {}
+
+        data[platformUrl] = { envId, verifiedAt: new Date().toISOString() };
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+        console.log(`[platformStore] Saved login status for ${platformUrl} (env: ${envId})`);
+    } catch (err) {
+        console.error('[platformStore] Failed to save login status:', err.message);
+    }
+}
+
+/**
+ * Clear persisted login for a platform (e.g. when cookies expired).
+ * @param {string} platformUrl
+ */
+function clearLoginStatus(platformUrl) {
+    try {
+        const filePath = path.join(_dataDir(), LOGIN_FILE);
+        if (!fs.existsSync(filePath)) return;
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {};
+        delete data[platformUrl];
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+        console.log(`[platformStore] Cleared login status for ${platformUrl}`);
+    } catch (_) {}
+}
+
+/**
+ * Get persisted login info for a platform URL.
+ * @param {string} platformUrl
+ * @returns {{ envId: string, verifiedAt: string } | null}
+ */
+function getLoginStatus(platformUrl) {
+    const cache = _loadLoginCache();
+    return cache[platformUrl] || null;
+}
+
+/**
+ * Restore login status onto a platform object if previously verified.
+ * Returns the saved login info, or null.
+ */
+function _restoreLogin(platform) {
+    const saved = getLoginStatus(platform.url);
+    if (!saved) return null;
+    console.log(`[platformStore] Restored login for ${platform.name} (env: ${saved.envId}, verified: ${saved.verifiedAt})`);
+    return saved;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,10 +469,11 @@ function updateToolStatus(sessionId, platformId, toolType, status, extra = {}) {
     tool.status = status;
     if (extra.script !== undefined) tool.script = extra.script;
     if (extra.buildLog) tool.buildLog = extra.buildLog;
+    if (extra.jdVerified !== undefined) tool.jdVerified = extra.jdVerified;
     if (status === 'ready' && extra.script) {
         tool.version++;
         // Persist script to disk so it survives session restarts
-        _saveToolScript(platform.url, toolType, extra.script, tool.version);
+        _saveToolScript(platform.url, toolType, extra.script, tool.version, tool.jdVerified);
     }
 
     return { success: true, tool };
@@ -340,5 +514,10 @@ module.exports = {
     updateConnectionStatus,
     clearSession,
     getPresetsForRegion,
+    saveLoginStatus,
+    clearLoginStatus,
+    getLoginStatus,
+    addFixRule,
+    getFixRules,
     REGION_PRESETS
 };

@@ -1,6 +1,6 @@
 const webSocketService = require('./webSocketService').getInstance();
 const spawn = require('child_process').spawn;
-const {  stopProxy, checkAndStartProxy } = require('./proxyService');
+const {  startProxy, stopProxy, checkAndStartProxy } = require('./proxyService');
 const { sleep } = require('../utils');
 const config = require('../../config').getInstance();
 const isBuild = config.getIsBuild();
@@ -491,6 +491,7 @@ class TaskService {
             const envRes = await getEnvById(id);
             const env = envRes?.data;
             if (!env) {
+                console.error(`[buildTaskContext] getEnvById("${id}") failed:`, envRes?.code, envRes?.message);
                 return null;
             }
             let envData = envsData[id] || {};
@@ -817,6 +818,7 @@ class TaskService {
             case 'agent_conversation_update':
             case 'agent_subtask_update':
             case 'agent_artifact_update':
+            case 'agent_artifact_replace':
             case 'agent_error': {
                 this.webSocketService.sendToFront({
                     ...data,
@@ -839,6 +841,8 @@ class TaskService {
             // 在任务真正开始前，重置完成通知标记，允许同名任务后续发送完成通知
             if (!this._sentCompleted) this._sentCompleted = {};
             this._sentCompleted[taskName] = false;
+            // 防止运行时代理字段污染内存中的 envData 缓存（taskData.env 是引用）
+            taskData.env = { ...taskData.env };
             // 检查环境是否配置代理，执行checkAndStartProxy
             if (taskData.env && taskData.env.proxy && taskData.env.proxy.ipType && taskData.env.proxy.ipHost && taskData.env.proxy.ipPort) {
                 const proxyRes = await checkAndStartProxy(taskName,taskData.env.proxy.ipType, taskData.env.proxy.ipHost, taskData.env.proxy.ipPort, taskData.env.proxy.ipUsername, taskData.env.proxy.ipPassword);
@@ -852,6 +856,18 @@ class TaskService {
                     taskData.env.useProxy = true;
                     this.isUseProxy[taskName] = true;
                     this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} use proxy:${url}`, 0, taskName));
+                } else {
+                    // Fallback: proxy verification failed, start proxy without verification
+                    this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} proxy verify failed (${proxyRes.message}), starting proxy without verification...`, 1, taskName));
+                    const fallbackUrl = await startProxy(taskName, taskData.env.proxy.ipType, taskData.env.proxy.ipHost, taskData.env.proxy.ipPort, taskData.env.proxy.ipUsername, taskData.env.proxy.ipPassword);
+                    if (fallbackUrl) {
+                        taskData.env.proxyUrl = fallbackUrl;
+                        taskData.env.useProxy = true;
+                        this.isUseProxy[taskName] = true;
+                        this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} proxy fallback started:${fallbackUrl}`, 0, taskName));
+                    } else {
+                        this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} proxy fallback also failed, launching without proxy`, 1, taskName));
+                    }
                 }
             }
             this.isRunning[taskName] = true;
@@ -974,7 +990,8 @@ class TaskService {
                 }
                 // 保持兼容：如果检测到运行结束且标记为已完成，则触发一次 finishTask 并退出
                 if ((!this.isRunning[taskName] || this.isRunning[taskName] === false) && (this.isCompleted[taskName] === true)) {
-                    finishTask(this, taskName, true, 'Task completed (checkCompleted)');
+                    const success = !!this.isSuccess[taskName];
+                    finishTask(this, taskName, success, success ? 'Task completed (checkCompleted)' : 'Task terminated (checkCompleted)');
                     break;
                 }
             }

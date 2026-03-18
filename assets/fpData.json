@@ -6,9 +6,18 @@
             "architecture": "x86",
             "bitness": "64",
             "brands": [
-                { "brand": "Chromium", "version": "134" },
-                { "brand": "Google Chrome", "version": "134" },
-                { "brand": "Not.A/Brand", "version": "99" }
+                {
+                    "brand": "Chromium",
+                    "version": "134"
+                },
+                {
+                    "brand": "Google Chrome",
+                    "version": "134"
+                },
+                {
+                    "brand": "Not.A/Brand",
+                    "version": "99"
+                }
             ],
             "platform": "Windows",
             "platform_version": "10.0.0",
@@ -294,9 +303,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -313,9 +331,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -327,17 +354,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "15.0.0",
                 "ua_full_version": "134.0.6998.120"
             },
             "webglFingerprint": {
@@ -346,17 +382,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "15.0.1",
                 "ua_full_version": "134.0.6998.66"
             },
             "webglFingerprint": {
@@ -370,9 +415,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -389,9 +443,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -408,9 +471,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -422,17 +494,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.0",
                 "ua_full_version": "134.0.6998.8"
             },
             "webglFingerprint": {
@@ -446,9 +527,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -465,9 +555,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -484,9 +583,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -498,17 +606,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.1",
                 "ua_full_version": "134.0.6998.92"
             },
             "webglFingerprint": {
@@ -517,17 +634,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.2",
                 "ua_full_version": "134.0.6998.102"
             },
             "webglFingerprint": {
@@ -536,17 +662,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "15.0.0",
                 "ua_full_version": "134.0.6998.118"
             },
             "webglFingerprint": {
@@ -560,9 +695,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -579,9 +723,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -593,17 +746,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "15.0.1",
                 "ua_full_version": "134.0.6998.130"
             },
             "webglFingerprint": {
@@ -617,9 +779,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -631,17 +802,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.0",
                 "ua_full_version": "134.0.6998.16"
             },
             "webglFingerprint": {
@@ -655,9 +835,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -669,17 +858,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.1",
                 "ua_full_version": "134.0.6998.28"
             },
             "webglFingerprint": {
@@ -693,9 +891,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -707,17 +914,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.2",
                 "ua_full_version": "134.0.6998.34"
             },
             "webglFingerprint": {
@@ -731,9 +947,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -745,17 +970,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "15.0.0",
                 "ua_full_version": "134.0.6998.42"
             },
             "webglFingerprint": {
@@ -769,9 +1003,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -783,17 +1026,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "15.0.1",
                 "ua_full_version": "134.0.6998.48"
             },
             "webglFingerprint": {
@@ -807,9 +1059,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -821,17 +1082,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.0",
                 "ua_full_version": "134.0.6998.58"
             },
             "webglFingerprint": {
@@ -845,9 +1115,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -859,17 +1138,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.1",
                 "ua_full_version": "134.0.6998.62"
             },
             "webglFingerprint": {
@@ -883,9 +1171,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -897,17 +1194,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.2",
                 "ua_full_version": "134.0.6998.72"
             },
             "webglFingerprint": {
@@ -921,9 +1227,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -935,17 +1250,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "15.0.0",
                 "ua_full_version": "134.0.6998.78"
             },
             "webglFingerprint": {
@@ -959,9 +1283,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -973,17 +1306,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "15.0.1",
                 "ua_full_version": "134.0.6998.84"
             },
             "webglFingerprint": {
@@ -997,9 +1339,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -1011,17 +1362,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.0",
                 "ua_full_version": "134.0.6998.90"
             },
             "webglFingerprint": {
@@ -1035,9 +1395,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -1049,17 +1418,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.1",
                 "ua_full_version": "134.0.6998.96"
             },
             "webglFingerprint": {
@@ -1073,9 +1451,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -1087,17 +1474,26 @@
             }
         },
         {
-            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
             "clientHintFingerprint": {
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
-                "platform_version": "11.0.0",
+                "platform_version": "16.0.2",
                 "ua_full_version": "134.0.6998.104"
             },
             "webglFingerprint": {
@@ -1111,9 +1507,18 @@
                 "architecture": "x86",
                 "bitness": "64",
                 "brands": [
-                    { "brand": "Chromium", "version": "134" },
-                    { "brand": "Google Chrome", "version": "134" },
-                    { "brand": "Not.A/Brand", "version": "99" }
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
                 ],
                 "platform": "Windows",
                 "platform_version": "10.0.0",
@@ -1123,30 +1528,426 @@
                 "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)",
                 "vendor": "Google Inc. (NVIDIA)"
             }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
+                ],
+                "platform": "Windows",
+                "platform_version": "15.0.0",
+                "ua_full_version": "134.0.6998.88"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.70"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
+                ],
+                "platform": "Windows",
+                "platform_version": "15.0.0",
+                "ua_full_version": "134.0.6998.120"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.66"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (NVIDIA)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
+                ],
+                "platform": "Windows",
+                "platform_version": "15.0.0",
+                "ua_full_version": "134.0.6998.40"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 7600 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.95"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 7700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
+                ],
+                "platform": "Windows",
+                "platform_version": "15.0.0",
+                "ua_full_version": "134.0.6998.105"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 7800 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.88"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (AMD, AMD Radeon RX 7900 XTX Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (AMD)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
+                ],
+                "platform": "Windows",
+                "platform_version": "15.0.0",
+                "ua_full_version": "134.0.6998.70"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (Intel, Intel Arc A770 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (Intel)"
+            }
+        },
+        {
+            "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "clientHintFingerprint": {
+                "architecture": "x86",
+                "bitness": "64",
+                "brands": [
+                    {
+                        "brand": "Chromium",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Google Chrome",
+                        "version": "134"
+                    },
+                    {
+                        "brand": "Not.A/Brand",
+                        "version": "99"
+                    }
+                ],
+                "platform": "Windows",
+                "platform_version": "10.0.0",
+                "ua_full_version": "134.0.6998.120"
+            },
+            "webglFingerprint": {
+                "renderer": "ANGLE (Intel, Intel Arc A750 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                "vendor": "Google Inc. (Intel)"
+            }
         }
     ],
     "languageFingerprintList": [
-        { "httpLanguage": "en-US,en", "jsLanguage": "en-US" },
-        { "httpLanguage": "en-GB,en", "jsLanguage": "en-GB" },
-        { "httpLanguage": "en-AU,en", "jsLanguage": "en-AU" },
-        { "httpLanguage": "en-CA,en", "jsLanguage": "en-CA" },
-        { "httpLanguage": "en-NZ,en", "jsLanguage": "en-NZ" },
-        { "httpLanguage": "en-IE,en", "jsLanguage": "en-IE" },
-        { "httpLanguage": "en-IN,en", "jsLanguage": "en-IN" },
-        { "httpLanguage": "en-SG,en", "jsLanguage": "en-SG" },
-        { "httpLanguage": "en-PH,en", "jsLanguage": "en-PH" },
-        { "httpLanguage": "en-ZA,en", "jsLanguage": "en-ZA" },
-        { "httpLanguage": "en-US", "jsLanguage": "en-US" },
-        { "httpLanguage": "en-GB", "jsLanguage": "en-GB" },
-        { "httpLanguage": "en-AU", "jsLanguage": "en-AU" },
-        { "httpLanguage": "en-CA", "jsLanguage": "en-CA" },
-        { "httpLanguage": "en-NZ", "jsLanguage": "en-NZ" },
-        { "httpLanguage": "en", "jsLanguage": "en" }
+        {
+            "httpLanguage": "en-US,en;q=0.9",
+            "jsLanguage": "en-US"
+        },
+        {
+            "httpLanguage": "en-GB,en;q=0.9",
+            "jsLanguage": "en-GB"
+        },
+        {
+            "httpLanguage": "en-AU,en;q=0.9",
+            "jsLanguage": "en-AU"
+        },
+        {
+            "httpLanguage": "en-CA,en;q=0.9",
+            "jsLanguage": "en-CA"
+        },
+        {
+            "httpLanguage": "en-NZ,en;q=0.9",
+            "jsLanguage": "en-NZ"
+        },
+        {
+            "httpLanguage": "en-IE,en;q=0.9",
+            "jsLanguage": "en-IE"
+        },
+        {
+            "httpLanguage": "en-IN,en;q=0.9",
+            "jsLanguage": "en-IN"
+        },
+        {
+            "httpLanguage": "en-SG,en;q=0.9",
+            "jsLanguage": "en-SG"
+        },
+        {
+            "httpLanguage": "en-ZA,en;q=0.9",
+            "jsLanguage": "en-ZA"
+        },
+        {
+            "httpLanguage": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+            "jsLanguage": "en-US"
+        },
+        {
+            "httpLanguage": "en-CA,en;q=0.9,fr-CA;q=0.8,fr;q=0.7",
+            "jsLanguage": "en-CA"
+        },
+        {
+            "httpLanguage": "en-GB,en;q=0.9,fr;q=0.8",
+            "jsLanguage": "en-GB"
+        },
+        {
+            "httpLanguage": "en-US,en;q=0.9,es;q=0.8",
+            "jsLanguage": "en-US"
+        },
+        {
+            "httpLanguage": "en-US,en;q=0.9,de;q=0.8",
+            "jsLanguage": "en-US"
+        },
+        {
+            "httpLanguage": "en-US,en;q=0.9,ja;q=0.8",
+            "jsLanguage": "en-US"
+        },
+        {
+            "httpLanguage": "en-US,en;q=0.9,ko;q=0.8",
+            "jsLanguage": "en-US"
+        },
+        {
+            "httpLanguage": "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7",
+            "jsLanguage": "en-US"
+        },
+        {
+            "httpLanguage": "en-AU,en;q=0.9,zh-TW;q=0.8",
+            "jsLanguage": "en-AU"
+        },
+        {
+            "httpLanguage": "en-SG,en;q=0.9,zh-CN;q=0.8,ms;q=0.7",
+            "jsLanguage": "en-SG"
+        },
+        {
+            "httpLanguage": "en-IN,en;q=0.9,hi;q=0.8",
+            "jsLanguage": "en-IN"
+        }
     ],
     "screenFingerprintList": [
-        { "availHeight": 1032, "availWidth": 1920, "height": 1080, "pixelDepth": 24, "width": 1920 },
-        { "availHeight": 892, "availWidth": 1600, "height": 900, "pixelDepth": 24, "width": 1600 }
-        
-       
+        {
+            "availHeight": 1032,
+            "availWidth": 1920,
+            "height": 1080,
+            "pixelDepth": 24,
+            "width": 1920
+        },
+        {
+            "availHeight": 1392,
+            "availWidth": 2560,
+            "height": 1440,
+            "pixelDepth": 24,
+            "width": 2560
+        },
+        {
+            "availHeight": 892,
+            "availWidth": 1600,
+            "height": 900,
+            "pixelDepth": 24,
+            "width": 1600
+        },
+        {
+            "availHeight": 728,
+            "availWidth": 1366,
+            "height": 768,
+            "pixelDepth": 24,
+            "width": 1366
+        },
+        {
+            "availHeight": 1032,
+            "availWidth": 1920,
+            "height": 1080,
+            "pixelDepth": 24,
+            "width": 1920
+        },
+        {
+            "availHeight": 1152,
+            "availWidth": 2048,
+            "height": 1152,
+            "pixelDepth": 24,
+            "width": 2048
+        },
+        {
+            "availHeight": 1040,
+            "availWidth": 1920,
+            "height": 1080,
+            "pixelDepth": 24,
+            "width": 1920
+        },
+        {
+            "availHeight": 1400,
+            "availWidth": 2560,
+            "height": 1440,
+            "pixelDepth": 24,
+            "width": 2560
+        }
     ]
 }

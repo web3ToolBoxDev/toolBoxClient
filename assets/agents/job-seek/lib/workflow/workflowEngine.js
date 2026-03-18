@@ -26,8 +26,28 @@ function getStepHandlers() {
     return _stepHandlers;
 }
 
+// Lazy-require dashboardServer for SSE broadcast (avoid circular dep)
+let _dashboardServer = null;
+function _broadcastStatus(sessionId) {
+    if (!_dashboardServer) _dashboardServer = require('../dashboardServer');
+    const broadcaster = _dashboardServer._getSSEBroadcaster();
+    if (broadcaster) {
+        const status = getStatus(sessionId);
+        broadcaster(sessionId, 'workflowUpdate', status);
+    }
+}
+
 // Login status cache: source → { status, checkedAt }
 const _loginCache = new Map();
+
+// Step timeout thresholds (ms) — steps running longer are marked stuck
+const STEP_TIMEOUTS = {
+    customizeProfile: 30_000,     // 30s
+    search: 10 * 60_000,         // 10 min
+    generate: 15 * 60_000,       // 15 min
+    apply: 20 * 60_000           // 20 min
+};
+const DEFAULT_STEP_TIMEOUT = 5 * 60_000; // 5 min
 
 /**
  * Start a workflow run.
@@ -190,6 +210,14 @@ async function _executePipeline(sessionId, config, context) {
         // Skip already completed steps (for resume)
         if (['done', 'skipped'].includes(step.status)) continue;
 
+        // [VERSION LOCK] Apply step deferred to next version — auto-skip
+        if (step.name === 'apply') {
+            store.updateStepStatus(sessionId, step.name, 'skipped', {
+                error: 'Auto-Apply is coming in the next version.'
+            });
+            continue;
+        }
+
         const handler = handlers[step.name];
         if (!handler || !handler.execute) {
             store.updateStepStatus(sessionId, step.name, 'error', {
@@ -199,6 +227,7 @@ async function _executePipeline(sessionId, config, context) {
         }
 
         store.updateStepStatus(sessionId, step.name, 'running');
+        _broadcastStatus(sessionId);
 
         try {
             const result = await handler.execute({
@@ -209,14 +238,17 @@ async function _executePipeline(sessionId, config, context) {
             });
 
             store.updateStepStatus(sessionId, step.name, 'done', { result });
+            _broadcastStatus(sessionId);
         } catch (err) {
             store.updateStepStatus(sessionId, step.name, 'error', {
                 error: err.message
             });
+            _broadcastStatus(sessionId);
 
             // If a critical step fails, stop the pipeline
             if (['search'].includes(step.name)) {
                 store.updateRunStatus(sessionId, 'failed');
+                _broadcastStatus(sessionId);
                 return;
             }
         }
@@ -227,7 +259,87 @@ async function _executePipeline(sessionId, config, context) {
     if (finalRun && finalRun.status === 'running') {
         store.updateRunStatus(sessionId, 'completed');
         store.archiveRun(sessionId);
+        _broadcastStatus(sessionId);
     }
+}
+
+/**
+ * Check for stuck steps and mark them.
+ * @param {string} sessionId
+ * @returns {{ stuckSteps: string[] }}
+ */
+function checkStuckSteps(sessionId) {
+    const run = store.getRun(sessionId);
+    if (!run || run.status !== 'running') return { stuckSteps: [] };
+
+    const stuckSteps = [];
+    const now = Date.now();
+
+    for (const step of run.steps) {
+        if (step.status !== 'running' || !step.startedAt) continue;
+        const elapsed = now - new Date(step.startedAt).getTime();
+        const timeout = STEP_TIMEOUTS[step.name] || DEFAULT_STEP_TIMEOUT;
+        if (elapsed > timeout) {
+            store.updateStepStatus(sessionId, step.name, 'stuck', {
+                error: `Step timed out after ${Math.round(elapsed / 1000)}s`
+            });
+            stuckSteps.push(step.name);
+        }
+    }
+
+    return { stuckSteps };
+}
+
+/**
+ * Retry a specific step (resets status to idle and re-runs pipeline).
+ * @param {string} sessionId
+ * @param {string} stepName
+ * @param {object} config
+ * @param {object} context
+ */
+async function retryStep(sessionId, stepName, config, context) {
+    const run = store.getRun(sessionId);
+    if (!run) return { success: false, error: 'No active run' };
+
+    const step = run.steps.find(s => s.name === stepName);
+    if (!step) return { success: false, error: `Step not found: ${stepName}` };
+
+    if (!['error', 'stuck'].includes(step.status)) {
+        return { success: false, error: `Cannot retry step in status: ${step.status}` };
+    }
+
+    // Reset step
+    store.updateStepStatus(sessionId, stepName, 'idle');
+
+    // Resume the run from this step
+    store.updateRunStatus(sessionId, 'running');
+
+    _executePipeline(sessionId, config, context).catch(err => {
+        console.error(`[workflowEngine] Retry error (${sessionId}):`, err.message);
+        store.updateRunStatus(sessionId, 'failed');
+    });
+
+    return { success: true };
+}
+
+/**
+ * Skip a specific step.
+ * @param {string} sessionId
+ * @param {string} stepName
+ */
+function skipStep(sessionId, stepName) {
+    const run = store.getRun(sessionId);
+    if (!run) return { success: false, error: 'No active run' };
+
+    const step = run.steps.find(s => s.name === stepName);
+    if (!step) return { success: false, error: `Step not found: ${stepName}` };
+
+    if (['done'].includes(step.status)) {
+        return { success: false, error: `Cannot skip completed step` };
+    }
+
+    store.updateStepStatus(sessionId, stepName, 'skipped');
+    return { success: true };
 }
 
 module.exports = {
@@ -237,5 +349,10 @@ module.exports = {
     getStatus,
     checkLoginStatus,
     setLoginStatus,
-    checkLoginRequirements
+    checkLoginRequirements,
+    checkStuckSteps,
+    retryStep,
+    skipStep,
+    STEP_TIMEOUTS,
+    DEFAULT_STEP_TIMEOUT
 };

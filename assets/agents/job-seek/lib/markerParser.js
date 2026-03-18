@@ -12,10 +12,15 @@
  *   [ANSWER:field=value]           — onboarding answer extraction (existing)
  */
 
-const VALID_PROFILE_SECTIONS = new Set(['basic', 'skills', 'experience', 'education', 'highlights']);
+const VALID_PROFILE_SECTIONS = new Set([
+    'basic', 'skills', 'experience', 'education', 'highlights',
+    'certifications', 'projects', 'publications', 'languages', 'volunteering', 'summary_templates'
+]);
 const VALID_DIRECTION_FIELDS = new Set(['q_job_title', 'q_location', 'q_work_mode', 'q_salary']);
 
-const MARKER_REGEX = /\[(?:PROFILE_(SET|ADD|REMOVE)|DIRECTION|ANSWER):([^\]=]+)=([^\]]*)\]/g;
+// PROFILE_* markers update the session-tailored profile
+// MASTER_* markers update the master (total) profile directly
+const MARKER_REGEX = /\[(?:(?:PROFILE|MASTER)_(SET|ADD|REMOVE)|DIRECTION|ANSWER):([^\]=]+)=([^\]]*)\]/g;
 const PROFILE_COMPLETE_REGEX = /\[PROFILE_COMPLETE\]/g;
 
 /**
@@ -32,13 +37,14 @@ function parse(text) {
     let match;
     const regex = new RegExp(MARKER_REGEX.source, 'g');
     while ((match = regex.exec(text)) !== null) {
-        const [, profileOp, field, value] = match;
+        const [fullMatch, profileOp, field, value] = match;
         if (profileOp) {
-            // PROFILE_SET / PROFILE_ADD / PROFILE_REMOVE
+            // PROFILE_SET/ADD/REMOVE or MASTER_SET/ADD/REMOVE
             const section = field.trim().toLowerCase();
             if (VALID_PROFILE_SECTIONS.has(section)) {
+                const isMaster = fullMatch.startsWith('[MASTER_');
                 markers.push({
-                    type: 'profile',
+                    type: isMaster ? 'master_profile' : 'profile',
                     op: profileOp.toUpperCase(),
                     field: section,
                     value: value.trim()
@@ -70,7 +76,7 @@ function parse(text) {
 
     // Strip all markers from displayed text
     let cleanText = text
-        .replace(/\[(?:PROFILE_(?:SET|ADD|REMOVE)|DIRECTION|ANSWER):[^\]]*\]/g, '')
+        .replace(/\[(?:(?:PROFILE|MASTER)_(?:SET|ADD|REMOVE)|DIRECTION|ANSWER):[^\]]*\]/g, '')
         .replace(/\[PROFILE_COMPLETE\]/g, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();

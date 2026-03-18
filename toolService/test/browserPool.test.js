@@ -24,7 +24,8 @@ describe('browserPool — buildChromeArgs', () => {
 
     test('builds basic args without proxy', () => {
         const args = buildChromeArgs(baseEnv);
-        expect(args).toContain('--no-sandbox');
+        // --no-sandbox removed to avoid Cloudflare detection
+        expect(args).not.toContain('--no-sandbox');
         expect(args).toContain('--disable-blink-features=AutomationControlled');
         expect(args.some(a => a.includes('--user-agent='))).toBe(true);
         expect(args.some(a => a.includes('--toolbox='))).toBe(true);

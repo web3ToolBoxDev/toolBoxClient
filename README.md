@@ -2,6 +2,38 @@
 
 Step-by-Step Development of Web3 Tools
 
+## v1.2.0 — Job Search AI
+
+### What's New
+
+- **Job Search AI Agent** — Automated job search, AI matching, and document generation
+  - Dashboard with real-time workflow progress, job listings, and document preview
+  - Multi-platform search: Indeed, LinkedIn, Job Bank (with fingerprint browser)
+  - AI-powered match scoring (60-100%), inline resume/cover letter/interview prep generation
+  - 4-tab document modal: Job Description / Resume / Cover Letter / Interview Prep
+  - Search history: URL dedup, pagination (auto page-advance), AI query expansion
+  - Workflow Editor: Search → Generate → Apply pipeline (Apply deferred to v1.3)
+  - Global Settings: min score, target count, max results, user search preferences
+  - Anti-debug tool for sites with debugger traps (e.g., Indeed)
+  - Full i18n: English + Chinese
+- **Platform Management** — Login/Confirm flow with AI verification, search tool build
+- **UI Improvements** — Collapsible profile, vertical workflow editor, Job Type column
+
+### Known Issues (v1.3 priorities)
+
+- [ ] AI call timeout: codex CLI occasionally hangs, blocking pipeline completion
+- [ ] Workflow-level retry: redesign Failed tasks as workflow resume (not per-job retry)
+- [ ] `_selfHealAndRetry` dead code: wire into search execution failure path
+- [ ] Interview Prep "Job Requirements" shows N/A (AI prompt improvement needed)
+- [ ] Profile section renders raw markdown `**bold**`
+- [ ] Search keywords contaminated with markdown from profile data
+- [ ] Anti-debug domain memory not persisted across restarts
+- [ ] Salary field extraction: AI script generates job type instead of salary
+- [ ] Generate Docs bulk button non-functional (redesign as Regenerate Modal)
+- [ ] Duplicate jobs edge case: same job with different URL query params
+
+---
+
 ## English
 
 **Important:** The default MetaMask password is web3toolbox. For customization, please contact Aming.
@@ -364,6 +396,27 @@ If you encounter issues, join the Discord and @Aming: [community link](https://d
 Apache-2.0. See [LICENSE](LICENSE).
 
 ## 中文
+
+### v1.2.0 — 求职 AI 助手
+
+- **AI 求职代理** — 自动搜索职位、AI 匹配评分、一键生成简历/求职信/面试准备
+- **多平台搜索**：Indeed、LinkedIn、Job Bank（配合指纹浏览器）
+- **实时工作流**：搜索 → 匹配 → 生成文档，Dashboard 实时展示进度
+- **4 标签文档预览**：职位描述 / 简历 / 求职信 / 面试准备
+- **搜索记忆**：URL 去重、自动翻页、AI 扩展搜索词
+- **反调试工具**：自动检测并注入 anti-debugger（如 Indeed）
+- **中英文全面支持**
+
+#### v1.3 优先修复项
+
+- AI 调用超时导致 pipeline 卡死
+- 工作流级别重试（替代单任务 retry）
+- 面试准备 Job Requirements 为 N/A
+- Profile 区域 markdown 未渲染
+- 搜索词 markdown 污染
+- 薪资字段提取为 job type
+
+---
 
 **重要说明：** MetaMask 默认密码为 web3toolbox，如需定制请联系 Aming。
 

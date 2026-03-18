@@ -16,9 +16,10 @@ const { spawn } = require('child_process');
 function buildChromeArgs(env, options = {}) {
     const args = [
         '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
+        // NOTE: --no-sandbox removed — Cloudflare detects it and blocks access
         '--disable-infobars',
+        '--no-first-run',
+        '--no-default-browser-check',
         `--user-agent=${env.user_agent}`,
         `--lang=${env.language_js}`
     ];
@@ -35,9 +36,8 @@ function buildChromeArgs(env, options = {}) {
         hardware: env.hardware,
         screen: env.screen,
         clientHint: env.clientHint,
-        languages_js: env.language_js,
-        languages_http: env.language_http,
-        fonts_remove: env.fonts_remove
+        languages_js: (env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
+        languages_http: env.language_http
     };
 
     if (env.useProxy) {

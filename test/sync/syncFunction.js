@@ -112,7 +112,7 @@ function buildFingerprints(env) {
       hardware: env.hardware,
       screen: env.screen,
       clientHint: env.clientHint,
-      languages_js: env.language_js,
+      languages_js: (env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
       languages_http: env.language_http,
       fonts_remove: env.fonts_remove,
       position: env.position,
@@ -128,7 +128,7 @@ function buildFingerprints(env) {
     hardware: env.hardware,
     screen: env.screen,
     clientHint: env.clientHint,
-    languages_js: env.language_js,
+    languages_js: (env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
     languages_http: env.language_http,
     fonts_remove: env.fonts_remove,
   });
@@ -137,8 +137,6 @@ function buildFingerprints(env) {
 function buildLaunchArgs(env, metamaskDir) {
     const args = [
         '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
         '--disable-infobars',
     ];
     if (env && env.user_agent) args.push(`--user-agent=${env.user_agent}`);

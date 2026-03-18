@@ -184,6 +184,13 @@ function AgentWorkspace() {
                 setArtifacts((prev) => ({ ...prev, [sessionId]: [...(prev[sessionId] || []), ...append] }));
                 break;
             }
+            case 'agent_artifact_replace': {
+                const sessionId = info?.data?.sessionId;
+                if (!sessionId) break;
+                const list = Array.isArray(info?.data?.artifacts) ? info.data.artifacts : [];
+                setArtifacts((prev) => ({ ...prev, [sessionId]: list }));
+                break;
+            }
             case 'agent_runtime_log_update': {
                 const sessionId = info?.data?.sessionId;
                 if (!sessionId) break;
@@ -819,34 +826,7 @@ function AgentWorkspace() {
                                     </Button>
                                 </div>
 
-                                <div className="runtime-row runtime-row--execution">
-                                    <Button
-                                        size="sm"
-                                        variant="outline-light"
-                                        onClick={() => handleExecutionControl(activeExecutionState.paused ? 'resume' : 'pause')}
-                                        disabled={!isTaskRunning || !activeSessionId}
-                                    >
-                                        {activeExecutionState.paused
-                                            ? t('agentWorkspace.resume', 'Resume')
-                                            : t('agentWorkspace.pause', 'Pause')}
-                                    </Button>
-                                    <Button
-                                        size="sm"
-                                        variant="outline-light"
-                                        onClick={() => handleExecutionControl('retry')}
-                                        disabled={!isTaskRunning || !activeSessionId}
-                                    >
-                                        {t('agentWorkspace.retry', 'Retry')}
-                                    </Button>
-                                    <Button
-                                        size="sm"
-                                        variant="outline-danger"
-                                        onClick={() => handleExecutionControl('cancel')}
-                                        disabled={!isTaskRunning || !activeSessionId}
-                                    >
-                                        {t('agentWorkspace.cancel', 'Cancel')}
-                                    </Button>
-                                </div>
+                                {/* Pause/Retry/Cancel removed — subtask-level Start/Finish/Restart is sufficient */}
                                 <div className="runtime-row runtime-row--danger">
                                     <Button
                                         size="sm"

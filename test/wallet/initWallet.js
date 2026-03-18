@@ -287,8 +287,6 @@ async function runTask() {
     let metamaskEx = path.resolve(baseExtensionDir, './metamask-chrome-13.2.0');
     let fingerprints = '';
     let args = ['--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
         '--disable-infobars',
         `--user-agent=${taskData.env.user_agent}`,
         `--lang=${taskData.env.language_js}`,
@@ -301,7 +299,7 @@ async function runTask() {
             hardware: taskData.env.hardware,
             screen: taskData.env.screen,
             clientHint: taskData.env.clientHint,
-            languages_js: taskData.env.language_js,
+            languages_js: (taskData.env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
             languages_http: taskData.env.language_http,
             fonts_remove: taskData.env.fonts_remove + ',Tahoma',
             position: taskData.env.position,
@@ -318,7 +316,7 @@ async function runTask() {
             hardware: taskData.env.hardware,
             screen: taskData.env.screen,
             clientHint: taskData.env.clientHint,
-            languages_js: taskData.env.language_js,
+            languages_js: (taskData.env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
             languages_http: taskData.env.language_http,
             fonts_remove: taskData.env.fonts_remove + ',Tahoma'
         });

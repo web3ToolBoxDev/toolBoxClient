@@ -19,6 +19,30 @@ if (fs.existsSync(fpDataPath)) {
 // envData 以 {id: value} 形式存在内存
 const envData = {};
 
+// 迁移旧格式指纹到新格式（audio: float → {seed}, canvas: number/{toDataUrl} → {toDataUrl, seed}）
+function migrateFingerprint(fp) {
+    if (!fp) return false;
+    let changed = false;
+    const randomSeed = () => Math.floor(Math.random() * 99999) + 1;
+
+    // audio: old float → new {seed: N}
+    if (typeof fp.audio === 'number' || fp.audio === undefined || fp.audio === null) {
+        fp.audio = { seed: randomSeed() };
+        changed = true;
+    }
+
+    // canvas: old number or {toDataUrl} without seed → {toDataUrl, seed}
+    if (typeof fp.canvas === 'number' || fp.canvas === undefined || fp.canvas === null) {
+        fp.canvas = { toDataUrl: (Math.random() * 10), seed: randomSeed() };
+        changed = true;
+    } else if (typeof fp.canvas === 'object' && fp.canvas.seed === undefined) {
+        fp.canvas.seed = randomSeed();
+        changed = true;
+    }
+
+    return changed;
+}
+
 // 检查指纹数据库是否可用
 function isFingerPrintDbAvailable() {
     const db = config.getFingerPrintDb();
@@ -37,9 +61,35 @@ function isFingerPrintDbAvailable() {
         const findAsync = util.promisify(db.find).bind(db);
         const fingerprints = await findAsync({});
         if (Array.isArray(fingerprints)) {
-            fingerprints.forEach(fp => {
+            const updateAsync = util.promisify(db.update).bind(db);
+            for (const fp of fingerprints) {
+                const migrated = migrateFingerprint(fp);
+                // 清理脏数据：proxy 已删除但残留运行时代理字段
+                const orphanFields = ['proxyUrl', 'useProxy', 'country', 'position', 'webrtc_public', 'timeZone'];
+                const hasOrphans = !fp.proxy && orphanFields.some(f => fp[f] !== undefined);
+                if (hasOrphans) {
+                    const fieldsToUnset = {};
+                    for (const f of orphanFields) {
+                        if (fp[f] !== undefined) {
+                            fieldsToUnset[f] = true;
+                            delete fp[f];
+                        }
+                    }
+                    try { await updateAsync({ id: fp.id }, { $unset: fieldsToUnset }, {}); } catch (_) {}
+                    console.log(`[envData] Cleaned orphan proxy fields for env ${fp.name || fp.id}`);
+                }
+                // 修复 language_js: 应该是简单 locale (如 "en-CA")，不能含 q-values 或多语言
+                if (fp.language_js && (fp.language_js.includes(';q=') || fp.language_js.includes(','))) {
+                    const simpleLang = fp.language_js.split(',')[0].split(';')[0].trim();
+                    fp.language_js = simpleLang;
+                    try { await updateAsync({ id: fp.id }, { $set: { language_js: simpleLang } }, {}); } catch (_) {}
+                    console.log(`[envData] Fixed language_js for env ${fp.name || fp.id}: → ${simpleLang}`);
+                }
                 envData[fp.id || fp._id] = fp;
-            });
+                if (migrated) {
+                    try { await updateAsync({ id: fp.id }, { $set: { audio: fp.audio, canvas: fp.canvas } }, {}); } catch (_) {}
+                }
+            }
             console.log(`[envData] Loaded ${Object.keys(envData).length} fingerprints into memory.`);
         }
     } catch (e) {
@@ -144,12 +194,12 @@ async function generateRandomFingerPrint(counts) {
             language_js: fpData.languageFingerprintList[languageIndex].jsLanguage,
             language_http: fpData.languageFingerprintList[languageIndex].httpLanguage,
             // screen: fpData.screenFingerprintList[screenIndex],
-            canvas: { toDataUrl: random1() * 10 },
+            canvas: { toDataUrl: random1() * 10, seed: Math.floor(Math.random() * 99999) + 1 },
             hardware: fpData.userdata.hardware || {
                 memory: 8,
                 concurrency: 8
             },
-            audio: random1(),
+            audio: { seed: Math.floor(Math.random() * 99999) + 1 },
             clientRect: random1(),
             fonts_remove: removeFonts.join(','),
             createdAt: Date.now(), // 新增创建时间戳
@@ -186,9 +236,10 @@ async function getFingerPrints() {
             return { success: false, code: 2005, message: 'No fingerprints found' };
         }
         
-        fingerprints.forEach(fp => {
+        for (const fp of fingerprints) {
+            migrateFingerprint(fp);
             envData[fp.id || fp._id] = fp; // 同步到内存
-        });
+        }
         return { success: true, code: 0, data: { ...envData } };
     } catch (error) {
         console.error('Error fetching fingerprints:', error);
@@ -273,6 +324,12 @@ async function getEnvById(id){
     try {
         const fingerprint = await findAsync({ id });
         if (fingerprint) {
+            if (migrateFingerprint(fingerprint)) {
+                try {
+                    const updateAsync2 = util.promisify(db.update).bind(db);
+                    await updateAsync2({ id }, { $set: { audio: fingerprint.audio, canvas: fingerprint.canvas } }, {});
+                } catch (_) {}
+            }
             envData[id] = fingerprint; // 同步到内存
             return { success: true, code: 0, data: fingerprint };
         } else {
@@ -357,7 +414,31 @@ async function deleteFingerPrintProxy(id) {
     delete fingerprint.proxy_port;
     delete fingerprint.proxy_username;
     delete fingerprint.proxy_password;
-    await setEnvById(id, fingerprint);
+    // 清除代理关联的地理位置信息
+    delete fingerprint.position;
+    delete fingerprint.webrtc_public;
+    delete fingerprint.timeZone;
+    // 清除运行时代理字段（taskService 启动代理时写入内存缓存的）
+    delete fingerprint.proxyUrl;
+    delete fingerprint.useProxy;
+    delete fingerprint.country;
+
+    // 用 $unset 从 NeDB 中真正移除字段（$set 不会删除缺失字段）
+    const fieldsToUnset = {
+        proxy_type: true, proxy_ip: true, proxy_port: true,
+        proxy_username: true, proxy_password: true,
+        position: true, webrtc_public: true, timeZone: true,
+        proxyUrl: true, useProxy: true, country: true
+    };
+    if (isFingerPrintDbAvailable()) {
+        const db = config.getFingerPrintDb();
+        const updateAsync = util.promisify(db.update).bind(db);
+        try {
+            await updateAsync({ id }, { $set: { proxy: null }, $unset: fieldsToUnset }, {});
+        } catch (_) {}
+    }
+    // 内存同步
+    envData[id] = fingerprint;
     return { success: true, code: 0, message: 'Proxy info cleared', data: fingerprint };
 }
 

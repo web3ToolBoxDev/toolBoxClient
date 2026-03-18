@@ -270,6 +270,23 @@ router.get('/getChromePath', async (req, res) => {
   const message = config.getChromePath();
   res.send(message);
 });
+
+// ── mini_installer 管理 ──
+router.post('/setInstallerPath', async (req, res) => {
+  const installerPath = req.body.path;
+  const message = config.setInstallerPath(installerPath);
+  res.send(message);
+});
+
+router.get('/getInstallerPath', async (req, res) => {
+  const message = config.getInstallerPath();
+  res.send(message);
+});
+
+router.post('/runInstaller', async (req, res) => {
+  const message = await config.runInstaller();
+  res.send(message);
+});
 // 修改指纹环境名称
 router.post('/updateFingerPrintName', async (req, res) => {
   const { id, name } = req.body;

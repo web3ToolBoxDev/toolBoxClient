@@ -253,8 +253,6 @@ async function runTask() {
     let fingerprints = '';
     let args = [
         '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
         '--disable-infobars',
         `--user-agent=${currentTaskData.env.user_agent}`,
         `--lang=${currentTaskData.env.language_js}`,
@@ -270,14 +268,14 @@ async function runTask() {
             hardware: currentTaskData.env.hardware,
             screen: currentTaskData.env.screen,
             clientHint: currentTaskData.env.clientHint,
-            languages_js: currentTaskData.env.language_js,
+            languages_js: (currentTaskData.env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
             languages_http: currentTaskData.env.language_http,
-            fonts_remove: currentTaskData.env.fonts_remove,
             position: currentTaskData.env.position,
             timeZone: currentTaskData.env.timeZone,
             webrtc_public: currentTaskData.env.webrtc_public,
         });
         args.push(`--proxy-server=${currentTaskData.env.proxyUrl}`);
+        args.push('--disable-ipv6');
     } else {
         fingerprints = JSON.stringify({
             audio: currentTaskData.env.audio,
@@ -287,9 +285,8 @@ async function runTask() {
             hardware: currentTaskData.env.hardware,
             screen: currentTaskData.env.screen,
             clientHint: currentTaskData.env.clientHint,
-            languages_js: currentTaskData.env.language_js,
-            languages_http: currentTaskData.env.language_http,
-            fonts_remove: currentTaskData.env.fonts_remove
+            languages_js: (currentTaskData.env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
+            languages_http: currentTaskData.env.language_http
         });
     }
 

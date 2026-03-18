@@ -2,7 +2,11 @@
 
 /**
  * Pipeline Integration E2E — Real matchProfile + resumeGen + coverLetter,
- * only mocking the network-dependent tools (jobSearch, parseListing).
+ * only mocking the platform workflow layer and parseListing HTTP handler.
+ *
+ * The pipeline now uses platform-based search (scriptBuilder.executeSearchScript)
+ * instead of calling jobSearch handler directly. We mock the workflow layer to
+ * provide fake platforms with ready search tools that return realistic results.
  *
  * Tests the full data flow:
  *   dashboard API → searchPipeline → matchProfile (real) → dashboardServer state → dashboard HTML
@@ -17,19 +21,85 @@
  * 7. Error recovery (search failures don't crash pipeline)
  */
 
+jest.setTimeout(30000);
+
 const http = require('http');
+
+// Realistic job listings with fullText (as the platform search script would return)
+const MOCK_LISTINGS = [
+    {
+        title: 'Senior React Developer', company: 'WebCo', url: 'https://jobs.test/react-dev',
+        location: 'Toronto, ON', salary: '$120K-$150K',
+        fullText: 'Senior React Developer at WebCo. Skills required: React, TypeScript, Redux, GraphQL, CSS-in-JS, Jest. 5+ years frontend experience. Bachelor degree in Computer Science or related field. Strong communication skills, team collaboration.'
+    },
+    {
+        title: 'Java Backend Developer', company: 'EnterpriseCo', url: 'https://jobs.test/java-dev',
+        location: 'Remote', salary: '$110K',
+        fullText: 'Java Backend Developer. Requirements: Java, Spring Boot, Hibernate, PostgreSQL, Docker, Kubernetes, microservices. 3+ years Java development. Bachelor degree. Problem solving skills.'
+    },
+    {
+        title: 'Fullstack Engineer', company: 'StartupX', url: 'https://jobs.test/fullstack',
+        location: 'Vancouver, BC', salary: '$100K-$130K',
+        fullText: 'Fullstack Engineer position. Technical skills: React, Node.js, TypeScript, PostgreSQL, Docker, REST API, GraphQL. 3+ years fullstack development experience. Bachelor degree in CS or equivalent. Team player, good communicator.'
+    },
+    {
+        title: 'DevOps Engineer', company: 'CloudCo', url: 'https://jobs.test/devops',
+        location: 'Toronto', salary: '$115K',
+        fullText: 'DevOps Engineer role. Requirements: Terraform, AWS, Docker, Kubernetes, CI/CD, Linux, Python, Bash. 4+ years DevOps or SRE experience. Bachelor degree. Automation mindset.'
+    },
+    {
+        title: 'Frontend Team Lead', company: 'BigTech', url: 'https://jobs.test/fe-lead',
+        location: 'Remote', salary: '$140K-$170K',
+        fullText: 'Frontend Team Lead. Skills: React, TypeScript, CSS, HTML, team management, code review, mentoring, Git. 5+ years frontend experience, 2+ years leading teams. Bachelor degree or equivalent experience. Leadership, mentoring, communication skills.'
+    }
+];
+
+// ─── Mock workflow layer (platform-based search) ───
+const mockPlatforms = [];
+
+jest.mock('./workflow/platformStore', () => ({
+    getPlatforms: jest.fn(() => mockPlatforms),
+    getPlatform: jest.fn((sid, pid) => mockPlatforms.find(p => p.id === pid) || null),
+    updateToolStatus: jest.fn(),
+    updateConnectionStatus: jest.fn(),
+    addPlatform: jest.fn(),
+    removePlatform: jest.fn(),
+    clearSession: jest.fn(),
+    getPresetsForRegion: jest.fn(() => [])
+}));
+
+const mockExecuteSearchScript = jest.fn(async (sessionId, platformId, params, opts) => {
+    return { success: true, jobs: MOCK_LISTINGS };
+});
+
+jest.mock('./workflow/scriptBuilder', () => ({
+    executeSearchScript: (...args) => mockExecuteSearchScript(...args),
+    buildTool: jest.fn(),
+    healScript: jest.fn()
+}));
+
+jest.mock('./workflow/platformService', () => ({
+    adoptSharedBrowser: jest.fn().mockResolvedValue({ success: false }),
+    launchLogin: jest.fn().mockResolvedValue({ success: false }),
+    verifyLogin: jest.fn().mockResolvedValue({ status: 'logged_in' })
+}));
 
 // Only mock network-dependent tools
 jest.mock('./tools/jobSearch', () => ({
-    handler: jest.fn()
+    handler: jest.fn().mockResolvedValue({ listings: [] })
 }));
-jest.mock('./tools/parseListing', () => ({
-    handler: jest.fn()
-}));
+jest.mock('./tools/parseListing', () => {
+    const real = jest.requireActual('./tools/parseListing');
+    return {
+        handler: jest.fn().mockResolvedValue({
+            title: 'Unknown',
+            sections: { technical: '', experience: '', education: '', soft_skills: '' }
+        }),
+        extractRequirements: real.extractRequirements
+    };
+});
 // matchProfile, resumeGen, coverLetter are NOT mocked — they run for real
 
-const { handler: jobSearchHandler } = require('./tools/jobSearch');
-const { handler: parseListingHandler } = require('./tools/parseListing');
 const dashboardServer = require('./dashboardServer');
 const searchPipeline = require('./searchPipeline');
 
@@ -56,64 +126,6 @@ const STATE = {
     },
     subtasks: { [SID]: [{ key: 'onboarding', status: 'done' }, { key: 'profile', status: 'done' }, { key: 'search', status: 'running' }] },
     intentFiles: { [SID]: { version: 2 } }
-};
-
-// Realistic job listings from "search"
-const MOCK_LISTINGS = [
-    { url: 'https://jobs.test/react-dev', title: 'Senior React Developer', company: 'WebCo', location: 'Toronto, ON', salary: '$120K-$150K' },
-    { url: 'https://jobs.test/java-dev', title: 'Java Backend Developer', company: 'EnterpriseCo', location: 'Remote', salary: '$110K' },
-    { url: 'https://jobs.test/fullstack', title: 'Fullstack Engineer', company: 'StartupX', location: 'Vancouver, BC', salary: '$100K-$130K' },
-    { url: 'https://jobs.test/devops', title: 'DevOps Engineer', company: 'CloudCo', location: 'Toronto', salary: '$115K' },
-    { url: 'https://jobs.test/fe-lead', title: 'Frontend Team Lead', company: 'BigTech', location: 'Remote', salary: '$140K-$170K' }
-];
-
-// Realistic parsed requirements for each listing
-const MOCK_REQUIREMENTS = {
-    'https://jobs.test/react-dev': {
-        title: 'Senior React Developer',
-        sections: {
-            technical: 'React, TypeScript, Redux, GraphQL, CSS-in-JS, Jest, 5+ years frontend experience',
-            experience: '5+ years of professional frontend development experience',
-            education: 'Bachelor degree in Computer Science or related field',
-            soft_skills: 'Strong communication skills, team collaboration'
-        }
-    },
-    'https://jobs.test/java-dev': {
-        title: 'Java Backend Developer',
-        sections: {
-            technical: 'Java, Spring Boot, Hibernate, PostgreSQL, Docker, Kubernetes, microservices',
-            experience: '3+ years Java development',
-            education: 'Bachelor degree',
-            soft_skills: 'Problem solving'
-        }
-    },
-    'https://jobs.test/fullstack': {
-        title: 'Fullstack Engineer',
-        sections: {
-            technical: 'React, Node.js, TypeScript, PostgreSQL, Docker, REST API, GraphQL',
-            experience: '3+ years fullstack development',
-            education: 'Bachelor degree in CS or equivalent',
-            soft_skills: 'Team player, good communicator'
-        }
-    },
-    'https://jobs.test/devops': {
-        title: 'DevOps Engineer',
-        sections: {
-            technical: 'Terraform, AWS, Docker, Kubernetes, CI/CD, Linux, Python, Bash',
-            experience: '4+ years DevOps or SRE',
-            education: 'Bachelor degree',
-            soft_skills: 'Automation mindset'
-        }
-    },
-    'https://jobs.test/fe-lead': {
-        title: 'Frontend Team Lead',
-        sections: {
-            technical: 'React, TypeScript, CSS, HTML, team management, code review, mentoring, Git',
-            experience: '5+ years frontend, 2+ years leading teams',
-            education: 'Bachelor degree or equivalent experience',
-            soft_skills: 'Leadership, mentoring, communication'
-        }
-    }
 };
 
 function fetchJSON(path) {
@@ -161,14 +173,12 @@ function fetchHTML(path) {
 
 describe('Pipeline Integration E2E (real matching)', () => {
     beforeAll((done) => {
-        // Setup mocks for network tools
-        jobSearchHandler.mockResolvedValue({ listings: MOCK_LISTINGS });
-        parseListingHandler.mockImplementation(async ({ url }) => {
-            return MOCK_REQUIREMENTS[url] || {
-                title: 'Unknown',
-                sections: { technical: '', experience: '', education: '', soft_skills: '' }
-            };
-        });
+        // Seed mock platforms with ready search tools matching Toronto sources
+        mockPlatforms.length = 0;
+        mockPlatforms.push(
+            { id: 'plat_indeed', name: 'Indeed', url: 'https://indeed.com/jobs', envId: null, _browserId: 'br_mock', _pageIndex: 0, connectionType: 'browser', tools: { search: { status: 'ready', script: 'mock', version: 1, buildLog: [] }, apply: { status: 'not_built', script: null, version: 0, buildLog: [] } } },
+            { id: 'plat_linkedin', name: 'LinkedIn', url: 'https://linkedin.com/jobs', envId: null, _browserId: 'br_mock', _pageIndex: 0, connectionType: 'browser', tools: { search: { status: 'ready', script: 'mock', version: 1, buildLog: [] }, apply: { status: 'not_built', script: null, version: 0, buildLog: [] } } }
+        );
 
         dashboardServer.start(() => STATE, TEST_PORT);
         setTimeout(done, 300);
@@ -201,7 +211,7 @@ describe('Pipeline Integration E2E (real matching)', () => {
     // ─── 3. Wait for pipeline completion ───
     test('pipeline completes and finds qualified jobs', async () => {
         // Wait for async pipeline to finish
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 2000));
 
         const { body } = await fetchJSON(`/api/pipeline/${SID}/status`);
         expect(body.running).toBe(false);
@@ -235,11 +245,12 @@ describe('Pipeline Integration E2E (real matching)', () => {
     // ─── 5. Pipeline stage counts ───
     test('jobStats shows correct stage distribution', async () => {
         const { body } = await fetchJSON(`/api/dashboard/${SID}`);
-        expect(body.jobStats.total).toBe(5);
-        // Jobs above minScore=50 should be 'matched', others 'discovered'
+        // Only qualified jobs are stored (score >= minScore=50)
+        const totalJobs = body.jobs.length;
+        expect(totalJobs).toBeGreaterThanOrEqual(3);
+        expect(body.jobStats.total).toBe(totalJobs);
+        // All stored jobs should be 'matched' status
         const matchedCount = body.jobStats.matched || 0;
-        const discoveredCount = body.jobStats.discovered || 0;
-        expect(matchedCount + discoveredCount).toBe(5);
         expect(matchedCount).toBeGreaterThanOrEqual(3);
     });
 
@@ -310,30 +321,30 @@ describe('Pipeline Integration E2E (real matching)', () => {
     test('dashboard HTML includes job data in table format', async () => {
         const { status, body } = await fetchHTML(`/dashboard/${SID}`);
         expect(status).toBe(200);
-        expect(body).toContain('Automated Job Search');
-        expect(body).toContain('job-table');
         expect(body).toContain('Application Pipeline');
+        expect(body).toContain('job-table');
         expect(body).toContain('tab-history');
     });
 
     // ─── 12. Error recovery ───
     test('pipeline recovers from search errors gracefully', async () => {
         const errorSid = 'error-recovery-' + Date.now();
-        STATE.selectedAnswers[errorSid] = { q_job_title: 'Error Test' };
+        STATE.selectedAnswers[errorSid] = { q_job_title: 'Error Test', q_location: 'Toronto' };
         STATE.profileSections[errorSid] = { skills: 'Test' };
         STATE.subtasks[errorSid] = [];
         STATE.intentFiles[errorSid] = { version: 1 };
 
-        // Make search fail
-        jobSearchHandler.mockRejectedValueOnce(new Error('Network timeout'));
-        jobSearchHandler.mockResolvedValue({ listings: MOCK_LISTINGS });
+        // Make search fail once, then succeed
+        mockExecuteSearchScript
+            .mockRejectedValueOnce(new Error('Network timeout'))
+            .mockResolvedValue({ success: true, jobs: MOCK_LISTINGS });
 
         const { body } = await postJSON(`/api/pipeline/${errorSid}/start`, {
             minScore: 50, targetCount: 2
         });
         expect(body.running).toBe(true);
 
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 2000));
 
         const { body: status } = await fetchJSON(`/api/pipeline/${errorSid}/status`);
         expect(status.running).toBe(false);
@@ -344,13 +355,13 @@ describe('Pipeline Integration E2E (real matching)', () => {
     // ─── 13. Stop mid-pipeline ───
     test('stop pipeline mid-execution', async () => {
         const stopSid = 'stop-mid-' + Date.now();
-        STATE.selectedAnswers[stopSid] = { q_job_title: 'Stop Test' };
+        STATE.selectedAnswers[stopSid] = { q_job_title: 'Stop Test', q_location: 'Toronto' };
         STATE.profileSections[stopSid] = { skills: 'Test' };
         STATE.subtasks[stopSid] = [];
         STATE.intentFiles[stopSid] = { version: 1 };
 
         // Make search slow
-        jobSearchHandler.mockImplementation(() => new Promise(r => setTimeout(() => r({ listings: MOCK_LISTINGS }), 2000)));
+        mockExecuteSearchScript.mockImplementation(() => new Promise(r => setTimeout(() => r({ success: true, jobs: MOCK_LISTINGS }), 2000)));
 
         await postJSON(`/api/pipeline/${stopSid}/start`, { minScore: 50, targetCount: 10 });
 
@@ -362,17 +373,20 @@ describe('Pipeline Integration E2E (real matching)', () => {
         await new Promise(r => setTimeout(r, 500));
         const { body: status } = await fetchJSON(`/api/pipeline/${stopSid}/status`);
         expect(status.running).toBe(false);
+
+        // Restore default mock behavior
+        mockExecuteSearchScript.mockImplementation(async () => ({ success: true, jobs: MOCK_LISTINGS }));
     });
 
     // ─── 14. Concurrent pipeline prevention ───
     test('cannot start two pipelines for same session', async () => {
         const concSid = 'conc-' + Date.now();
-        STATE.selectedAnswers[concSid] = { q_job_title: 'Concurrent' };
+        STATE.selectedAnswers[concSid] = { q_job_title: 'Concurrent', q_location: 'Toronto' };
         STATE.profileSections[concSid] = { skills: 'React' };
         STATE.subtasks[concSid] = [];
         STATE.intentFiles[concSid] = { version: 1 };
 
-        jobSearchHandler.mockImplementation(() => new Promise(r => setTimeout(() => r({ listings: MOCK_LISTINGS }), 3000)));
+        mockExecuteSearchScript.mockImplementation(() => new Promise(r => setTimeout(() => r({ success: true, jobs: MOCK_LISTINGS }), 3000)));
 
         await postJSON(`/api/pipeline/${concSid}/start`, { minScore: 50 });
 
@@ -381,5 +395,8 @@ describe('Pipeline Integration E2E (real matching)', () => {
 
         // Cleanup
         await postJSON(`/api/pipeline/${concSid}/stop`, {});
+
+        // Restore default mock behavior
+        mockExecuteSearchScript.mockImplementation(async () => ({ success: true, jobs: MOCK_LISTINGS }));
     });
 });

@@ -30,15 +30,29 @@ function getTSC() {
     return _tsc;
 }
 
+// Anti-debug tool (generic utility — detect + inject on demand)
+let _antiDebug = null;
+function getAntiDebug() {
+    if (!_antiDebug) _antiDebug = require('../tools/antiDebug');
+    return _antiDebug;
+}
+
+let _platformService = null;
+function getPlatformService() {
+    if (!_platformService) _platformService = require('./platformService');
+    return _platformService;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 5; // Step 4b (JD verify) is a sub-step, not counted separately
+const JD_VERIFY_MAX_RETRIES = 3;
 
 const DOM_EXTRACT_SELECTOR = 'input, button, select, a[href], form, textarea, [role="search"], [role="listbox"]';
 
-const SEARCH_OUTPUT_SCHEMA = '{ jobs: [{ title, company, url, location, salary, description }] }';
+const SEARCH_OUTPUT_SCHEMA = '{ jobs: [{ title, company, url, location, salary, description, fullText }] }  // salary = compensation/pay (e.g. "$80K-$120K", "CA$90,000/yr"), NOT job type. Leave empty string if no salary shown.';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -86,8 +100,11 @@ function extractCodeBlock(text) {
 /**
  * Execute a tool call via toolServiceClient.
  */
-async function toolCall(name, params) {
-    const res = await getTSC().executeTool(name, params);
+async function toolCall(name, params, timeout) {
+    const tsc = getTSC();
+    const res = timeout
+        ? await tsc.request('POST', '/tools/execute', { name, params }, timeout)
+        : await tsc.executeTool(name, params);
     if (res && res.success === false) {
         throw new Error(`Tool ${name} failed: ${res.error || 'unknown'}`);
     }
@@ -195,16 +212,52 @@ async function buildTool(sessionId, platformId, toolType, options = {}) {
         buildLog.push(logEntry(1, `Loading ${platform.name} (${platform.url})`, 'running'));
         emitProgress(buildLog, onProgress);
 
-        // Reuse the logged-in env browser when available
+        // Reuse the logged-in env browser when available, with fallback if dead
         if (platform._browserId) {
-            browserId = platform._browserId;
-            reusedBrowser = true;
-            console.log(`[dashboard:build] Step 1 — Reusing logged-in browser ${browserId}, opening new tab...`);
-            const newTab = await toolCall('page_new', { browserId, url: platform.url, waitUntil: 'domcontentloaded' });
-            pageIndex = newTab.pageIndex !== undefined ? newTab.pageIndex : 0;
-            console.log(`[dashboard:build] Step 1 — New tab opened, pageIndex=${pageIndex}`);
-        } else {
-            console.log(`[dashboard:build] Step 1 — No _browserId, launching fresh browser...`);
+            console.log(`[dashboard:build] Step 1 — Reusing logged-in browser ${platform._browserId}, opening new tab...`);
+            try {
+                const newTab = await toolCall('page_new', { browserId: platform._browserId, url: platform.url, waitUntil: 'domcontentloaded' });
+                browserId = platform._browserId;
+                reusedBrowser = true;
+                pageIndex = newTab.pageIndex !== undefined ? newTab.pageIndex : 0;
+                console.log(`[dashboard:build] Step 1 — New tab opened, pageIndex=${pageIndex}`);
+            } catch (reuseErr) {
+                console.log(`[dashboard:build] Step 1 — Browser ${platform._browserId} is dead (${reuseErr.message}), falling back to fresh launch`);
+                delete platform._browserId;
+                delete platform._pageIndex;
+                // Fall through to fresh launch below
+            }
+        }
+        if (!browserId) {
+            // Strategy A: adopt a tab in an existing shared browser (same envId)
+            try {
+                const adopted = await getPlatformService().adoptSharedBrowser(sessionId, platformId);
+                if (adopted.success) {
+                    browserId = adopted.browserId;
+                    pageIndex = adopted.pageIndex;
+                    reusedBrowser = true;
+                    console.log(`[dashboard:build] Step 1 — Adopted shared browser ${browserId}, tab ${pageIndex}`);
+                }
+            } catch (_) { /* ignore */ }
+        }
+        if (!browserId && platform.envId) {
+            // Strategy B: auto-launch via launchLogin (preserves fingerprint + cookies)
+            console.log(`[dashboard:build] Step 1 — Auto-launching login browser for "${platform.name}"...`);
+            try {
+                const launchResult = await getPlatformService().launchLogin(sessionId, platformId);
+                if (launchResult.success && launchResult.browserId) {
+                    browserId = launchResult.browserId;
+                    pageIndex = platform._pageIndex || 0;
+                    reusedBrowser = true;
+                    console.log(`[dashboard:build] Step 1 — Login browser launched: ${browserId}`);
+                }
+            } catch (launchErr) {
+                console.log(`[dashboard:build] Step 1 — Login launch failed: ${launchErr.message}`);
+            }
+        }
+        if (!browserId) {
+            // Strategy C: last resort — fresh browser (no cookies, may get blocked)
+            console.log(`[dashboard:build] Step 1 — Last resort: launching fresh browser (no session cookies)...`);
             const launchRes = await toolCall('browser_launch', { envId: platform.envId || undefined });
             browserId = launchRes.browserId;
             const gotoRes = await toolCall('page_goto', { browserId, url: platform.url });
@@ -256,10 +309,18 @@ async function buildTool(sessionId, platformId, toolType, options = {}) {
         const domSummary = buildDomSummary(domData);
         console.log(`[dashboard:build] Step 2 — DOM summary: ${domSummary.length} chars`);
 
-        // Detect anti-bot blocks (Cloudflare, CAPTCHA, access denied) before wasting AI calls
-        const blockDetected = await _detectAntiBot(browserId, pageIndex);
+        // Detect anti-bot blocks (Cloudflare, CAPTCHA, access denied) — wait up to 60s for auto-resolution
+        const abMaxWait = 60000;
+        const abPoll = 3000;
+        const abStart = Date.now();
+        let blockDetected = await _detectAntiBot(browserId, pageIndex);
+        while (blockDetected && Date.now() - abStart < abMaxWait) {
+            console.log(`[dashboard:build] Step 2 — Anti-bot detected: ${blockDetected}. Waiting for resolution...`);
+            await new Promise(r => setTimeout(r, abPoll));
+            blockDetected = await _detectAntiBot(browserId, pageIndex);
+        }
         if (blockDetected) {
-            const msg = `Page blocked by anti-bot protection: ${blockDetected}. Use a fingerprint browser with a logged-in session.`;
+            const msg = `Page blocked by anti-bot protection: ${blockDetected}. Timed out after 60s.`;
             console.log(`[dashboard:build] Step 2 — BLOCKED: ${msg}`);
             buildLog.push(logEntry(2, msg, 'failed', screenshot ? { screenshotUrl: `data:image/png;base64,${screenshot}` } : {}));
             emitProgress(buildLog, onProgress);
@@ -330,6 +391,24 @@ async function buildTool(sessionId, platformId, toolType, options = {}) {
             }
 
             lastError = verifyResult.message;
+
+            // AI failure research: analyze the failure and auto-generate a fix rule
+            if (aiInvoke) {
+                try {
+                    const currentPrompt = buildGeneratePrompt(platform, toolType, '(DOM omitted)', null);
+                    const analysis = await analyzeFailure(platform.name, platform.url, toolType, {
+                        error: verifyResult.message,
+                        script: generatedScript,
+                        screenshot: verifyResult.screenshotUrl || null,
+                        promptRules: currentPrompt
+                    }, { aiInvoke });
+                    if (analysis.rule) {
+                        getPlatformStore().addFixRule(platform.url, toolType, analysis.rule);
+                        buildLog.push(logEntry(4, `AI fix rule: ${analysis.rule}`, 'info'));
+                        console.log(`[dashboard:build] AI generated fix rule: ${analysis.rule}`);
+                    }
+                } catch (_) { /* non-critical */ }
+            }
         }
 
         // Clean up: only close browser if we launched a fresh one (don't kill the shared login browser)
@@ -343,6 +422,53 @@ async function buildTool(sessionId, platformId, toolType, options = {}) {
         }
 
         // ---------------------------------------------------------------
+        // Step 4b — JD Extraction Verification (search scripts only)
+        // Runs the script WITHOUT _verifyMode to confirm fullText extraction works.
+        // Retries up to JD_VERIFY_MAX_RETRIES times. If all fail, saves script
+        // with jdVerified=false so pipeline can fall back to HTTP JD fetch.
+        // ---------------------------------------------------------------
+        let jdVerified = false;
+        if (toolType === 'search') {
+            console.log(`[dashboard:build] Step 4b — Verifying JD extraction (up to ${JD_VERIFY_MAX_RETRIES} attempts)...`);
+            buildLog.push(logEntry(4, 'Verifying JD extraction (Phase 2)', 'running'));
+            emitProgress(buildLog, onProgress);
+
+            for (let jdAttempt = 1; jdAttempt <= JD_VERIFY_MAX_RETRIES; jdAttempt++) {
+                console.log(`[dashboard:build] Step 4b — JD verify attempt ${jdAttempt}/${JD_VERIFY_MAX_RETRIES}`);
+                const jdResult = await verifyJDExtraction(browserId, pageIndex, generatedScript, testParams);
+                console.log(`[dashboard:build] Step 4b — JD verify result: ok=${jdResult.ok} | ${jdResult.message}`);
+
+                if (jdResult.ok) {
+                    jdVerified = true;
+                    buildLog.push(logEntry(4, jdResult.message, 'success'));
+                    emitProgress(buildLog, onProgress);
+                    break;
+                }
+
+                buildLog.push(logEntry(4, `JD verify attempt ${jdAttempt} failed: ${jdResult.message}`, 'failed'));
+                emitProgress(buildLog, onProgress);
+
+                // Navigate back to search page before retry (JD click may have navigated away)
+                if (jdAttempt < JD_VERIFY_MAX_RETRIES) {
+                    try {
+                        const platformUrl = platform.url || '';
+                        if (platformUrl) {
+                            console.log(`[dashboard:build] Step 4b — Navigating back to ${platformUrl} before retry...`);
+                            await toolCall('page_navigate', { browserId, pageIndex, url: platformUrl });
+                            await new Promise(r => setTimeout(r, 3000));
+                        }
+                    } catch (_) { /* ignore navigation error */ }
+                }
+            }
+
+            if (!jdVerified) {
+                console.log(`[dashboard:build] Step 4b — JD extraction failed after ${JD_VERIFY_MAX_RETRIES} attempts. Saving script with jdVerified=false (fallback to HTTP fetch).`);
+                buildLog.push(logEntry(4, `JD extraction verify failed after ${JD_VERIFY_MAX_RETRIES} attempts — script saved with HTTP fallback`, 'warning'));
+                emitProgress(buildLog, onProgress);
+            }
+        }
+
+        // ---------------------------------------------------------------
         // Step 5 — Store
         // ---------------------------------------------------------------
         buildLog.push(logEntry(5, 'Saving script', 'running'));
@@ -350,13 +476,17 @@ async function buildTool(sessionId, platformId, toolType, options = {}) {
 
         store.updateToolStatus(sessionId, platformId, toolType, 'ready', {
             script: generatedScript,
+            jdVerified,
             buildLog
         });
 
-        buildLog.push(logEntry(5, 'Script saved — tool is ready', 'success'));
+        const saveMsg = jdVerified || toolType !== 'search'
+            ? 'Script saved — tool is ready (JD extraction verified)'
+            : 'Script saved — tool is ready (JD extraction unverified, will use HTTP fallback)';
+        buildLog.push(logEntry(5, saveMsg, 'success'));
         emitProgress(buildLog, onProgress);
 
-        return { success: true, script: generatedScript, buildLog };
+        return { success: true, script: generatedScript, jdVerified, buildLog };
     } catch (err) {
         // Ensure browser is closed on unexpected errors (only if we launched a fresh one)
         if (browserId && !reusedBrowser) {
@@ -373,7 +503,7 @@ async function buildTool(sessionId, platformId, toolType, options = {}) {
 
 function buildGeneratePrompt(platform, toolType, domSummary, previousError) {
     const typeDesc = toolType === 'search'
-        ? `a SEARCH script that accepts { keywords, location, jobType, minSalary } and returns ${SEARCH_OUTPUT_SCHEMA}`
+        ? `a SEARCH script that accepts { keywords, location, jobType, minSalary, maxResults } and returns ${SEARCH_OUTPUT_SCHEMA}`
         : 'an APPLY script that fills out a job application form given { resumeText, coverLetterText, jobUrl }';
 
     let prompt = `You are an expert Puppeteer script writer.
@@ -388,11 +518,14 @@ The script will be executed inside an async function body that receives:
   - params: the input parameters object
 
 IMPORTANT — Available page methods (ONLY use these):
+
+  Basic:
   page.goto(url)                     — navigate to a URL
-  page.click(selector)               — click an element by CSS selector
-  page.type(selector, text, {delay}) — type text into an input
+  page.click(selector)               — click an element (use humanClick instead when possible)
+  page.type(selector, text, {delay}) — type text (use humanType instead when possible)
   page.focus(selector)               — focus an element
-  page.keyboard.press(key)           — press a key ("Enter", "Tab", "Escape", etc.)
+  page.keyboard.press(key)           — press a SINGLE key ("Enter", "Tab", "Escape", "Backspace", etc.)
+                                        WARNING: Does NOT support modifier combos like "Control+a" — only single key names.
   page.waitForSelector(selector, {timeout, visible}) — wait for element to appear
   page.waitForNavigation({timeout})  — wait for page navigation
   page.waitForTimeout(ms)            — wait for N milliseconds
@@ -400,18 +533,118 @@ IMPORTANT — Available page methods (ONLY use these):
   page.$eval(selector, fn, ...args)  — run JS on first matching element
   page.$$eval(selector, fn, ...args) — run JS on all matching elements
   page.$(selector)                   — check if element exists (returns selector string or null)
-  page.$$(selector)                  — get array of matching elements (array of placeholder objects with .length)
+  page.$$(selector)                  — get array of matching elements
   page.screenshot()                  — take a screenshot (returns base64)
   page.url()                         — get current page URL
   page.title()                       — get page title
 
+  Human-like (PREFERRED for anti-detection):
+  page.humanClick(selector)          — mouse moves to element with Bezier curve, then clicks
+  page.humanType(selector, text)     — click, AUTOMATICALLY CLEARS existing text via triple-click+Backspace, then types with 80-220ms random delay.
+                                        Use this to replace input values — do NOT manually select/clear text with keyboard combos.
+  page.randomDelay(min, max)         — wait random ms between min and max
+  page.mouse.move(x, y, {steps})     — move mouse along curved path to coordinates
+  page.checkAntiBot({maxWait})       — detect Cloudflare/CAPTCHA, wait up to maxWait ms for resolution
+
 Return ONLY a JavaScript code block (no imports, no browser creation). The code must:
 1. Use \`page\` and \`params\` (do NOT require/import anything).
 2. Use page.waitForSelector() with 5-10s timeouts before interacting with elements.
-3. For search: fill the search form with params.keywords, submit, wait for results, extract job cards using page.$$eval(), return the results array.
+3. For search: navigate to the search results page (prefer URL-based approach — see Rule 10), wait for results,
+   extract job cards using page.$$eval(), return the results array. Only fill the search form manually if URL-based
+   navigation is not possible for this platform.
 4. For apply: navigate to the job URL, fill form fields, submit.
 5. Wrap everything in try/catch and return { success: true, jobs: [...] } or { success: false, error: '...' }.
 6. Use page.evaluate() or page.$$eval() to extract data from the DOM — do NOT use page_extract directly.
+7. ANTI-DETECTION: Use page.humanClick() and page.humanType() instead of page.click()/page.type().
+   Add page.randomDelay(800, 2000) between major actions. Call page.checkAntiBot() after navigation.
+   NEVER use page.evaluate() to set input .value directly — always use page.humanType().
+   NEVER use keyboard modifier combos like "Control+a", "Shift+Tab", "Meta+a" — they are NOT supported.
+   To clear an input field before typing, just use page.humanType(selector, newText) — it clears automatically.
+8. URL EXTRACTION — CRITICAL:
+   When extracting job URLs from link elements, ALWAYS prefer the actual link.href over reconstructing from element IDs.
+   - Use the real href from the <a> tag directly. If the href contains tracking parameters and you want a clean
+     canonical URL, use new URL(href, baseUrl) to parse it — but KEEP the original href as fallback.
+   - NEVER override a valid href with a URL reconstructed from element id or data attributes — id formats vary
+     across sites and produce invalid URLs (404 errors).
+   - For relative URLs, resolve them against the platform base URL.
+9. LAZY-LOADED LISTS — SCROLL BEFORE EXTRACTION:
+   Many job sites lazy-load results (only 7-10 visible initially). Before Phase 1 extraction:
+   - Scroll the job list container (or window) multiple times (up to 5 scrolls) to trigger loading more cards.
+   - After each scroll, wait 1.5-2.5s, then check if new cards appeared (compare card count before/after).
+   - Stop scrolling when no new cards load or when card count reaches params.maxResults (default 30).
+   - The params.maxResults value tells you how many results the pipeline wants — respect it.
+10. SEARCH NAVIGATION — URL-FIRST APPROACH + PAGINATION:
+   PREFERRED: Build the full search URL with keywords, location, and pagination as query parameters,
+   then use page.goto(searchUrl) to navigate directly. This is more reliable than filling forms.
+   IMPORTANT: ALWAYS include &location= in the URL, even if params.location is empty — pass an empty
+   string (&location=). This overrides stale cookie-based locations. Without this, the site may silently
+   filter by a previously-used city.
+   Example: /jobs/search/?keywords=Fullstack&location=Toronto&start=25
+   Example (no location): /jobs/search/?keywords=Fullstack&location=&start=0
+   Do NOT also type into the search form after URL-based navigation — the URL already carries the search intent.
+
+   params.pageOffset (integer, 0 = first page) tells the script which page of results to start from.
+   If pageOffset > 0:
+
+   Strategy A (URL-based — PREFERRED): Build the search URL with pagination offset appended
+   (e.g. Indeed &start=10, LinkedIn &start=25, Job Bank &page=2).
+   offset = pageOffset * resultsPerPage (typically 10-25 depending on site).
+
+   Strategy B (Click-based — fallback): If the platform does NOT support URL-based search:
+   - Fill the search form, submit, wait for results
+   - Then click the "Next page" button pageOffset times
+   - Add randomDelay(1500, 3000) between each page navigation
+   - Wait for new results to load before proceeding to extraction
+
+   If pageOffset is 0 (default), start from the first page as normal.
+
+11. ZERO RESULTS DETECTION & LOCATION RECOVERY:
+   CRITICAL: After navigating to the search URL, do NOT blindly waitForSelector on job cards.
+   Instead, wait for EITHER job cards OR "no results" indicators (whichever comes first):
+   a. Use Promise.race or a polling loop to detect EITHER:
+      - Job card selectors (e.g. a[href*="/jobs/view/"], .job-card-container)
+      - "No results" indicators (text containing "No results", "0 results", "No matching jobs",
+        or an empty state illustration/container)
+   b. If "no results" or 0 results detected:
+      1. Take a screenshot
+      2. Check for stale location filter pills (e.g. "Sudbury, ON", a city name with an X button,
+         or a location dropdown showing an unexpected value)
+      3. If a stale location pill/filter is found: click the "X" or clear the location input using
+         page.humanType(locationSelector, params.location || ''), then press Enter to re-search
+      4. Wait for results again (repeat step a)
+      5. If still no results after clearing location, return { success: true, jobs: [] } — NOT an error
+   c. If results ARE found (job cards visible): proceed to extraction normally.
+   d. NEVER let the script timeout waiting for job cards that will never appear. Always handle
+      the "0 results" case gracefully.
+
+12. LOCATION FIELD — ALWAYS INCLUDE IN URL:
+   Job sites (especially LinkedIn) remember the last search location from previous sessions via cookies.
+   This can silently limit results to an unintended city (e.g. a small town with few jobs).
+   PRIMARY defense: Always include location in the URL (see Rule 10).
+   SECONDARY defense: After results load, if the displayed location filter/pill shows a different
+   location than expected, clear it and re-search (see Rule 11b).
+   When using form-based navigation (Rule 10, Strategy B):
+   a. If params.location is provided: find the location input, CLEAR it completely using
+      page.humanType(locationSelector, params.location), then wait for the autocomplete dropdown
+      and select the first suggestion (or press Enter).
+   b. If params.location is empty/blank: find the location input and CLEAR it completely.
+      Some sites have a "Remote" or "Anywhere" option — prefer that if available.
+
+13. PHASE 2 — JD Detail Extraction (search scripts ONLY):
+   After extracting the job cards list (Phase 1), add a Phase 2 loop that iterates each job:
+   a. IMPORTANT: Check params._verifyMode at the top of Phase 2. If truthy, SKIP the entire Phase 2 loop
+      (just set each job.fullText = '' and continue). This makes verification fast.
+      Example: if (params._verifyMode) { jobs.forEach(j => j.fullText = ''); } else { /* Phase 2 loop */ }
+   b. humanClick the job card title/link to open its details in the split-pane or detail panel.
+   c. randomDelay(1500, 3000) to wait for the detail panel to load.
+   d. Use page.evaluate() to extract the FULL job description text from the detail panel.
+      Discover the correct selectors from the DOM structure provided below — do NOT hardcode
+      selectors from other platforms. Look for the largest text block in the detail area.
+   e. Store the extracted text as job.fullText (string).
+   f. Wrap each iteration in try/catch — if detail extraction fails, set fullText to '' and continue.
+   g. The final output for each job: { title, company, url, location, salary, description (snippet), fullText (complete JD) }.
+      IMPORTANT: salary must be the compensation/pay range (e.g. "$80K-$120K", "CA$90,000/yr").
+      Do NOT put job type (Full-time, Part-time, Contract) in salary — leave salary as empty string if not shown.
 
 DOM structure of the page:
 ${domSummary}
@@ -419,6 +652,15 @@ ${domSummary}
 
     if (previousError) {
         prompt += `\n\nPREVIOUS ATTEMPT FAILED with: ${previousError}\nPlease fix the issues and generate a corrected script.\n`;
+    }
+
+    // Inject platform-specific fix rules learned from past failures via AI analysis
+    const fixRules = getPlatformStore().getFixRules(platform.url, toolType);
+    if (fixRules && fixRules.length > 0) {
+        prompt += '\n\nPLATFORM-SPECIFIC FIX RULES (learned from previous failures — MUST follow):\n';
+        fixRules.forEach((rule, i) => {
+            prompt += `${i + 1}. ${rule}\n`;
+        });
     }
 
     return prompt;
@@ -434,7 +676,7 @@ async function verifyScript(browserId, pageIndex, script, toolType, testParams, 
         const location = testParams.location || '';
 
         const execParams = toolType === 'search'
-            ? { keywords, location, jobType: '', minSalary: '' }
+            ? { keywords, location, jobType: '', minSalary: '', _verifyMode: true }
             : { jobUrl: 'https://example.com/job/1', resumeText: 'Test resume', coverLetterText: '' };
 
         console.log(`[dashboard:build] verify — Executing script via pageProxy with params: ${JSON.stringify(execParams)}`);
@@ -443,10 +685,11 @@ async function verifyScript(browserId, pageIndex, script, toolType, testParams, 
         const pageProxy = buildPageProxy(browserId, pageIndex);
         const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
         let scriptError = null;
+        let scriptResult = null;
         try {
             const scriptFn = new AsyncFunction('page', 'params', script);
             const t0 = Date.now();
-            await scriptFn(pageProxy, execParams);
+            scriptResult = await scriptFn(pageProxy, execParams);
             console.log(`[dashboard:build] verify — Script execution completed in ${Date.now() - t0}ms`);
         } catch (err) {
             scriptError = err.message;
@@ -474,6 +717,20 @@ async function verifyScript(browserId, pageIndex, script, toolType, testParams, 
             };
         }
 
+        // Check script returned valid job data (Phase 1 data check)
+        if (toolType === 'search' && scriptResult) {
+            const jobs = scriptResult.jobs || (scriptResult.success ? scriptResult.jobs : null);
+            if (!jobs || !Array.isArray(jobs) || jobs.length === 0) {
+                console.log(`[dashboard:build] verify — Script returned no jobs (result keys: ${Object.keys(scriptResult || {}).join(',')})`);
+                return {
+                    ok: false,
+                    message: 'Script returned no job results — expected { jobs: [...] }',
+                    screenshotUrl
+                };
+            }
+            console.log(`[dashboard:build] verify — Script returned ${jobs.length} jobs (Phase 1 data OK)`);
+        }
+
         // Ask AI to verify the post-execution screenshot
         const verifyPrompt = toolType === 'search'
             ? `Look at this screenshot of a job search page. Does it show job search results or a properly filled search form with results? Answer YES or NO and explain briefly.`
@@ -496,6 +753,80 @@ async function verifyScript(browserId, pageIndex, script, toolType, testParams, 
             message: `Verification error: ${err.message}`,
             screenshotUrl: null
         };
+    }
+}
+
+/**
+ * Step 4b — Verify JD extraction (Phase 2) by running the script without _verifyMode
+ * on a single job. Returns { ok, message, jobCount, fullTextLen }.
+ */
+async function verifyJDExtraction(browserId, pageIndex, script, testParams) {
+    const JD_VERIFY_TIMEOUT = 120000; // 2 min max for JD extraction of 1 job
+    try {
+        const keywords = testParams.keywords || 'software engineer';
+        const location = testParams.location || '';
+        const execParams = { keywords, location, jobType: '', minSalary: '', _verifyMode: false };
+
+        console.log(`[dashboard:build] verify-jd — Running script with _verifyMode=false to test JD extraction...`);
+        const pageProxy = buildPageProxy(browserId, pageIndex);
+        const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+        const scriptFn = new AsyncFunction('page', 'params', script);
+
+        const t0 = Date.now();
+        let result;
+        try {
+            result = await Promise.race([
+                scriptFn(pageProxy, execParams),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), JD_VERIFY_TIMEOUT))
+            ]);
+        } catch (jdErr) {
+            if ((jdErr.message || '').includes('timeout')) {
+                // Timeout → detect & inject anti-debug, then retry once
+                console.log('[dashboard:build] verify-jd — timed out, checking for debug traps...');
+                const ad = await getAntiDebug().ensureAntiDebug(browserId, pageIndex);
+                if (ad.detected && ad.injected) {
+                    console.log(`[dashboard:build] verify-jd — debug traps neutralized [${ad.details.join(',')}], retrying...`);
+                    try { await toolCall('page_screenshot', { browserId, pageIndex }); } catch (_) {}
+                    result = await Promise.race([
+                        scriptFn(pageProxy, execParams),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('JD extraction timed out after anti-debug retry')), JD_VERIFY_TIMEOUT))
+                    ]);
+                } else {
+                    throw new Error('JD extraction timed out after 2 minutes');
+                }
+            } else {
+                throw jdErr;
+            }
+        }
+        const elapsed = Date.now() - t0;
+
+        if (!result || !result.jobs || !Array.isArray(result.jobs) || result.jobs.length === 0) {
+            return { ok: false, message: `JD verify: script returned no jobs (${elapsed}ms)`, jobCount: 0, fullTextLen: 0 };
+        }
+
+        // Check if at least 1 job has non-empty fullText
+        const withJD = result.jobs.filter(j => j.fullText && j.fullText.length > 50);
+        const bestLen = Math.max(0, ...result.jobs.map(j => (j.fullText || '').length));
+        console.log(`[dashboard:build] verify-jd — ${result.jobs.length} jobs, ${withJD.length} with fullText (best: ${bestLen} chars, ${elapsed}ms)`);
+
+        if (withJD.length === 0) {
+            return {
+                ok: false,
+                message: `JD verify: ${result.jobs.length} jobs found but none have fullText (best: ${bestLen} chars, ${elapsed}ms)`,
+                jobCount: result.jobs.length,
+                fullTextLen: bestLen
+            };
+        }
+
+        return {
+            ok: true,
+            message: `JD verify OK: ${withJD.length}/${result.jobs.length} jobs have fullText (best: ${bestLen} chars, ${elapsed}ms)`,
+            jobCount: result.jobs.length,
+            fullTextLen: bestLen
+        };
+    } catch (err) {
+        console.error(`[dashboard:build] verify-jd — EXCEPTION: ${err.message}`);
+        return { ok: false, message: `JD verify error: ${err.message}`, jobCount: 0, fullTextLen: 0 };
     }
 }
 
@@ -527,13 +858,30 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
     let reusedBrowser = false;
     try {
         let pageIndex;
-        // Reuse the logged-in env browser when available
+        // Reuse the logged-in env browser when available, with fallback if dead
         if (platform._browserId) {
-            browserId = platform._browserId;
-            reusedBrowser = true;
-            const newTab = await toolCall('page_new', { browserId, url: platform.url, waitUntil: 'domcontentloaded' });
-            pageIndex = newTab.pageIndex !== undefined ? newTab.pageIndex : 0;
-        } else {
+            try {
+                // Navigate on the existing login tab instead of opening a new tab.
+                // page_new triggers Cloudflare blocks on some sites; page_goto on an
+                // already-trusted tab preserves the session cookie context.
+                browserId = platform._browserId;
+                pageIndex = platform._pageIndex || 0;
+                reusedBrowser = true;
+                // Bring tab to front before navigating — background tabs may be throttled/frozen
+                try {
+                    await toolCall('page_evaluate', { browserId, pageIndex, expression: 'window.focus()' });
+                } catch (_) { /* best-effort: page_evaluate may fail on some pages */ }
+                await toolCall('page_goto', { browserId, pageIndex, url: platform.url, waitUntil: 'domcontentloaded' });
+                console.log(`[search:exec] Navigated existing tab (pageIndex=${pageIndex}) to ${platform.url}`);
+            } catch (err) {
+                console.log(`[search:exec] Browser ${platform._browserId} is dead (${err.message}), falling back to fresh launch`);
+                browserId = null;
+                reusedBrowser = false;
+                delete platform._browserId;
+                delete platform._pageIndex;
+            }
+        }
+        if (!browserId) {
             const launchRes = await toolCall('browser_launch', { envId: options.envId || platform.envId || undefined });
             browserId = launchRes.browserId;
             const gotoRes = await toolCall('page_goto', { browserId, url: platform.url });
@@ -543,28 +891,94 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
         // Wait for dynamic content to render
         await new Promise(r => setTimeout(r, 3000));
 
-        // Build execution context — we create an AsyncFunction that receives `page` helpers and `params`
-        // The script expects `page` (Puppeteer-like) and `params`. We bridge via toolServiceClient calls.
-        const pageProxy = buildPageProxy(browserId, pageIndex);
+        // Check for anti-bot before running script
+        const blocked = await _detectAntiBot(browserId, pageIndex);
+        if (blocked) {
+            console.log(`[search:exec] Anti-bot detected before script: ${blocked}. Waiting up to 45s...`);
+            let resolved = false;
+            for (let i = 0; i < 15; i++) {
+                await new Promise(r => setTimeout(r, 3000));
+                const still = await _detectAntiBot(browserId, pageIndex);
+                if (!still) { resolved = true; break; }
+            }
+            if (!resolved) {
+                if (!reusedBrowser) {
+                    try { await toolCall('browser_close', { browserId }); } catch (_) {}
+                }
+                return { success: false, jobs: [], error: `Blocked by anti-bot: ${blocked}` };
+            }
+            console.log('[search:exec] Anti-bot cleared, proceeding with script.');
+        }
+
+        // Activate the tab before running the script — background tabs may be throttled/frozen
+        // page_screenshot forces the browser to render the tab, effectively bringing it to front
+        try {
+            await toolCall('page_screenshot', { browserId, pageIndex });
+            console.log(`[search:exec] Tab ${pageIndex} activated via screenshot`);
+        } catch (_) { /* best-effort */ }
+
+        // Build execution context
+        const pageProxy = buildPageProxy(browserId, pageIndex, platform.url);
         const params = {
             keywords: searchParams.keywords || '',
             location: searchParams.location || '',
             jobType: searchParams.jobType || '',
-            minSalary: searchParams.minSalary || ''
+            minSalary: searchParams.minSalary || '',
+            pageOffset: searchParams.pageOffset || 0,
+            maxResults: options.maxResults || 30
         };
 
-        // Execute the stored script in a sandboxed async function
+        // Execute the stored script (with smart anti-debug retry on timeout)
+        const EXEC_TIMEOUT = 180000; // 3 minutes max
         const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
         const scriptFn = new AsyncFunction('page', 'params', tool.script);
-        const result = await scriptFn(pageProxy, params);
+        let result;
+        try {
+            result = await Promise.race([
+                scriptFn(pageProxy, params),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), EXEC_TIMEOUT))
+            ]);
+        } catch (execErr) {
+            const isTimeout = (execErr.message || '').includes('timeout');
+            if (isTimeout) {
+                // Timeout → likely debugger trap. Detect + inject + retry once.
+                console.log('[search:exec] Script timed out — checking for debug traps...');
+                const ad = await getAntiDebug().ensureAntiDebug(browserId, pageIndex, platform.url);
+                if (ad.detected) {
+                    console.log(`[search:exec] Debug traps found [${ad.details.join(',')}] — retrying script...`);
+                    try {
+                        await toolCall('page_screenshot', { browserId, pageIndex }); // re-activate tab
+                    } catch (_) {}
+                    result = await Promise.race([
+                        scriptFn(pageProxy, params),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error(`Search script timed out after anti-debug retry (${EXEC_TIMEOUT / 1000}s)`)), EXEC_TIMEOUT))
+                    ]);
+                } else {
+                    throw new Error(`Search script execution timed out after ${EXEC_TIMEOUT / 1000}s (no debug traps detected)`);
+                }
+            } else {
+                throw execErr;
+            }
+        }
+
+        if (result && result.success === false) {
+            // Capture failure screenshot before closing browser (for AI failure analysis)
+            let failScreenshot = null;
+            try {
+                const ssRes = await toolCall('page_screenshot', { browserId, pageIndex });
+                failScreenshot = ssRes.base64 || ssRes.screenshot || null;
+            } catch (_) { /* best-effort */ }
+
+            // Only close browser if we launched a fresh one
+            if (!reusedBrowser) {
+                try { await toolCall('browser_close', { browserId }); } catch (_) { /* ignore */ }
+            }
+            return { success: false, jobs: [], error: result.error || 'Script execution failed', failScreenshot };
+        }
 
         // Only close browser if we launched a fresh one
         if (!reusedBrowser) {
             try { await toolCall('browser_close', { browserId }); } catch (_) { /* ignore */ }
-        }
-
-        if (result && result.success === false) {
-            return { success: false, jobs: [], error: result.error || 'Script execution failed' };
         }
 
         let jobs = [];
@@ -581,10 +995,19 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
 
         return { success: true, jobs };
     } catch (err) {
+        // Capture failure screenshot before closing browser
+        let failScreenshot = null;
+        try {
+            if (browserId) {
+                const ssRes = await toolCall('page_screenshot', { browserId, pageIndex });
+                failScreenshot = ssRes.base64 || ssRes.screenshot || null;
+            }
+        } catch (_) { /* best-effort */ }
+
         if (browserId && !reusedBrowser) {
             try { await toolCall('browser_close', { browserId }); } catch (_) { /* ignore */ }
         }
-        return { success: false, jobs: [], error: err.message };
+        return { success: false, jobs: [], error: err.message, failScreenshot };
     }
 }
 
@@ -603,11 +1026,49 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
  *   page_wait_for_selector    — wait for a CSS selector
  *   page_wait_for_navigation  — wait for navigation event
  */
-function buildPageProxy(browserId, pageIndex) {
+function buildPageProxy(browserId, pageIndex, platformUrl) {
+    // Longer timeout for page proxy tool calls (Phase 2 JD extraction can be slow)
+    // 120s per tool call — Indeed anti-bot checks + JD extraction can exceed 60s
+    const BASE_TIMEOUT = 120000;
+
+    // Pre-inject anti-debug for known trap domains (fast path — no detection needed)
+    if (platformUrl) {
+        getAntiDebug().preInjectIfKnown(browserId, pageIndex, platformUrl).catch(() => {});
+    }
+
+    // Retry-with-activation wrapper: if a tool call times out:
+    //   1st timeout → activate tab + retry
+    //   2nd timeout → ensureAntiDebug + activate tab + final retry
+    let _antiDebugApplied = false;
+    const tc = async (name, params) => {
+        try {
+            return await toolCall(name, params, BASE_TIMEOUT);
+        } catch (err) {
+            const msg = (err && err.message) || '';
+            if (!msg.includes('timed out')) throw err;
+
+            // 1st retry: activate tab
+            console.log(`[pageProxy] ${name} timed out — activating tab ${pageIndex} and retrying...`);
+            try { await toolCall('page_screenshot', { browserId, pageIndex }, 30000); } catch (_) {}
+            try {
+                return await toolCall(name, params, BASE_TIMEOUT);
+            } catch (err2) {
+                const msg2 = (err2 && err2.message) || '';
+                if (!msg2.includes('timed out') || _antiDebugApplied) throw err2;
+
+                // 2nd retry: anti-debug + activate tab (last chance)
+                console.log(`[pageProxy] ${name} timed out again — applying anti-debug and final retry...`);
+                _antiDebugApplied = true;
+                try { await getAntiDebug().ensureAntiDebug(browserId, pageIndex, platformUrl); } catch (_) {}
+                try { await toolCall('page_screenshot', { browserId, pageIndex }, 30000); } catch (_) {}
+                return toolCall(name, params, BASE_TIMEOUT);
+            }
+        }
+    };
     const proxy = {
         // -- Navigation --
         async goto(url, opts) {
-            return toolCall('page_goto', { browserId, url, pageIndex });
+            return tc('page_goto', { browserId, url, pageIndex });
         },
 
         // -- Waiting --
@@ -615,7 +1076,7 @@ function buildPageProxy(browserId, pageIndex) {
             const timeout = (opts && opts.timeout) || 8000;
             const visible = opts && opts.visible;
             try {
-                await toolCall('page_wait_for_selector', { browserId, pageIndex, selector, timeout, visible: !!visible });
+                await tc('page_wait_for_selector', { browserId, pageIndex, selector, timeout, visible: !!visible });
                 return true;
             } catch (err) {
                 throw new Error(`waitForSelector timed out: ${selector}`);
@@ -625,7 +1086,7 @@ function buildPageProxy(browserId, pageIndex) {
             const timeout = (opts && opts.timeout) || 10000;
             const waitUntil = (opts && opts.waitUntil) || 'domcontentloaded';
             try {
-                await toolCall('page_wait_for_navigation', { browserId, pageIndex, waitUntil, timeout });
+                await tc('page_wait_for_navigation', { browserId, pageIndex, waitUntil, timeout });
             } catch (_) {
                 // Fallback: simple wait if navigation detection fails
                 await new Promise(r => setTimeout(r, 2000));
@@ -637,14 +1098,14 @@ function buildPageProxy(browserId, pageIndex) {
 
         // -- Interaction --
         async click(selector) {
-            return toolCall('page_click', { browserId, selector, pageIndex });
+            return tc('page_click', { browserId, selector, pageIndex });
         },
         async type(selector, text, opts) {
             const delay = opts && opts.delay;
-            return toolCall('page_type', { browserId, selector, text, delay, pageIndex });
+            return tc('page_type', { browserId, selector, text, delay, pageIndex });
         },
         async focus(selector) {
-            return toolCall('page_evaluate', {
+            return tc('page_evaluate', {
                 browserId, pageIndex,
                 expression: `document.querySelector('${selector.replace(/'/g, "\\'")}')?.focus()`
             });
@@ -653,11 +1114,11 @@ function buildPageProxy(browserId, pageIndex) {
         // -- Keyboard --
         keyboard: {
             async press(key) {
-                return toolCall('page_keyboard', { browserId, key, pageIndex });
+                return tc('page_keyboard', { browserId, key, pageIndex });
             },
             async type(text) {
                 // Type text one character at a time via page_type on active element
-                return toolCall('page_evaluate', {
+                return tc('page_evaluate', {
                     browserId, pageIndex,
                     expression: `void 0` // placeholder — actual typing uses page_type
                 });
@@ -667,7 +1128,7 @@ function buildPageProxy(browserId, pageIndex) {
         // -- Query --
         async $(selector) {
             try {
-                const res = await toolCall('page_evaluate', {
+                const res = await tc('page_evaluate', {
                     browserId, pageIndex,
                     expression: `!!document.querySelector('${selector.replace(/'/g, "\\'")}')`
                 });
@@ -678,7 +1139,7 @@ function buildPageProxy(browserId, pageIndex) {
         },
         async $$(selector) {
             try {
-                const res = await toolCall('page_evaluate', {
+                const res = await tc('page_evaluate', {
                     browserId, pageIndex,
                     expression: `document.querySelectorAll('${selector.replace(/'/g, "\\'")}').length`
                 });
@@ -703,7 +1164,7 @@ function buildPageProxy(browserId, pageIndex) {
                     return fn(el, ...args);
                 })()
             `;
-            const res = await toolCall('page_evaluate', { browserId, pageIndex, expression });
+            const res = await tc('page_evaluate', { browserId, pageIndex, expression });
             return res.result;
         },
         async $$eval(selector, fnStr, ...args) {
@@ -717,7 +1178,7 @@ function buildPageProxy(browserId, pageIndex) {
                     return fn(els, ...args);
                 })()
             `;
-            const res = await toolCall('page_evaluate', { browserId, pageIndex, expression });
+            const res = await tc('page_evaluate', { browserId, pageIndex, expression });
             return res.result;
         },
 
@@ -730,13 +1191,13 @@ function buildPageProxy(browserId, pageIndex) {
             } else {
                 expression = String(fnOrString);
             }
-            const res = await toolCall('page_evaluate', { browserId, pageIndex, expression });
+            const res = await tc('page_evaluate', { browserId, pageIndex, expression });
             return res.result;
         },
 
         // -- Extract text (convenience, maps to page_extract) --
         async extractText(selector, opts = {}) {
-            const res = await toolCall('page_extract', {
+            const res = await tc('page_extract', {
                 browserId, pageIndex, selector,
                 attribute: opts.attribute || undefined,
                 all: opts.all || false
@@ -747,27 +1208,27 @@ function buildPageProxy(browserId, pageIndex) {
 
         // -- Screenshot --
         async screenshot(opts) {
-            const res = await toolCall('page_screenshot', { browserId, pageIndex });
+            const res = await tc('page_screenshot', { browserId, pageIndex });
             return res.base64 || res.screenshot || null;
         },
 
         // -- Page info --
         async content() {
-            const res = await toolCall('page_evaluate', {
+            const res = await tc('page_evaluate', {
                 browserId, pageIndex,
                 expression: 'document.documentElement.outerHTML.slice(0, 50000)'
             });
             return res.result || '';
         },
         async url() {
-            const res = await toolCall('page_evaluate', {
+            const res = await tc('page_evaluate', {
                 browserId, pageIndex,
                 expression: 'window.location.href'
             });
             return res.result || '';
         },
         async title() {
-            const res = await toolCall('page_evaluate', {
+            const res = await tc('page_evaluate', {
                 browserId, pageIndex,
                 expression: 'document.title'
             });
@@ -776,7 +1237,104 @@ function buildPageProxy(browserId, pageIndex) {
 
         // -- Scroll --
         async scroll(direction) {
-            return toolCall('page_scroll', { browserId, direction: direction || 'down' });
+            return tc('page_scroll', { browserId, direction: direction || 'down' });
+        },
+
+        // ── Human-like helpers (anti-detection) ──
+
+        /**
+         * Random delay between min and max ms.
+         */
+        async randomDelay(min = 500, max = 2000) {
+            const ms = Math.floor(Math.random() * (max - min)) + min;
+            await new Promise(r => setTimeout(r, ms));
+        },
+
+        /**
+         * Mouse movement simulation via synthetic MouseEvent dispatch.
+         */
+        mouse: {
+            async move(x, y, opts = {}) {
+                const steps = opts.steps || 8;
+                const startX = Math.floor(Math.random() * 300);
+                const startY = Math.floor(Math.random() * 300);
+                const jitterX = Math.floor(Math.random() * 30 - 15);
+                const jitterY = Math.floor(Math.random() * 20 - 10);
+                await tc('page_evaluate', {
+                    browserId, pageIndex,
+                    expression: `(function(){
+                        var sX=${startX},sY=${startY},eX=${x},eY=${y},st=${steps},jX=${jitterX},jY=${jitterY};
+                        for(var i=0;i<=st;i++){
+                            var t=i/st;
+                            var cx=sX+(eX-sX)*t+Math.sin(t*Math.PI)*jX;
+                            var cy=sY+(eY-sY)*t+Math.cos(t*Math.PI)*jY;
+                            document.dispatchEvent(new MouseEvent('mousemove',{clientX:cx,clientY:cy,bubbles:true}));
+                        }
+                    })()`
+                });
+                await new Promise(r => setTimeout(r, 50 + Math.random() * 100));
+            }
+        },
+
+        /**
+         * Human-like click: move mouse to element center (with jitter) then click.
+         */
+        async humanClick(selector) {
+            try {
+                const res = await tc('page_evaluate', {
+                    browserId, pageIndex,
+                    expression: `(function(){
+                        var el=document.querySelector('${selector.replace(/'/g, "\\'")}');
+                        if(!el)return null;
+                        var r=el.getBoundingClientRect();
+                        return {x:r.x+r.width/2,y:r.y+r.height/2,w:r.width,h:r.height};
+                    })()`
+                });
+                const pos = res.result;
+                if (pos) {
+                    const offX = (Math.random() - 0.5) * pos.w * 0.3;
+                    const offY = (Math.random() - 0.5) * pos.h * 0.3;
+                    await proxy.mouse.move(pos.x + offX, pos.y + offY);
+                    await new Promise(r => setTimeout(r, 80 + Math.random() * 150));
+                }
+            } catch (_) { /* best-effort mouse movement */ }
+            return tc('page_click', { browserId, selector, pageIndex });
+        },
+
+        /**
+         * Human-like typing: click into field, clear via triple-click+Backspace, type with random delay.
+         */
+        async humanType(selector, text, opts = {}) {
+            await proxy.humanClick(selector);
+            await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
+            // Clear field using page_type clear:true
+            await tc('page_type', { browserId, selector, text: '', clear: true, pageIndex });
+            await new Promise(r => setTimeout(r, 100 + Math.random() * 200));
+            if (text) {
+                const delay = Math.floor(80 + Math.random() * 140); // 80-220ms avg
+                await tc('page_type', { browserId, selector, text, delay, pageIndex });
+            }
+        },
+
+        /**
+         * Detect Cloudflare / CAPTCHA / anti-bot pages.
+         * Polls until resolved or maxWait exceeded.
+         * @returns {{blocked: boolean}}
+         * @throws if still blocked after maxWait
+         */
+        async checkAntiBot(opts = {}) {
+            const maxWait = opts.maxWait || 45000;
+            const pollInterval = opts.pollInterval || 3000;
+            const startTime = Date.now();
+            while (true) {
+                const blocked = await _detectAntiBot(browserId, pageIndex);
+                if (!blocked) return { blocked: false };
+                if (Date.now() - startTime > maxWait) {
+                    throw new Error(`Anti-bot: ${blocked}. Timed out after ${Math.round(maxWait / 1000)}s.`);
+                }
+                console.log(`[pageProxy] Anti-bot detected: ${blocked}. Waiting for resolution...`);
+                await new Promise(r => setTimeout(r, pollInterval));
+            }
         }
     };
 
@@ -813,11 +1371,17 @@ async function healScript(sessionId, platformId, toolType, errorContext, options
         return { success: false, error: 'No existing script to heal' };
     }
 
+    // Include platform-specific fix rules learned from past failures
+    const fixRules = store.getFixRules(platform.url, toolType);
+    const fixRulesBlock = fixRules.length > 0
+        ? `\nPLATFORM-SPECIFIC FIX RULES (learned from previous failures — MUST follow):\n${fixRules.map((r, i) => `${i + 1}. ${r}`).join('\n')}\n`
+        : '';
+
     const prompt = `You are an expert Puppeteer script fixer.
 
 The following script for ${platform.name} (${platform.url}) failed with this error:
 ${errorContext.error}
-
+${fixRulesBlock}
 Current script:
 \`\`\`javascript
 ${currentScript}
@@ -849,6 +1413,77 @@ Keep the same function signature (receives \`page\` and \`params\`).
 }
 
 // ---------------------------------------------------------------------------
+// Failure analysis — AI-driven fix rule generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Analyze a script failure and generate a prompt fix rule via AI.
+ *
+ * Called after build-verify failures or pipeline runtime failures.
+ * The AI sees the error, failed script, current prompt rules, and a screenshot,
+ * then outputs ONE concise rule to prevent the same failure in future scripts.
+ *
+ * @param {string} platformName - Display name of the platform
+ * @param {string} platformUrl - URL of the platform
+ * @param {string} toolType - 'search' or 'apply'
+ * @param {object} errorContext - { error, script, screenshot?, promptRules? }
+ * @param {object} options - { aiInvoke: function }
+ * @returns {{ rule: string|null }}
+ */
+async function analyzeFailure(platformName, platformUrl, toolType, errorContext, options = {}) {
+    const { aiInvoke } = options;
+    if (typeof aiInvoke !== 'function') return { rule: null };
+
+    // Gather existing fix rules to avoid duplicates
+    const existingFixRules = getPlatformStore().getFixRules(platformUrl, toolType);
+    const existingRulesBlock = existingFixRules.length > 0
+        ? `\nExisting platform-specific fix rules (do NOT duplicate these):\n${existingFixRules.map((r, i) => `${i + 1}. ${r}`).join('\n')}\n`
+        : '';
+
+    const prompt = `You are a Puppeteer automation expert analyzing a script failure.
+
+Platform: ${platformName} (${platformUrl})
+Error: ${errorContext.error}
+
+Failed script (first 800 chars):
+\`\`\`
+${(errorContext.script || '').slice(0, 800)}
+\`\`\`
+
+Current generation prompt rules (abbreviated):
+${(errorContext.promptRules || '').slice(0, 2000)}
+${existingRulesBlock}
+The screenshot shows the page state when the error occurred.
+
+Based on this failure, write ONE concise rule (1-2 sentences) that the script generator
+should follow to prevent this failure in future scripts. Focus on the ROOT CAUSE, not the
+symptom. Write the rule as an imperative instruction.
+Do NOT repeat rules that already exist in the current prompt or fix rules above.
+
+Examples of good rules:
+- "ALWAYS include &location= parameter in search URL to override stale cookie-based locations."
+- "After navigation, check for 'No results' text BEFORE waiting for job card selectors."
+- "Use page.waitForSelector with a 15s timeout for slow-loading job detail panels."
+
+Return ONLY the rule text, nothing else.`;
+
+    try {
+        console.log(`[analyzeFailure] Analyzing failure for ${platformName}/${toolType}: ${(errorContext.error || '').slice(0, 100)}`);
+        const response = await aiInvoke(prompt, errorContext.screenshot || null);
+        const rule = (response || '').trim().replace(/^["']|["']$/g, '').replace(/^Rule:\s*/i, '');
+        if (rule && rule.length > 10 && rule.length < 500) {
+            console.log(`[analyzeFailure] Generated fix rule: ${rule.slice(0, 100)}`);
+            return { rule };
+        }
+        console.log(`[analyzeFailure] AI response not usable (len=${(rule || '').length})`);
+        return { rule: null };
+    } catch (err) {
+        console.log(`[analyzeFailure] AI analysis failed: ${err.message}`);
+        return { rule: null };
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -856,6 +1491,7 @@ module.exports = {
     buildTool,
     executeSearchScript,
     healScript,
+    analyzeFailure,
     // Exported for testing
     _extractCodeBlock: extractCodeBlock,
     _buildDomSummary: buildDomSummary,

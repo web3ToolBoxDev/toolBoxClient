@@ -360,6 +360,52 @@ describe('ChromeManager', () => {
         expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('deleteFailed'));
     });
 
+    // --- Wallet initialization check ---
+    it('openEnv blocks when bound wallet is not initialized', async () => {
+        // fp1 has a bound wallet that is NOT initialized
+        Object.assign(mockFingerPrints, {
+            'fp1': { id: 'fp1', name: 'Env Alpha', createdAt: 1, proxy: null, bindWalletId: 'w1' },
+            'fp2': { id: 'fp2', name: 'Env Beta', createdAt: 2, proxy: null }
+        });
+        mockWallets.push({ id: 'w1', name: 'W1', bindEnvId: 'fp1', walletInitialized: false });
+
+        render(<ChromeManager />);
+        await act(async () => {
+            fireEvent.click(screen.getAllByText('open')[0]); // click open on fp1
+        });
+        // Should show alert and NOT call execTask
+        expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('钱包尚未初始化'));
+        expect(mockApi.execTask).not.toHaveBeenCalled();
+    });
+
+    it('openEnv proceeds when bound wallet IS initialized', async () => {
+        Object.assign(mockFingerPrints, {
+            'fp1': { id: 'fp1', name: 'Env Alpha', createdAt: 1, proxy: null, bindWalletId: 'w2' },
+            'fp2': { id: 'fp2', name: 'Env Beta', createdAt: 2, proxy: null }
+        });
+        mockWallets.push({ id: 'w2', name: 'W2', bindEnvId: 'fp1', walletInitialized: true });
+
+        render(<ChromeManager />);
+        await act(async () => {
+            fireEvent.click(screen.getAllByText('open')[0]);
+        });
+        expect(mockApi.execTask).toHaveBeenCalledWith('openChrome', { envIds: ['fp1'] });
+    });
+
+    it('openEnv proceeds when no wallet is bound', async () => {
+        // fp1 has no bindWalletId
+        Object.assign(mockFingerPrints, {
+            'fp1': { id: 'fp1', name: 'Env Alpha', createdAt: 1, proxy: null },
+            'fp2': { id: 'fp2', name: 'Env Beta', createdAt: 2, proxy: null }
+        });
+
+        render(<ChromeManager />);
+        await act(async () => {
+            fireEvent.click(screen.getAllByText('open')[0]);
+        });
+        expect(mockApi.execTask).toHaveBeenCalledWith('openChrome', { envIds: ['fp1'] });
+    });
+
     // --- Delete with bound wallets ---
     it('deleteSelected also deletes bound wallets', async () => {
         mockWallets.push({ id: 'w1', name: 'W1', bindEnvId: 'fp1' });

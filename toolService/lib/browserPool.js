@@ -24,27 +24,31 @@ const genId = () => `browser_${Date.now()}_${Math.random().toString(16).slice(2,
 
 function buildChromeArgs(env, options = {}) {
     const args = [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disabled-setupid-sandbox',
-        '--disable-infobars',
+        // NOTE: --no-sandbox removed — Cloudflare detects it and blocks access (e.g. Indeed)
+        '--no-first-run',
+        '--no-default-browser-check',
         `--user-agent=${env.user_agent}`,
         `--lang=${env.language_js}`
     ];
     if (options.walletExtensionPath) {
         args.push(`--disable-extensions-except=${options.walletExtensionPath}`);
     }
+    // 将新格式 audio: {seed: N} 转为 Chromium 补丁期望的浮点数噪声值
+    let audioNoise = env.audio;
+    if (audioNoise && typeof audioNoise === 'object' && audioNoise.seed !== undefined) {
+        const s = audioNoise.seed;
+        audioNoise = ((((s * 1103515245 + 12345) & 0x7fffffff) % 10000) + 1) / 1000000;
+    }
     const fingerprints = {
-        audio: env.audio,
+        audio: audioNoise,
         clientRect: env.clientRect,
         webgl: env.webgl,
         canvas: env.canvas,
         hardware: env.hardware,
         screen: env.screen,
         clientHint: env.clientHint,
-        languages_js: env.language_js,
-        languages_http: env.language_http,
-        fonts_remove: env.fonts_remove
+        // languages_js: (env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
+        languages_http: env.language_http
     };
     if (env.useProxy) {
         fingerprints.position = env.position;
@@ -87,7 +91,7 @@ async function launchWithFingerprint({ chromePath, savePath, env, headless = fal
     const browser = await puppeteer.launch({
         headless: headless ? 'new' : false,
         executablePath: chromePath,
-        ignoreDefaultArgs: ['--enable-automation'],
+        // ignoreDefaultArgs: ['--enable-automation'],
         userDataDir,
         args,
         defaultViewport: null
@@ -115,9 +119,10 @@ async function launchWithChrome({ chromePath, headless = false }) {
         executablePath: chromePath,
         ignoreDefaultArgs: ['--enable-automation'],
         args: [
-            '--no-sandbox',
             '--disable-infobars',
-            '--disable-blink-features=AutomationControlled'
+            '--disable-blink-features=AutomationControlled',
+            '--no-first-run',
+            '--no-default-browser-check'
         ],
         defaultViewport: null
     });
@@ -138,7 +143,7 @@ async function launchHeadless({ chromePath } = {}) {
     const puppeteer = _getPuppeteer();
     const launchOpts = {
         headless: 'new',
-        args: ['--no-sandbox', '--disable-infobars'],
+        args: ['--disable-infobars'],
         defaultViewport: null
     };
     if (chromePath) launchOpts.executablePath = chromePath;
@@ -273,14 +278,27 @@ function size() {
 
 // ─── Internal ───
 
+let _puppeteerInstance = null;
 function _getPuppeteer() {
+    if (_puppeteerInstance) return _puppeteerInstance;
+    // 优先使用 puppeteer-extra（带 stealth 插件，过 Turnstile/Cloudflare 检测）
     try {
-        return require('puppeteer-core');
+        const puppeteerExtra = require('puppeteer-extra');
+        const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+        puppeteerExtra.use(StealthPlugin());
+        _puppeteerInstance = puppeteerExtra;
+        return _puppeteerInstance;
+    } catch (_) {}
+    // 回退到 puppeteer-core
+    try {
+        _puppeteerInstance = require('puppeteer-core');
+        return _puppeteerInstance;
     } catch (_) {
         try {
-            return require('puppeteer');
+            _puppeteerInstance = require('puppeteer');
+            return _puppeteerInstance;
         } catch (_2) {
-            throw new Error('Neither puppeteer-core nor puppeteer is installed');
+            throw new Error('Neither puppeteer-extra, puppeteer-core, nor puppeteer is installed');
         }
     }
 }

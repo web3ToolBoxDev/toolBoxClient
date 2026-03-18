@@ -4,7 +4,8 @@ const platformStore = require('./platformStore');
 
 // Mock toolServiceClient — general tool calls go through toolService
 jest.mock('../core/toolServiceClient', () => ({
-    executeTool: jest.fn()
+    executeTool: jest.fn(),
+    request: jest.fn().mockResolvedValue({ success: false, browsers: [] })
 }));
 const toolServiceClient = require('../core/toolServiceClient');
 
@@ -115,7 +116,8 @@ describe('launchLogin', () => {
         // Mock toolService responses
         toolServiceClient.executeTool
             .mockResolvedValueOnce({ success: true, result: { browserId: 'br_abc' } })  // browser_launch
-            .mockResolvedValueOnce({ success: true });  // page_goto
+            .mockResolvedValueOnce({ success: true })  // page_goto
+            .mockResolvedValueOnce({ success: true, result: { results: ['<div>AccountMenu</div>'], count: 1 } });  // auto-verify DOM check
 
         const result = await platformService.launchLogin(SESSION, indeed.id, {});
 
@@ -126,7 +128,8 @@ describe('launchLogin', () => {
         expect(result.loginUrl).toContain('indeed.com');
 
         // Verify toolService was called with full env object (not just envId string)
-        expect(toolServiceClient.executeTool).toHaveBeenCalledTimes(2);
+        // Calls: browser_launch + page_goto + auto-verify (DOM selector check)
+        expect(toolServiceClient.executeTool).toHaveBeenCalledTimes(3);
         expect(toolServiceClient.executeTool).toHaveBeenCalledWith('browser_launch', expect.objectContaining({
             env: expect.objectContaining({ id: 'env_123', user_agent: 'Mozilla/5.0 Test' }),
             chromePath: 'C:/chrome.exe',
@@ -198,10 +201,10 @@ describe('launchLogin', () => {
         const indeed = platforms.find(p => p.name === 'Indeed');
         platformStore.updatePlatform(SESSION, indeed.id, { envId: 'env_fail' });
 
-        toolServiceClient.executeTool.mockResolvedValueOnce({
-            success: false,
-            error: 'Chrome not found'
-        });
+        // First launch fails, recovery path retries and also fails
+        toolServiceClient.executeTool
+            .mockResolvedValueOnce({ success: false, error: 'Chrome not found' })   // browser_launch (1st attempt)
+            .mockResolvedValueOnce({ success: false, error: 'Chrome not found' });  // browser_launch (retry after recovery)
 
         const result = await platformService.launchLogin(SESSION, indeed.id, {});
         expect(result.success).toBe(false);
@@ -323,15 +326,62 @@ describe('launchLogin', () => {
 });
 
 describe('confirmLogin', () => {
-    test('marks platform as connected', () => {
+    test('verifies login via DOM then marks connected (browser open + DOM passes)', async () => {
         const platforms = platformStore.getPlatforms(SESSION);
-        const result = platformService.confirmLogin(SESSION, platforms[0].id);
+        const linkedin = platforms.find(p => p.name === 'LinkedIn');
+        // Directly set _browserId on the platform object (like launchLogin does)
+        linkedin._browserId = 'br-confirm';
+        linkedin._pageIndex = 0;
+        toolServiceClient.executeTool.mockImplementation((tool) => {
+            if (tool === 'page_extract') {
+                return Promise.resolve({ success: true, result: { count: 1, values: ['<img class="global-nav__me-photo">'] } });
+            }
+            return Promise.resolve({ success: false });
+        });
+
+        const result = await platformService.confirmLogin(SESSION, linkedin.id);
         expect(result.success).toBe(true);
-        expect(result.platform.status).toBe('connected');
+        expect(result.verified).toBe(true);
+        expect(result.method).toBe('dom');
+        linkedin._browserId = undefined;
+        toolServiceClient.executeTool.mockReset();
     });
 
-    test('returns error for unknown platform', () => {
-        const result = platformService.confirmLogin(SESSION, 'fake');
+    test('returns failure when login not detected', async () => {
+        const platforms = platformStore.getPlatforms(SESSION);
+        const linkedin = platforms.find(p => p.name === 'LinkedIn');
+        linkedin._browserId = 'br-confirm2';
+        linkedin._pageIndex = 0;
+        // DOM check returns 0 elements and no screenshot verifier set
+        toolServiceClient.executeTool.mockImplementation((tool) => {
+            if (tool === 'page_extract') {
+                return Promise.resolve({ success: true, result: { count: 0, values: [] } });
+            }
+            return Promise.resolve({ success: false });
+        });
+
+        const result = await platformService.confirmLogin(SESSION, linkedin.id);
+        expect(result.success).toBe(false);
+        expect(result.verified).toBe(false);
+        linkedin._browserId = undefined;
+        toolServiceClient.executeTool.mockReset();
+    });
+
+    test('falls back to manual for unknown platform (no detector)', async () => {
+        platformStore.addPlatform(SESSION, {
+            name: 'UnknownSite', url: 'https://unknown-jobs.example.com', enabled: true
+        });
+        const platforms = platformStore.getPlatforms(SESSION);
+        const unknown = platforms.find(p => p.name === 'UnknownSite');
+
+        const result = await platformService.confirmLogin(SESSION, unknown.id);
+        expect(result.success).toBe(true);
+        expect(result.verified).toBe(false);
+        expect(result.method).toBe('manual');
+    });
+
+    test('returns error for unknown platform id', async () => {
+        const result = await platformService.confirmLogin(SESSION, 'fake');
         expect(result.success).toBe(false);
     });
 });

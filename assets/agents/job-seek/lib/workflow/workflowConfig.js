@@ -20,9 +20,9 @@ const SOURCE_META = {
 /** Step definitions with defaults. */
 const STEP_DEFAULTS = {
     customizeProfile: { enabled: true, order: 0 },
-    search:           { enabled: true, order: 1 },
-    generate:         { enabled: true, order: 2 },
-    apply:            { enabled: true, order: 3 }
+    search:           { enabled: true, order: 1, platforms: [] },
+    generate:         { enabled: true, order: 2, tailorResume: true, coverLetter: true, interviewPrep: true, jobIds: [] },
+    apply:            { enabled: false, order: 3, autoSubmit: true, delayBetweenJobs: [10, 30], maxApplyPerRun: 10, skipOnCaptchaFail: true, platforms: [], jobIds: [] } // [LOCKED] deferred to next version
 };
 
 const VALID_STEPS = Object.keys(STEP_DEFAULTS);
@@ -58,6 +58,7 @@ function buildDefaultConfig(location, overrides = {}) {
             minScore: 60,
             targetCount: 10,
             maxResults: 30,
+            userPreferences: '',
             ...(overrides.search || {})
         },
         generate: {
@@ -108,6 +109,9 @@ function validateConfig(config) {
         if (typeof config.search.targetCount === 'number' && config.search.targetCount < 1) {
             errors.push('targetCount must be >= 1');
         }
+        if (config.search.userPreferences && typeof config.search.userPreferences === 'string' && config.search.userPreferences.length > 500) {
+            errors.push('userPreferences must be <= 500 characters');
+        }
     }
 
     return { valid: errors.length === 0, errors };
@@ -131,11 +135,16 @@ function mergeConfig(base, patch) {
 
     if (patch.steps) {
         if (typeof patch.steps === 'object' && !Array.isArray(patch.steps)) {
-            // Object form: { search: { enabled: false } }
-            merged.steps = base.steps.map(s => ({
-                ...s,
-                ...(patch.steps[s.name] || {})
-            }));
+            // Object form: { search: { enabled: false, platforms: ['indeed'] } }
+            merged.steps = base.steps.map(s => {
+                const override = patch.steps[s.name];
+                if (!override) return s;
+                const merged_step = { ...s, ...override };
+                // Array fields: replace entirely (not merge)
+                if (override.platforms) merged_step.platforms = override.platforms;
+                if (override.jobIds) merged_step.jobIds = override.jobIds;
+                return merged_step;
+            });
         }
     }
 

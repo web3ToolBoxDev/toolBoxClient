@@ -68,6 +68,38 @@ async function isBackendReady() {
     }
 }
 
+/**
+ * Dismiss TaskOffcanvas if it is visible (backdrop blocks interaction).
+ * The offcanvas auto-opens when `taskExecuted` fires (e.g. after execTask).
+ * We close it by clicking the Bootstrap close button inside the header.
+ */
+/**
+ * Dismiss TaskOffcanvas if it is visible (backdrop blocks interaction).
+ * The offcanvas may appear with a delay after navigation or execTask,
+ * so we first wait briefly for the backdrop to appear, then close it.
+ */
+async function dismissTaskOffcanvas(page) {
+    const backdrop = page.locator('.offcanvas-backdrop.show');
+    // Wait up to 3s for backdrop to appear — if it never shows, nothing to dismiss
+    try {
+        await backdrop.waitFor({ state: 'visible', timeout: 3_000 });
+    } catch {
+        return; // No backdrop appeared — nothing to dismiss
+    }
+    console.log('[e2e]   ⚠ TaskOffcanvas backdrop detected — dismissing…');
+    const offcanvas = page.locator('[data-testid="task-offcanvas"]');
+    // Try close button first
+    const closeBtn = offcanvas.locator('.offcanvas-header .btn-close');
+    if (await closeBtn.isVisible().catch(() => false)) {
+        await closeBtn.click();
+    } else {
+        // Fallback: press Escape
+        await page.keyboard.press('Escape');
+    }
+    await expect(backdrop).not.toBeVisible({ timeout: 5_000 });
+    console.log('[e2e]   ✓ TaskOffcanvas dismissed');
+}
+
 test.describe('Agent Workspace Onboarding E2E', () => {
     test.setTimeout(240_000); // 4 minutes
 
@@ -100,6 +132,9 @@ test.describe('Agent Workspace Onboarding E2E', () => {
         await expect(page.locator('.agent-workspace-main')).toBeVisible({ timeout: 15_000 });
         console.log('[e2e]   ✓ Workspace loaded');
 
+        // Dismiss TaskOffcanvas if it auto-opened (backdrop blocks interaction)
+        await dismissTaskOffcanvas(page);
+
         // Wait for session panel and create a fresh session
         await expect(page.locator('.agent-session-toolbar')).toBeVisible({ timeout: 20_000 });
         const sessionInput = page.locator('.agent-session-toolbar input');
@@ -108,7 +143,7 @@ test.describe('Agent Workspace Onboarding E2E', () => {
         await expect(page.locator('.agent-session-item.active', { hasText: /E2E Test Session/i })).toBeVisible({ timeout: 15_000 });
         console.log('[e2e]   ✓ New session created');
 
-        // ── Step 3: Configure provider & model ──
+        // ── Step 3: Configure provider, bind env, then apply model ──
         console.log('[e2e] Step 3: Configuring provider and model...');
         const runtimeToggle = page.locator('[aria-label="toggle-runtime-settings"]');
         await runtimeToggle.click();
@@ -147,15 +182,8 @@ test.describe('Agent Workspace Onboarding E2E', () => {
             await page.waitForTimeout(300);
         }
 
-        // Click Apply Model
-        await page.locator('button', { hasText: /apply model/i }).click();
-        console.log('[e2e]   ✓ Model applied');
-
-        // Wait for execution state to become Running
-        await expect(page.locator('.session-context-toolbar')).toContainText(/running/i, { timeout: 15_000 });
-        console.log('[e2e]   ✓ Execution state: Running');
-
-        // ── Step 3b: Bind environment ──
+        // ── Step 3b: Bind environment BEFORE Apply Model ──
+        // (Apply Model triggers execTask → preset modal auto-opens and blocks UI)
         console.log('[e2e] Step 3b: Binding environment...');
         const bindModeSelect = page.locator('[aria-label="session-bind-mode"]');
         await expect(bindModeSelect).toBeVisible({ timeout: 5_000 });
@@ -171,6 +199,17 @@ test.describe('Agent Workspace Onboarding E2E', () => {
         await bindBtn.click();
         console.log('[e2e]   ✓ Environment bound to session');
         await page.waitForTimeout(1000);
+
+        // Click Apply Model (this triggers execTask → preset modal will auto-open)
+        await page.locator('button', { hasText: /apply model/i }).click();
+        console.log('[e2e]   ✓ Model applied');
+
+        // Dismiss TaskOffcanvas if it auto-opened after execTask
+        await dismissTaskOffcanvas(page);
+
+        // Wait for execution state to become Running
+        await expect(page.locator('.session-context-toolbar')).toContainText(/running/i, { timeout: 15_000 });
+        console.log('[e2e]   ✓ Execution state: Running');
 
         // ── Step 4: Open preset modal ──
         console.log('[e2e] Step 4: Opening preset modal...');

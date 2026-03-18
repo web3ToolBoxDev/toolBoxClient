@@ -28,10 +28,12 @@ function AITaskPanel({
     const [showPresetModal, setShowPresetModal] = useState(false);
     const [expandedSubtask, setExpandedSubtask] = useState(null);
 
-    // Auto-open preset modal when triggered by backend (e.g., session first start)
+    // When backend signals auto-open, just consume the flag (don't auto-open modal).
+    // The preset bar already highlights unanswered questions to nudge the user.
+    const [presetHighlight, setPresetHighlight] = useState(false);
     useEffect(() => {
         if (autoOpenPreset) {
-            setShowPresetModal(true);
+            setPresetHighlight(true);
             if (onAutoOpenPresetConsumed) onAutoOpenPresetConsumed();
         }
     }, [autoOpenPreset, onAutoOpenPresetConsumed]);
@@ -581,9 +583,9 @@ function AITaskPanel({
                         <Button
                             variant="outline-light"
                             size="sm"
-                            className="ai-preset-trigger"
+                            className={`ai-preset-trigger${presetHighlight ? ' ai-preset-trigger--highlight' : ''}`}
                             disabled={interactionDisabled || !promptOptionCount}
-                            onClick={() => setShowPresetModal(true)}
+                            onClick={() => { setPresetHighlight(false); setShowPresetModal(true); }}
                         >
                             {`${t('taskLog.ai.chooseOption', 'Choose an option')} (${promptOptionCount})`}
                         </Button>
@@ -898,25 +900,37 @@ function AITaskPanel({
                                                                     }}
                                                                     disabled={interactionDisabled}
                                                                 />
-                                                                <Button
-                                                                    size="sm"
-                                                                    onClick={() => {
-                                                                        const value = String(questionDrafts[question.id] || '').trim();
-                                                                        if (!value || !onSubmitAnswer) return;
-                                                                        onSubmitAnswer({
-                                                                            questionId: question.id,
-                                                                            questionText: question.text,
-                                                                            answer: value
-                                                                        });
-                                                                    }}
-                                                                    disabled={interactionDisabled || !String(questionDrafts[question.id] || '').trim()}
-                                                                >
-                                                                    {t('common.confirm', 'Confirm')}
-                                                                </Button>
                                                             </div>
                                                         )}
                                                     </div>
                                                 ))}
+                                                {/* Unified Confirm button for all input questions in this group */}
+                                                {group.questions.some((q) => getQuestionType(q) === 'input') ? (
+                                                    <div className="ai-preset-group__confirm-bar">
+                                                        <Button
+                                                            size="sm"
+                                                            variant="primary"
+                                                            className="ai-preset-group__confirm-btn"
+                                                            disabled={interactionDisabled || !group.questions.some((q) => getQuestionType(q) === 'input' && String(questionDrafts[q.id] || '').trim())}
+                                                            onClick={() => {
+                                                                if (!onSubmitAnswer) return;
+                                                                const inputQuestions = group.questions.filter((q) => getQuestionType(q) === 'input');
+                                                                inputQuestions.forEach((q) => {
+                                                                    const value = String(questionDrafts[q.id] || '').trim();
+                                                                    if (value) {
+                                                                        onSubmitAnswer({
+                                                                            questionId: q.id,
+                                                                            questionText: q.text,
+                                                                            answer: value
+                                                                        });
+                                                                    }
+                                                                });
+                                                            }}
+                                                        >
+                                                            {t('common.confirmAll', 'Confirm All')}
+                                                        </Button>
+                                                    </div>
+                                                ) : null}
                                             </div>
                                         ) : null}
                                     </div>

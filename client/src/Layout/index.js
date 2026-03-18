@@ -6,6 +6,9 @@ import { useTranslation } from 'react-i18next';
 import useFingerPrintStore from '../store/fingerPrintStore';
 import { eventEmitter } from '../utils/eventEmitter';
 
+/** Routes where TaskOffcanvas should NOT auto-open (they have their own AI panel) */
+const SUPPRESS_OFFCANVAS_ROUTES = ['/agentWorkspace'];
+
 
 const menuItems = [
   { name: 'introduction', link: '#/', icon: '📘' },
@@ -51,7 +54,12 @@ const Layout = ({ Child }) => {
     fetchFingerPrints();
 
     const handleTaskExecuted = () => {
-      setShowTasksOffcanvas(true);
+      // Don't auto-open TaskOffcanvas on AgentWorkspace — it has its own AI panel
+      const hash = window.location.hash || '';
+      const isSuppressed = SUPPRESS_OFFCANVAS_ROUTES.some(r => hash.includes(r));
+      if (!isSuppressed) {
+        setShowTasksOffcanvas(true);
+      }
     };
     eventEmitter.on('taskExecuted', handleTaskExecuted);
     return () => {

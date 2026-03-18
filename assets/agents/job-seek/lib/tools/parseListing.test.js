@@ -1,6 +1,6 @@
 'use strict';
 
-const { TOOL_DEF, handler, extractRequirements, extractSection } = require('./parseListing');
+const { TOOL_DEF, handler, extractRequirements, extractSection, extractNiceToHave } = require('./parseListing');
 
 // Mock toolServiceClient
 jest.mock('../core/toolServiceClient', () => ({
@@ -43,6 +43,32 @@ describe('parse_listing tool', () => {
         });
     });
 
+    describe('extractNiceToHave', () => {
+        test('extracts "is a plus" patterns', () => {
+            const text = 'Required: React, Node. Docker experience is a plus. Kubernetes preferred.';
+            const result = extractNiceToHave(text);
+            expect(result).toContain('Docker');
+            expect(result).toContain('plus');
+        });
+
+        test('extracts "preferred" patterns', () => {
+            const text = 'Must have: Python. AWS experience preferred. MongoDB would be a bonus.';
+            const result = extractNiceToHave(text);
+            expect(result).toContain('preferred');
+        });
+
+        test('returns empty when no nice-to-have content', () => {
+            const text = 'We require React, Node, Python. 5 years experience needed.';
+            expect(extractNiceToHave(text)).toBe('');
+        });
+
+        test('handles Chinese markers', () => {
+            const text = 'Required skills include Java and Spring Boot. 有AWS云服务经验是加分项，具备容器化部署技术经验优先考虑.';
+            const result = extractNiceToHave(text);
+            expect(result.length).toBeGreaterThan(0);
+        });
+    });
+
     describe('extractRequirements', () => {
         test('extracts sections from job description', () => {
             const fetchResult = {
@@ -56,6 +82,16 @@ describe('parse_listing tool', () => {
             expect(req.sections.experience).toContain('5 years');
             expect(req.sections.education).toContain('Bachelor');
             expect(req.sections.soft_skills).toContain('communication');
+        });
+
+        test('extracts niceToHave section', () => {
+            const fetchResult = {
+                title: 'Dev',
+                text: 'Skills: React, Node. Docker experience is a plus. Kubernetes preferred.',
+            };
+            const req = extractRequirements(fetchResult);
+            expect(req.sections.niceToHave).toBeDefined();
+            expect(req.sections.niceToHave.length).toBeGreaterThan(0);
         });
 
         test('extracts salary from text', () => {
