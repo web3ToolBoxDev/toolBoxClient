@@ -466,6 +466,7 @@ function startPipeline(sessionId, config, direction, profile) {
         _pageOffsets: { ...(history.pageOffsets || {}) }, // restore page offsets per query key
         _sourceQualified: {},   // source → number of qualified jobs (persisted across rounds)
         _sourceResultCount: {}, // source → number of results fetched (persisted across rounds)
+        _selfHealAttempts: {},  // source → number of self-heal attempts (max 2 per source)
         stoppedAt: null
     };
 
@@ -478,14 +479,14 @@ function startPipeline(sessionId, config, direction, profile) {
 
     _pipelines.set(sessionId, pipeline);
 
-    // Run asynchronously
+    // Run asynchronously — _finishPipeline is guaranteed via try/finally inside _runPipeline,
+    // but add a safety catch here in case something goes wrong before the try block.
     _runPipeline(sessionId).catch(err => {
         console.error(`[searchPipeline] Error in pipeline ${sessionId}:`, err.message);
         const p = _pipelines.get(sessionId);
         if (p) {
-            p.running = false;
-            p.progress.phase = 'error';
             p.progress.errors.push(err.message);
+            _finishPipeline(sessionId, 'error');
         }
     });
 
@@ -537,23 +538,24 @@ async function _runPipeline(sessionId) {
     _log(`Queries: ${queries.map(q => `[${q.source}] "${q.query}" @ ${q.location || 'remote'}${q.pageOffset ? ` (page ${q.pageOffset})` : ''}`).join(' | ')}`);
 
     if (queries.length === 0) {
-        pipeline.running = false;
-        pipeline.progress.phase = 'error';
         pipeline.progress.errors.push('No job title set — cannot search');
         _log('ERROR: No job title set — cannot search');
+        _finishPipeline(sessionId, 'error');
         return;
     }
 
     // AI pre-check: algorithm fallback removed, AI is required
     if (!config.aiMatcher && !config.aiInvoke) {
-        pipeline.running = false;
-        pipeline.progress.phase = 'error';
         pipeline.progress.errors.push('No AI provider configured — AI matching is required');
         _log('ERROR: No AI provider — cannot start (algorithm fallback removed)');
+        _finishPipeline(sessionId, 'error');
         return;
     }
 
     // ── Search + Match (merged): process each job inline as it's found ──
+    // Wrap in try/finally to guarantee _finishPipeline is called even on unexpected errors
+    try {
+
     pipeline.progress.phase = 'searching';
     let _totalFetched = 0;  // total listings fetched across all sources (replaces allListings.length)
     if (previouslySeen.size > 0) {
@@ -1000,9 +1002,8 @@ async function _runPipeline(sessionId) {
             // Abort pipeline if too many consecutive errors (e.g. browser died, AI provider down)
             if (_consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                 _log(`ABORT: ${MAX_CONSECUTIVE_ERRORS} consecutive errors — stopping pipeline`);
-                pipeline.running = false;
-                pipeline.progress.phase = 'error';
                 pipeline.progress.errors.push(`Pipeline aborted: ${MAX_CONSECUTIVE_ERRORS} consecutive failures`);
+                _finishPipeline(sessionId, 'error');
             }
         }
     }
@@ -1068,31 +1069,84 @@ async function _runPipeline(sessionId) {
                         }));
                         _log(`[${q.source}] Platform tool returned ${listings.length} results`);
 
-                        // ── Low/zero result anomaly: mark cell error so user can rebuild manually ──
+                        // ── Low/zero result anomaly: attempt self-heal or mark for rebuild ──
                         const LOW_RESULT_THRESHOLD = 3;
                         if (listings.length < LOW_RESULT_THRESHOLD) {
-                            _log(`⚠ [${q.source}] Suspiciously low results (${listings.length}) — marking for rebuild`);
-                            dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
-                                cell: 'search', status: 'error',
-                                message: `Only ${listings.length} result(s) for "${q.query}" — please Rebuild search tool`
-                            });
+                            _log(`⚠ [${q.source}] Suspiciously low results (${listings.length}) — attempting self-heal`);
+
+                            // Try self-heal for low-result anomaly (may indicate Cloudflare block)
+                            if (config.aiInvoke && !(pipeline._selfHealAttempts?.[q.source] >= 2)) {
+                                pipeline._selfHealAttempts = pipeline._selfHealAttempts || {};
+                                pipeline._selfHealAttempts[q.source] = (pipeline._selfHealAttempts[q.source] || 0) + 1;
+                                const anomalyMsg = `Search returned only ${listings.length} result(s) — possible Cloudflare block or broken selector`;
+                                const healedListings = await _selfHealAndRetry(
+                                    sessionId, platformTool, q, config, anomalyMsg, null, _log
+                                );
+                                if (healedListings && healedListings.length > listings.length) {
+                                    _log(`✓ [${q.source}] Self-heal improved results: ${listings.length} → ${healedListings.length}`);
+                                    listings = healedListings;
+                                }
+                            }
+
+                            // Still low after heal attempt — mark for manual rebuild
+                            if (listings.length < LOW_RESULT_THRESHOLD) {
+                                dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                                    cell: 'search', status: 'error',
+                                    message: `Only ${listings.length} result(s) for "${q.query}" — please Rebuild search tool`
+                                });
+                            }
                         }
                     } else {
                         const errMsg = scriptResult.error || 'unknown error';
                         _log(`✗ [${q.source}] Platform tool failed: ${errMsg}`);
-                        _failedSources.add(q.source);
-                        dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
-                            cell: 'search', status: 'error',
-                            message: `Search failed: ${errMsg} — please Rebuild search tool`
-                        });
-                        dashboardServer.updatePipelineProgress(sessionId, {
-                            phase: 'taskFailed',
-                            title: `${platformTool.name} — Search failed`,
-                            company: '', platform: q.source, failPhase: 'search',
-                            error: errMsg,
-                            at: new Date().toISOString(), currentJob: null
-                        });
-                        pipeline.progress.errors.push(`[${q.source}] Search tool failed: ${errMsg}`);
+
+                        // ── Self-heal: attempt AI-driven script repair + retry ──
+                        let healed = false;
+                        if (config.aiInvoke && !(pipeline._selfHealAttempts?.[q.source] >= 2)) {
+                            pipeline._selfHealAttempts = pipeline._selfHealAttempts || {};
+                            pipeline._selfHealAttempts[q.source] = (pipeline._selfHealAttempts[q.source] || 0) + 1;
+                            _log(`🔧 [${q.source}] Self-heal attempt ${pipeline._selfHealAttempts[q.source]}/2...`);
+
+                            // Try to get a screenshot for better AI diagnosis
+                            let screenshot = null;
+                            try {
+                                const platform = getPlatformStore().getPlatform(sessionId, platformTool.id);
+                                if (platform?._browserId) {
+                                    const toolClient = require('./core/toolServiceClient');
+                                    const ssResult = await toolClient.executeTool('page_screenshot', {
+                                        browserId: platform._browserId, pageIndex: platform._pageIndex || 0
+                                    });
+                                    screenshot = ssResult?.screenshot || ssResult?.result || null;
+                                }
+                            } catch (_) { /* screenshot is optional */ }
+
+                            const healedListings = await _selfHealAndRetry(
+                                sessionId, platformTool, q, config, errMsg, screenshot, _log
+                            );
+                            if (healedListings && healedListings.length > 0) {
+                                healed = true;
+                                listings = healedListings;
+                                _log(`✓ [${q.source}] Self-heal succeeded: ${healedListings.length} results after repair`);
+                            } else {
+                                _log(`✗ [${q.source}] Self-heal failed — marking source as failed`);
+                            }
+                        }
+
+                        if (!healed) {
+                            _failedSources.add(q.source);
+                            dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                                cell: 'search', status: 'error',
+                                message: `Search failed: ${errMsg} — please Rebuild search tool`
+                            });
+                            dashboardServer.updatePipelineProgress(sessionId, {
+                                phase: 'taskFailed',
+                                title: `${platformTool.name} — Search failed`,
+                                company: '', platform: q.source, failPhase: 'search',
+                                error: errMsg,
+                                at: new Date().toISOString(), currentJob: null
+                            });
+                            pipeline.progress.errors.push(`[${q.source}] Search tool failed: ${errMsg}`);
+                        }
                     }
                 } else {
                     _log(`[${q.source}] No platform tool available — skipped`);
@@ -1231,11 +1285,24 @@ async function _runPipeline(sessionId) {
     const finalSummary = Object.entries(_sourceQualified).map(([s, n]) => `${s}: ${n}/${config.targetCount}`).join(', ');
     _log(`Final (${pipeline._searchRound} round${pipeline._searchRound > 1 ? 's' : ''}): ${p.qualified} qualified — ${finalSummary || 'none'}`);
     _finishPipeline(sessionId, allMet ? 'completed' : 'done');
+
+    } finally {
+        // Safety net: if pipeline is still marked as running (e.g. uncaught exception skipped
+        // all _finishPipeline calls), force-finish to prevent the workflow step from polling forever.
+        if (pipeline.running) {
+            console.error(`[searchPipeline] Safety net: pipeline ${sessionId} still running after _runPipeline — force finishing`);
+            _finishPipeline(sessionId, 'error');
+        }
+    }
 }
 
 function _finishPipeline(sessionId, reason) {
     const pipeline = _pipelines.get(sessionId);
     if (!pipeline) return;
+
+    // Idempotent: skip if already finished (prevents double history-save)
+    if (!pipeline.running && pipeline.stoppedAt) return;
+
     pipeline.running = false;
     pipeline.progress.phase = reason;
     pipeline.stoppedAt = new Date().toISOString();
@@ -1264,7 +1331,11 @@ function _finishPipeline(sessionId, reason) {
 function stopPipeline(sessionId) {
     const pipeline = _pipelines.get(sessionId);
     if (!pipeline) return { error: 'No pipeline found' };
-    pipeline.running = false;
+    // Mark as not running — the _runPipeline loop will detect this and call _finishPipeline('stopped').
+    // Also call _finishPipeline here as a safety net in case the loop already exited.
+    if (pipeline.running) {
+        _finishPipeline(sessionId, 'stopped');
+    }
     return { stopped: true };
 }
 
