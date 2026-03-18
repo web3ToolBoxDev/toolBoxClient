@@ -4910,14 +4910,16 @@ async function refreshStats() {
 
 // ─── Script Builder ───
 async function buildToolForPlatform(platformId, toolType) {
+    _pausePolling = true; // Free HTTP connections for long-running build request
     try {
         var res = await fetch(BASE_URL + '/api/platforms/' + _wfSessionId + '/' + encodeURIComponent(platformId) + '/tools/' + toolType + '/build', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
         });
         var data = await res.json();
         if (!data.success) alert(data.error || 'Build failed');
-        refreshWorkflowStatus();
     } catch (e) { alert(e.message); }
+    _pausePolling = false;
+    refreshWorkflowStatus(); pollWfStatus(); refreshStats();
 }
 
 async function executeSearchForPlatform(platformId) {
