@@ -26,6 +26,17 @@ function getStepHandlers() {
     return _stepHandlers;
 }
 
+// Lazy-require dashboardServer for SSE broadcast (avoid circular dep)
+let _dashboardServer = null;
+function _broadcastStatus(sessionId) {
+    if (!_dashboardServer) _dashboardServer = require('../dashboardServer');
+    const broadcaster = _dashboardServer._getSSEBroadcaster();
+    if (broadcaster) {
+        const status = getStatus(sessionId);
+        broadcaster(sessionId, 'workflowUpdate', status);
+    }
+}
+
 // Login status cache: source → { status, checkedAt }
 const _loginCache = new Map();
 
@@ -216,6 +227,7 @@ async function _executePipeline(sessionId, config, context) {
         }
 
         store.updateStepStatus(sessionId, step.name, 'running');
+        _broadcastStatus(sessionId);
 
         try {
             const result = await handler.execute({
@@ -226,14 +238,17 @@ async function _executePipeline(sessionId, config, context) {
             });
 
             store.updateStepStatus(sessionId, step.name, 'done', { result });
+            _broadcastStatus(sessionId);
         } catch (err) {
             store.updateStepStatus(sessionId, step.name, 'error', {
                 error: err.message
             });
+            _broadcastStatus(sessionId);
 
             // If a critical step fails, stop the pipeline
             if (['search'].includes(step.name)) {
                 store.updateRunStatus(sessionId, 'failed');
+                _broadcastStatus(sessionId);
                 return;
             }
         }
@@ -244,6 +259,7 @@ async function _executePipeline(sessionId, config, context) {
     if (finalRun && finalRun.status === 'running') {
         store.updateRunStatus(sessionId, 'completed');
         store.archiveRun(sessionId);
+        _broadcastStatus(sessionId);
     }
 }
 
