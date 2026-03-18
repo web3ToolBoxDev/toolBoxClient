@@ -3488,7 +3488,7 @@ function openJob(url) {
 async function deleteJob(jobUrl) {
     if (!confirm(t('confirmDeleteJob'))) return;
     try {
-        await fetch(BASE + '/api/jobs/' + encodeURIComponent(SID) + '/delete', {
+        await fetch(BASE_URL + '/api/jobs/' + _wfSessionId + '/delete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jobUrl: jobUrl })
@@ -3566,7 +3566,7 @@ async function bulkGenerateDocs() {
     document.getElementById('genDropdown').classList.remove('open');
     try {
         // Configure workflow: disable search + apply, enable generate with selected jobs
-        await fetch(BASE + '/api/workflow/' + encodeURIComponent(SID) + '/config', {
+        await fetch(BASE_URL + '/api/workflow/' + _wfSessionId + '/config', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -3578,7 +3578,7 @@ async function bulkGenerateDocs() {
             })
         });
         // Start workflow
-        await fetch(BASE + '/api/workflow/' + encodeURIComponent(SID) + '/start', {
+        await fetch(BASE_URL + '/api/workflow/' + _wfSessionId + '/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({})
@@ -3596,7 +3596,7 @@ async function bulkMarkApplied() {
     if (urls.length === 0) { alert(t('noJobsSelected')); return; }
     if (!confirm(t('confirmMarkApplied').replace('{n}', urls.length))) return;
     try {
-        await fetch(BASE + '/api/jobs/' + encodeURIComponent(SID) + '/bulk-status', {
+        await fetch(BASE_URL + '/api/jobs/' + _wfSessionId + '/bulk-status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jobUrls: urls, status: 'submitted' })
@@ -3611,7 +3611,7 @@ async function bulkArchive() {
     if (urls.length === 0) { alert(t('noJobsSelected')); return; }
     if (!confirm(t('confirmArchive').replace('{n}', urls.length))) return;
     try {
-        await fetch(BASE + '/api/jobs/' + encodeURIComponent(SID) + '/bulk-status', {
+        await fetch(BASE_URL + '/api/jobs/' + _wfSessionId + '/bulk-status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jobUrls: urls, status: 'archived' })
@@ -3626,7 +3626,7 @@ async function bulkDelete() {
     if (urls.length === 0) { alert(t('noJobsSelected')); return; }
     if (!confirm(t('confirmBulkDelete').replace('{n}', urls.length))) return;
     try {
-        await fetch(BASE + '/api/jobs/' + encodeURIComponent(SID) + '/bulk-delete', {
+        await fetch(BASE_URL + '/api/jobs/' + _wfSessionId + '/bulk-delete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jobUrls: urls })
