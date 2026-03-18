@@ -3664,13 +3664,54 @@ var _sectionRenderers = {
     }
 };
 
+function _parseJDSections(rawText, job) {
+    var sections = [];
+    // Add metadata header
+    var meta = [];
+    if (job.company) meta.push('Company: ' + job.company);
+    if (job.location) meta.push('Location: ' + job.location);
+    if (job.salary && job.salary !== '—') meta.push('Salary: ' + job.salary);
+    if (job.matchScore) meta.push('Match Score: ' + job.matchScore + '%');
+    if (meta.length) sections.push({ type: 'text', title: 'Overview', content: meta.join('\\n') });
+    // Try to split raw text by common section headings
+    var headingRe = /(?:^|\\n)\\s*(?:About|Who We|What You|Requirements|Qualifications|Responsibilities|What We|Why |Benefits|Compensation|Skills|Experience|Education|Job Type|Work Location|Posted|Description|Duties|Nice to Have|Must Have|The Role|Your Role|Our Team|The Team|How to Apply)[^\\n]*(?=:| -|\\n)/gi;
+    var parts = [];
+    var lastIdx = 0;
+    var match;
+    while ((match = headingRe.exec(rawText)) !== null) {
+        if (match.index > lastIdx) {
+            parts.push({ heading: null, body: rawText.slice(lastIdx, match.index).trim() });
+        }
+        var heading = match[0].trim().replace(/:$/, '');
+        lastIdx = match.index + match[0].length;
+        // Find next heading or end
+        var nextMatch = headingRe.exec(rawText);
+        var endIdx = nextMatch ? nextMatch.index : rawText.length;
+        if (nextMatch) headingRe.lastIndex = nextMatch.index; // rewind for next iteration
+        parts.push({ heading: heading, body: rawText.slice(lastIdx, endIdx).trim() });
+        lastIdx = endIdx;
+    }
+    if (lastIdx < rawText.length) {
+        parts.push({ heading: null, body: rawText.slice(lastIdx).trim() });
+    }
+    if (parts.length <= 1) {
+        // Couldn't parse sections — show as single block with line breaks
+        sections.push({ type: 'text', title: 'Job Description', content: rawText.replace(/([.!?])\\s+/g, '$1\\n\\n') });
+    } else {
+        parts.forEach(function(p) {
+            if (p.body) sections.push({ type: 'text', title: p.heading || 'Details', content: p.body });
+        });
+    }
+    return sections;
+}
+
 function showDocModal(jobUrl, defaultTab) {
     var job = (_cachedJobs || []).find(function(j){return j.url===jobUrl;});
     if (!job) return;
     var dj = (job.artifacts && job.artifacts.displayJson) || {};
-    // Inject JD as a virtual doc tab if fullText exists
+    // Inject JD as structured sections parsed from raw fullText
     if (job.fullText && job.fullText.length > 20) {
-        dj.jd = [{ type: 'text', title: 'Job Description', content: job.fullText }];
+        dj.jd = _parseJDSections(job.fullText, job);
     }
     _docModal.jobUrl = jobUrl;
     _docModal.docs = dj;
@@ -3689,7 +3730,7 @@ function _renderDocTabs(tabs) {
 }
 function switchDocTab(key) {
     _docModal.activeTab = key;
-    var tabs = ['resume','coverLetter','interviewPrep'].filter(function(k){return _docModal.docs[k]&&_docModal.docs[k].length;});
+    var tabs = ['jd','resume','coverLetter','interviewPrep'].filter(function(k){return _docModal.docs[k]&&_docModal.docs[k].length;});
     _renderDocTabs(tabs);
     _renderDocContent(key);
 }
