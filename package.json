@@ -47,10 +47,13 @@
           "!chromePath.json",
           "!/scripts/extensionInfo.json",
           "!agents/*/data/**",
-          "!agents/*/workspace/**"
+          "!agents/*/workspace/**",
+          "!ip2location/**",
+          "!scripts/node_modules/**"
         ]
       }
     ],
+    "beforeBuild": "./scripts/before-build.js",
     "mac": {
       "target": "dmg",
       "category": "public.app-category.developer-tools",
