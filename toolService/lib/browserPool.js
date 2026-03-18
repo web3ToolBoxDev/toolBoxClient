@@ -47,7 +47,7 @@ function buildChromeArgs(env, options = {}) {
         hardware: env.hardware,
         screen: env.screen,
         clientHint: env.clientHint,
-        languages_js: (env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
+        // languages_js: (env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
         languages_http: env.language_http
     };
     if (env.useProxy) {
@@ -91,7 +91,7 @@ async function launchWithFingerprint({ chromePath, savePath, env, headless = fal
     const browser = await puppeteer.launch({
         headless: headless ? 'new' : false,
         executablePath: chromePath,
-        ignoreDefaultArgs: ['--enable-automation'],
+        // ignoreDefaultArgs: ['--enable-automation'],
         userDataDir,
         args,
         defaultViewport: null
