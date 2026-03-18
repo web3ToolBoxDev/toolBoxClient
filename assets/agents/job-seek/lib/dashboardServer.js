@@ -3666,41 +3666,39 @@ var _sectionRenderers = {
 
 function _parseJDSections(rawText, job) {
     var sections = [];
-    // Add metadata header
+    // Metadata header
     var meta = [];
     if (job.company) meta.push('Company: ' + job.company);
     if (job.location) meta.push('Location: ' + job.location);
     if (job.salary && job.salary !== '—') meta.push('Salary: ' + job.salary);
     if (job.matchScore) meta.push('Match Score: ' + job.matchScore + '%');
     if (meta.length) sections.push({ type: 'text', title: 'Overview', content: meta.join('\\n') });
-    // Try to split raw text by common section headings
-    var headingRe = /(?:^|\\n)\\s*(?:About|Who We|What You|Requirements|Qualifications|Responsibilities|What We|Why |Benefits|Compensation|Skills|Experience|Education|Job Type|Work Location|Posted|Description|Duties|Nice to Have|Must Have|The Role|Your Role|Our Team|The Team|How to Apply)[^\\n]*(?=:| -|\\n)/gi;
-    var parts = [];
-    var lastIdx = 0;
-    var match;
-    while ((match = headingRe.exec(rawText)) !== null) {
-        if (match.index > lastIdx) {
-            parts.push({ heading: null, body: rawText.slice(lastIdx, match.index).trim() });
+    // Simple line-by-line split — no complex regex to avoid hanging on large text
+    var HEADINGS = ['about','who we','what you','requirements','qualifications','responsibilities',
+        'what we','why ','benefits','compensation','skills','experience','education',
+        'job type','work location','duties','nice to have','must have','the role',
+        'your role','how to apply','the team','our team'];
+    var lines = rawText.split(/\\n/);
+    var currentTitle = 'Job Description';
+    var currentBody = [];
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line) { currentBody.push(''); continue; }
+        var lower = line.toLowerCase().replace(/:$/, '');
+        var isHeading = line.length < 80 && HEADINGS.some(function(h) { return lower.indexOf(h) === 0; });
+        if (isHeading) {
+            if (currentBody.join('').trim()) sections.push({ type: 'text', title: currentTitle, content: currentBody.join('\\n').trim() });
+            currentTitle = line.replace(/:$/, '');
+            currentBody = [];
+        } else {
+            currentBody.push(line);
         }
-        var heading = match[0].trim().replace(/:$/, '');
-        lastIdx = match.index + match[0].length;
-        // Find next heading or end
-        var nextMatch = headingRe.exec(rawText);
-        var endIdx = nextMatch ? nextMatch.index : rawText.length;
-        if (nextMatch) headingRe.lastIndex = nextMatch.index; // rewind for next iteration
-        parts.push({ heading: heading, body: rawText.slice(lastIdx, endIdx).trim() });
-        lastIdx = endIdx;
     }
-    if (lastIdx < rawText.length) {
-        parts.push({ heading: null, body: rawText.slice(lastIdx).trim() });
-    }
-    if (parts.length <= 1) {
-        // Couldn't parse sections — show as single block with line breaks
-        sections.push({ type: 'text', title: 'Job Description', content: rawText.replace(/([.!?])\\s+/g, '$1\\n\\n') });
-    } else {
-        parts.forEach(function(p) {
-            if (p.body) sections.push({ type: 'text', title: p.heading || 'Details', content: p.body });
-        });
+    if (currentBody.join('').trim()) sections.push({ type: 'text', title: currentTitle, content: currentBody.join('\\n').trim() });
+    // If only metadata + 1 block, try sentence splitting for readability
+    if (sections.length <= 2 && rawText.length > 500) {
+        var bodyIdx = sections.length > 1 ? 1 : 0;
+        sections[bodyIdx].content = sections[bodyIdx].content.replace(/([.!?])\\s+([A-Z])/g, '$1\\n\\n$2');
     }
     return sections;
 }
@@ -5038,14 +5036,26 @@ populateEnvSelectors();
 
 // ─── SSE Live Push ───
 var _evtSource = null;
+// Debounced poll — coalesce rapid SSE events into a single poll
+var _wfPollTimer = null;
+function _debouncedPollWf() {
+    if (_wfPollTimer) return;
+    _wfPollTimer = setTimeout(function() { _wfPollTimer = null; pollWfStatus(); }, 500);
+}
+var _wfRefreshTimer = null;
+function _debouncedRefreshWf() {
+    if (_wfRefreshTimer) return;
+    _wfRefreshTimer = setTimeout(function() { _wfRefreshTimer = null; refreshWorkflowStatus(); }, 500);
+}
+
 function connectSSE() {
     if (_evtSource) _evtSource.close();
     _evtSource = new EventSource(BASE_URL + '/api/events/' + _wfSessionId);
     _evtSource.addEventListener('platformUpdate', function(e) {
-        try { refreshWorkflowStatus(); } catch (_) {}
+        try { _debouncedRefreshWf(); } catch (_) {}
     });
     _evtSource.addEventListener('workflowUpdate', function(e) {
-        try { pollWfStatus(); } catch (_) {}
+        try { _debouncedPollWf(); } catch (_) {}
     });
     _evtSource.addEventListener('alert', function(e) {
         try {
