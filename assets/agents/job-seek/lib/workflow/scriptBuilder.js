@@ -30,21 +30,12 @@ function getTSC() {
     return _tsc;
 }
 
-// Anti-debugging snippet — injected via page_evaluate before script execution.
-// Neutralizes Indeed/LinkedIn debugger traps that freeze pages when CDP is connected.
-const _antiDebugSnippet = `(function() {
-    if (window.__antiDebugPatched) return;
-    window.__antiDebugPatched = true;
-    var origSI = window.setInterval, origST = window.setTimeout;
-    function hasTrap(fn) { try { var s = typeof fn === 'function' ? fn.toString() : String(fn); return s.includes('debugger'); } catch(e) { return false; } }
-    window.setInterval = function(fn) { return hasTrap(fn) ? 0 : origSI.apply(this, arguments); };
-    window.setTimeout = function(fn) { return hasTrap(fn) ? 0 : origST.apply(this, arguments); };
-    try {
-        var OF = Function;
-        window.Function = function() { var a = Array.from(arguments); var b = a.length ? a[a.length-1] : ''; if (typeof b === 'string' && b.includes('debugger')) a[a.length-1] = b.replace(/debugger/g, 'void 0'); return OF.apply(this, a); };
-        window.Function.prototype = OF.prototype;
-    } catch(e) {}
-})()`;
+// Anti-debug tool (generic utility — detect + inject on demand)
+let _antiDebug = null;
+function getAntiDebug() {
+    if (!_antiDebug) _antiDebug = require('../tools/antiDebug');
+    return _antiDebug;
+}
 
 let _platformService = null;
 function getPlatformService() {
@@ -775,17 +766,36 @@ async function verifyJDExtraction(browserId, pageIndex, script, testParams) {
         const execParams = { keywords, location, jobType: '', minSalary: '', _verifyMode: false };
 
         console.log(`[dashboard:build] verify-jd — Running script with _verifyMode=false to test JD extraction...`);
-        // Neutralize anti-debug traps before JD extraction (same as executeSearchScript)
-        try { await toolCall('page_evaluate', { browserId, pageIndex, expression: _antiDebugSnippet }); } catch (_) {}
         const pageProxy = buildPageProxy(browserId, pageIndex);
         const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
         const scriptFn = new AsyncFunction('page', 'params', script);
 
         const t0 = Date.now();
-        const result = await Promise.race([
-            scriptFn(pageProxy, execParams),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('JD extraction timed out after 2 minutes')), JD_VERIFY_TIMEOUT))
-        ]);
+        let result;
+        try {
+            result = await Promise.race([
+                scriptFn(pageProxy, execParams),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), JD_VERIFY_TIMEOUT))
+            ]);
+        } catch (jdErr) {
+            if ((jdErr.message || '').includes('timeout')) {
+                // Timeout → detect & inject anti-debug, then retry once
+                console.log('[dashboard:build] verify-jd — timed out, checking for debug traps...');
+                const ad = await getAntiDebug().ensureAntiDebug(browserId, pageIndex);
+                if (ad.detected && ad.injected) {
+                    console.log(`[dashboard:build] verify-jd — debug traps neutralized [${ad.details.join(',')}], retrying...`);
+                    try { await toolCall('page_screenshot', { browserId, pageIndex }); } catch (_) {}
+                    result = await Promise.race([
+                        scriptFn(pageProxy, execParams),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('JD extraction timed out after anti-debug retry')), JD_VERIFY_TIMEOUT))
+                    ]);
+                } else {
+                    throw new Error('JD extraction timed out after 2 minutes');
+                }
+            } else {
+                throw jdErr;
+            }
+        }
         const elapsed = Date.now() - t0;
 
         if (!result || !result.jobs || !Array.isArray(result.jobs) || result.jobs.length === 0) {
@@ -905,15 +915,7 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
             console.log(`[search:exec] Tab ${pageIndex} activated via screenshot`);
         } catch (_) { /* best-effort */ }
 
-        // Neutralize anti-debugging traps (Indeed injects `debugger` statements that freeze
-        // page execution when CDP/DevTools is connected).
-        try {
-            await toolCall('page_evaluate', { browserId, pageIndex, expression: _antiDebugSnippet });
-            console.log('[search:exec] Anti-debug traps neutralized');
-        } catch (_) { /* best-effort */ }
-
-        // Build execution context — we create an AsyncFunction that receives `page` helpers and `params`
-        // The script expects `page` (Puppeteer-like) and `params`. We bridge via toolServiceClient calls.
+        // Build execution context
         const pageProxy = buildPageProxy(browserId, pageIndex);
         const params = {
             keywords: searchParams.keywords || '',
@@ -924,14 +926,38 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
             maxResults: options.maxResults || 30
         };
 
-        // Execute the stored script in a sandboxed async function (with timeout)
-        const EXEC_TIMEOUT = 180000; // 3 minutes max for search script execution
+        // Execute the stored script (with smart anti-debug retry on timeout)
+        const EXEC_TIMEOUT = 180000; // 3 minutes max
         const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
         const scriptFn = new AsyncFunction('page', 'params', tool.script);
-        const result = await Promise.race([
-            scriptFn(pageProxy, params),
-            new Promise((_, reject) => setTimeout(() => reject(new Error(`Search script execution timed out after ${EXEC_TIMEOUT / 1000}s`)), EXEC_TIMEOUT))
-        ]);
+        let result;
+        try {
+            result = await Promise.race([
+                scriptFn(pageProxy, params),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), EXEC_TIMEOUT))
+            ]);
+        } catch (execErr) {
+            const isTimeout = (execErr.message || '').includes('timeout');
+            if (isTimeout) {
+                // Timeout → likely debugger trap. Detect + inject + retry once.
+                console.log('[search:exec] Script timed out — checking for debug traps...');
+                const ad = await getAntiDebug().ensureAntiDebug(browserId, pageIndex);
+                if (ad.detected) {
+                    console.log(`[search:exec] Debug traps found [${ad.details.join(',')}] — retrying script...`);
+                    try {
+                        await toolCall('page_screenshot', { browserId, pageIndex }); // re-activate tab
+                    } catch (_) {}
+                    result = await Promise.race([
+                        scriptFn(pageProxy, params),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error(`Search script timed out after anti-debug retry (${EXEC_TIMEOUT / 1000}s)`)), EXEC_TIMEOUT))
+                    ]);
+                } else {
+                    throw new Error(`Search script execution timed out after ${EXEC_TIMEOUT / 1000}s (no debug traps detected)`);
+                }
+            } else {
+                throw execErr;
+            }
+        }
 
         if (result && result.success === false) {
             // Capture failure screenshot before closing browser (for AI failure analysis)
@@ -1003,21 +1029,33 @@ function buildPageProxy(browserId, pageIndex) {
     // 120s per tool call — Indeed anti-bot checks + JD extraction can exceed 60s
     const BASE_TIMEOUT = 120000;
 
-    // Retry-with-activation wrapper: if a tool call times out, activate the tab
-    // (background tabs get throttled/frozen by Chrome) and retry once.
+    // Retry-with-activation wrapper: if a tool call times out:
+    //   1st timeout → activate tab + retry
+    //   2nd timeout → ensureAntiDebug + activate tab + final retry
+    let _antiDebugApplied = false;
     const tc = async (name, params) => {
         try {
             return await toolCall(name, params, BASE_TIMEOUT);
         } catch (err) {
             const msg = (err && err.message) || '';
-            if (msg.includes('timed out')) {
-                console.log(`[pageProxy] ${name} timed out — activating tab ${pageIndex} and retrying...`);
-                try {
-                    await toolCall('page_screenshot', { browserId, pageIndex }, 30000);
-                } catch (_) { /* best-effort activation */ }
+            if (!msg.includes('timed out')) throw err;
+
+            // 1st retry: activate tab
+            console.log(`[pageProxy] ${name} timed out — activating tab ${pageIndex} and retrying...`);
+            try { await toolCall('page_screenshot', { browserId, pageIndex }, 30000); } catch (_) {}
+            try {
+                return await toolCall(name, params, BASE_TIMEOUT);
+            } catch (err2) {
+                const msg2 = (err2 && err2.message) || '';
+                if (!msg2.includes('timed out') || _antiDebugApplied) throw err2;
+
+                // 2nd retry: anti-debug + activate tab (last chance)
+                console.log(`[pageProxy] ${name} timed out again — applying anti-debug and final retry...`);
+                _antiDebugApplied = true;
+                try { await getAntiDebug().ensureAntiDebug(browserId, pageIndex); } catch (_) {}
+                try { await toolCall('page_screenshot', { browserId, pageIndex }, 30000); } catch (_) {}
                 return toolCall(name, params, BASE_TIMEOUT);
             }
-            throw err;
         }
     };
     const proxy = {

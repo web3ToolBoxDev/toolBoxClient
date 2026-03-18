@@ -15,11 +15,17 @@
  */
 
 const toolServiceClient = require('./core/toolServiceClient');
+const antiDebug = require('./tools/antiDebug');
 
 const MAX_ROUNDS = 10;
 
 // ─── Domain tool handlers (registered by domain modules) ───
 const _domainHandlers = new Map();
+
+// ─── Built-in utility tools ───
+_domainHandlers.set('anti_debug_check', (params) => antiDebug.detectDebugTraps(params.browserId, params.pageIndex));
+_domainHandlers.set('anti_debug_inject', (params) => antiDebug.injectAntiDebug(params.browserId, params.pageIndex));
+_domainHandlers.set('anti_debug_ensure', (params) => antiDebug.ensureAntiDebug(params.browserId, params.pageIndex));
 
 /**
  * Register a local domain tool handler.
