@@ -3640,7 +3640,7 @@ async function bulkDelete() {
 
 // ─── Document Modal ───
 var _docModal = { jobUrl: null, activeTab: null, docs: {} };
-var _docTabLabels = { resume: 'Resume', coverLetter: 'Cover Letter', interviewPrep: 'Interview Prep' };
+var _docTabLabels = { jd: 'Job Description', resume: 'Resume', coverLetter: 'Cover Letter', interviewPrep: 'Interview Prep' };
 
 var _sectionRenderers = {
     skills: function(s) {
@@ -3668,11 +3668,15 @@ var _sectionRenderers = {
 
 function showDocModal(jobUrl, defaultTab) {
     var job = (_cachedJobs || []).find(function(j){return j.url===jobUrl;});
-    if (!job || !job.artifacts) return;
-    var dj = job.artifacts.displayJson || {};
+    if (!job) return;
+    var dj = (job.artifacts && job.artifacts.displayJson) || {};
+    // Inject JD as a virtual doc tab if fullText exists
+    if (job.fullText && job.fullText.length > 20) {
+        dj.jd = [{ type: 'text', title: 'Job Description', content: job.fullText }];
+    }
     _docModal.jobUrl = jobUrl;
     _docModal.docs = dj;
-    var tabs = ['resume','coverLetter','interviewPrep'].filter(function(k){return dj[k]&&dj[k].length;});
+    var tabs = ['jd','resume','coverLetter','interviewPrep'].filter(function(k){return dj[k]&&dj[k].length;});
     if (!tabs.length) { return; }
     _docModal.activeTab = (defaultTab && tabs.includes(defaultTab)) ? defaultTab : tabs[0];
     document.getElementById('modalTitle').textContent = (job.title||'') + (job.company ? ' — ' + job.company : '');
@@ -3751,6 +3755,7 @@ function renderJobRow(job) {
 
     // Artifact badges (docs column) — click opens doc preview modal
     var badges = '';
+    if (job.fullText && job.fullText.length > 20) badges += '<span class="artifact-badge" title="Job Description — click to preview" style="cursor:pointer;background:#3b82f6;width:24px;font-size:0.58rem;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'jd\\')">JD</span>';
     if (log.generate?.aiGenerated) badges += '<span class="artifact-badge ai-badge" title="AI-generated documents">AI</span>';
     if (arts.resume && arts.resume !== 'generated' && arts.resume.length > 10) badges += '<span class="artifact-badge" title="Resume — click to preview" style="cursor:pointer;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'resume\\')">R</span>';
     if (arts.coverLetter && arts.coverLetter !== 'generated' && arts.coverLetter.length > 10) badges += '<span class="artifact-badge" title="Cover Letter — click to preview" style="cursor:pointer;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'coverLetter\\')">C</span>';
