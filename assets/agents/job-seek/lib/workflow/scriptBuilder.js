@@ -52,7 +52,7 @@ const JD_VERIFY_MAX_RETRIES = 3;
 
 const DOM_EXTRACT_SELECTOR = 'input, button, select, a[href], form, textarea, [role="search"], [role="listbox"]';
 
-const SEARCH_OUTPUT_SCHEMA = '{ jobs: [{ title, company, url, location, salary, description, fullText }] }  // salary = compensation/pay (e.g. "$80K-$120K", "CA$90,000/yr"), NOT job type. Leave empty string if no salary shown.';
+const SEARCH_OUTPUT_SCHEMA = '{ jobs: [{ title, company, url, location, salary, jobType, description, fullText }] }  // salary = compensation/pay ONLY (e.g. "$80K-$120K", "CA$90,000/yr"). jobType = employment type (e.g. "Full-time", "Contract", "Part-time"). NEVER put employment type in salary. Leave empty string if not shown.';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -642,9 +642,11 @@ Return ONLY a JavaScript code block (no imports, no browser creation). The code 
       selectors from other platforms. Look for the largest text block in the detail area.
    e. Store the extracted text as job.fullText (string).
    f. Wrap each iteration in try/catch — if detail extraction fails, set fullText to '' and continue.
-   g. The final output for each job: { title, company, url, location, salary, description (snippet), fullText (complete JD) }.
-      IMPORTANT: salary must be the compensation/pay range (e.g. "$80K-$120K", "CA$90,000/yr").
-      Do NOT put job type (Full-time, Part-time, Contract) in salary — leave salary as empty string if not shown.
+   g. The final output for each job: { title, company, url, location, salary, jobType, description (snippet), fullText (complete JD) }.
+      IMPORTANT field definitions — do NOT confuse these two fields:
+      - salary: compensation/pay range ONLY (e.g. "$80K-$120K", "CA$90,000/yr"). Leave empty string "" if no salary/pay is shown.
+      - jobType: employment type (e.g. "Full-time", "Part-time", "Contract", "Internship"). Leave empty string "" if not shown.
+      NEVER put "Full-time", "Part-time", "Contract" etc. in the salary field — those go in jobType.
 
 DOM structure of the page:
 ${domSummary}

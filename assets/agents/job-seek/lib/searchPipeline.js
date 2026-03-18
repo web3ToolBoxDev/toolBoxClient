@@ -139,6 +139,7 @@ async function _selfHealAndRetry(sessionId, platformTool, query, config, errorMs
                 location: j.location || query.location || '',
                 url: normalizeJobUrl(j.url || j.link || ''),
                 salary: j.salary || '',
+                jobType: j.jobType || '',
                 source: query.source,
                 fullText: j.fullText || ''
             }));
@@ -352,6 +353,27 @@ function _buildPlatformToolMap(sessionId, selectedPlatformIds) {
 }
 
 /**
+ * Strip markdown formatting from text to produce clean search-friendly strings.
+ * Removes: bold (**), italic (*), headers (#), list markers (- ), backticks, links.
+ * @param {string} text
+ * @returns {string}
+ */
+function _stripMarkdownFormatting(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text
+        .replace(/\*\*([^*]+)\*\*/g, '$1')   // **bold** → bold
+        .replace(/\*([^*]+)\*/g, '$1')         // *italic* → italic
+        .replace(/`([^`]+)`/g, '$1')           // `code` → code
+        .replace(/^#{1,6}\s+/gm, '')           // # heading → heading
+        .replace(/^\s*[-*+]\s+/gm, '')         // - list item → list item
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // [text](url) → text
+        .replace(/!\[([^\]]*)\]\([^)]+\)/g, '') // ![alt](url) → remove images
+        .replace(/~~([^~]+)~~/g, '$1')         // ~~strikethrough~~ → strikethrough
+        .replace(/\s+/g, ' ')                  // collapse whitespace
+        .trim();
+}
+
+/**
  * Generate search queries based on user's direction (job title, location, skills).
  * Returns an array of query objects for different job sites.
  */
@@ -365,10 +387,13 @@ function _buildPlatformToolMap(sessionId, selectedPlatformIds) {
  */
 function buildSearchQueries(direction, profile, options = {}) {
     const queries = [];
-    const jobTitle = direction.q_job_title || direction.jobTitle || '';
-    const location = direction.q_location || direction.location || '';
+    const jobTitle = _stripMarkdownFormatting(direction.q_job_title || direction.jobTitle || '');
+    const location = _stripMarkdownFormatting(direction.q_location || direction.location || '');
     const rawSkills = profile.skills || '';
-    const skills = (Array.isArray(rawSkills) ? rawSkills : rawSkills.split(/[,，\n]/)).map(s => String(s).trim()).filter(Boolean).slice(0, 6);
+    const skills = (Array.isArray(rawSkills) ? rawSkills : rawSkills.split(/[,，\n]/))
+        .map(s => _stripMarkdownFormatting(String(s).trim()))
+        .filter(Boolean)
+        .slice(0, 6);
     const pageOffsets = options.pageOffsets || {};
     const totalRuns = options.totalRuns || 0;  // how many previous pipeline runs
 
@@ -947,6 +972,7 @@ async function _runPipeline(sessionId) {
                 company: listing.company,
                 location: listing.location,
                 salary: listing.salary,
+                jobType: listing.jobType || '',
                 fullText: listing.fullText || '',
                 matchScore: score,
                 status,
@@ -1064,6 +1090,7 @@ async function _runPipeline(sessionId) {
                             location: j.location || q.location || '',
                             url: normalizeJobUrl(j.url || j.link || ''),
                             salary: j.salary || '',
+                            jobType: j.jobType || '',
                             source: q.source,
                             fullText: j.fullText || ''
                         }));
@@ -1364,10 +1391,35 @@ function getPipelineStatus(sessionId) {
  */
 function _buildInterviewPrompt(job, profile) {
     const req = job.artifacts?.requirements || {};
-    const techSkills = (req.technical || []).join(', ') || 'N/A';
-    const responsibilities = (req.responsibilities || []).map(r => `- ${r}`).join('\n') || 'N/A';
-    const education = req.education || 'N/A';
-    const experience = req.experience || 'N/A';
+    const sections = req.sections || {};
+    // Try structured sections first, then top-level fields, then fall back to fullText extraction
+    let techSkills = (sections.technical || req.technical || []);
+    techSkills = (Array.isArray(techSkills) ? techSkills.join(', ') : String(techSkills || '')).trim();
+    let responsibilities = (sections.responsibilities || req.responsibilities || []);
+    responsibilities = (Array.isArray(responsibilities)
+        ? responsibilities.map(r => `- ${r}`).join('\n')
+        : String(responsibilities || '')).trim();
+    const education = sections.education || req.education || '';
+    const experience = sections.experience || req.experience || '';
+
+    // When requirements are empty, extract key info from the raw JD text
+    const jdText = job.fullText || req.fullText || '';
+    if ((!techSkills || techSkills === 'N/A') && jdText) {
+        // Extract lines that mention skills/technologies/requirements
+        const skillLines = jdText.split(/[\n.]+/)
+            .map(l => l.trim())
+            .filter(l => l.length > 5 && /skill|tech|requir|qualif|proficien|experienc|knowledge|familiar/i.test(l))
+            .slice(0, 10);
+        techSkills = skillLines.join(', ') || 'See job description above';
+    }
+    if ((!responsibilities || responsibilities === 'N/A') && jdText) {
+        // Extract lines that mention responsibilities/duties/role
+        const respLines = jdText.split(/[\n.]+/)
+            .map(l => l.trim())
+            .filter(l => l.length > 10 && /responsib|dut|role|you will|you\'ll|work with|develop|design|implement|manage|lead|build|maintain|creat|collaborat/i.test(l))
+            .slice(0, 8);
+        responsibilities = respLines.map(r => `- ${r}`).join('\n') || 'See job description above';
+    }
 
     // Build candidate snapshot from profile
     const candidateLines = [];
@@ -1406,14 +1458,14 @@ You are an expert interview coach specializing in tech hiring. I am preparing fo
 
 ## Job Requirements
 
-**Technical Skills:** ${techSkills}
+**Technical Skills:** ${techSkills || 'N/A'}
 
 **Key Responsibilities:**
-${responsibilities}
+${responsibilities || 'N/A'}
 
-**Education:** ${education}
-**Experience:** ${experience}
-
+**Education:** ${education || 'N/A'}
+**Experience:** ${experience || 'N/A'}
+${jdText ? `\n**Full Job Description:**\n${jdText.slice(0, 3000)}\n` : ''}
 ## My Background
 
 ${candidateSnapshot}
@@ -1794,8 +1846,16 @@ function _parseCombinedResponse(raw) {
  */
 function _buildAiDocPrompt(job, profile) {
     const req = job.artifacts?.requirements || {};
-    const techSkills = (req.technical || []).join(', ') || 'N/A';
-    const responsibilities = (req.responsibilities || []).map(r => `- ${r}`).join('\n') || 'N/A';
+    const sections = req.sections || {};
+    let techSkills = (sections.technical || req.technical || []);
+    techSkills = (Array.isArray(techSkills) ? techSkills.join(', ') : String(techSkills || '')).trim() || 'N/A';
+    let responsibilities = (sections.responsibilities || req.responsibilities || []);
+    responsibilities = (Array.isArray(responsibilities)
+        ? responsibilities.map(r => `- ${r}`).join('\n')
+        : String(responsibilities || '')).trim() || 'N/A';
+    const education = sections.education || req.education || 'N/A';
+    const experience = sections.experience || req.experience || 'N/A';
+    const jdText = job.fullText || req.fullText || '';
 
     const candidateLines = [];
     if (profile) {
@@ -1820,8 +1880,9 @@ function _buildAiDocPrompt(job, profile) {
 Technical Skills: ${techSkills}
 Responsibilities:
 ${responsibilities}
-Education: ${req.education || 'N/A'}
-Experience: ${req.experience || 'N/A'}
+Education: ${education}
+Experience: ${experience}
+${jdText ? `\nFull Job Description:\n${jdText.slice(0, 2000)}\n` : ''}
 
 ## Candidate Background
 ${candidateSnapshot}
