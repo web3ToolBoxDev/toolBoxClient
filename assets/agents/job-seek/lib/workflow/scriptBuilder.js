@@ -30,6 +30,22 @@ function getTSC() {
     return _tsc;
 }
 
+// Anti-debugging snippet — injected via page_evaluate before script execution.
+// Neutralizes Indeed/LinkedIn debugger traps that freeze pages when CDP is connected.
+const _antiDebugSnippet = `(function() {
+    if (window.__antiDebugPatched) return;
+    window.__antiDebugPatched = true;
+    var origSI = window.setInterval, origST = window.setTimeout;
+    function hasTrap(fn) { try { var s = typeof fn === 'function' ? fn.toString() : String(fn); return s.includes('debugger'); } catch(e) { return false; } }
+    window.setInterval = function(fn) { return hasTrap(fn) ? 0 : origSI.apply(this, arguments); };
+    window.setTimeout = function(fn) { return hasTrap(fn) ? 0 : origST.apply(this, arguments); };
+    try {
+        var OF = Function;
+        window.Function = function() { var a = Array.from(arguments); var b = a.length ? a[a.length-1] : ''; if (typeof b === 'string' && b.includes('debugger')) a[a.length-1] = b.replace(/debugger/g, 'void 0'); return OF.apply(this, a); };
+        window.Function.prototype = OF.prototype;
+    } catch(e) {}
+})()`;
+
 let _platformService = null;
 function getPlatformService() {
     if (!_platformService) _platformService = require('./platformService');
@@ -759,6 +775,8 @@ async function verifyJDExtraction(browserId, pageIndex, script, testParams) {
         const execParams = { keywords, location, jobType: '', minSalary: '', _verifyMode: false };
 
         console.log(`[dashboard:build] verify-jd — Running script with _verifyMode=false to test JD extraction...`);
+        // Neutralize anti-debug traps before JD extraction (same as executeSearchScript)
+        try { await toolCall('page_evaluate', { browserId, pageIndex, expression: _antiDebugSnippet }); } catch (_) {}
         const pageProxy = buildPageProxy(browserId, pageIndex);
         const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
         const scriptFn = new AsyncFunction('page', 'params', script);
@@ -885,6 +903,13 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
         try {
             await toolCall('page_screenshot', { browserId, pageIndex });
             console.log(`[search:exec] Tab ${pageIndex} activated via screenshot`);
+        } catch (_) { /* best-effort */ }
+
+        // Neutralize anti-debugging traps (Indeed injects `debugger` statements that freeze
+        // page execution when CDP/DevTools is connected).
+        try {
+            await toolCall('page_evaluate', { browserId, pageIndex, expression: _antiDebugSnippet });
+            console.log('[search:exec] Anti-debug traps neutralized');
         } catch (_) { /* best-effort */ }
 
         // Build execution context — we create an AsyncFunction that receives `page` helpers and `params`
