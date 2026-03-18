@@ -3009,6 +3009,7 @@ function buildDashboardHTML(sessionId) {
         <th>Score</th>
         <th>Status</th>
         <th>Applied</th>
+        <th class="col-docs" data-i18n="docs">Docs</th>
         <th>Link</th>
       </tr>
     </thead>
@@ -3816,14 +3817,26 @@ async function refreshHistory() {
         var body = document.getElementById('historyBody');
         var noHist = document.getElementById('noHistory');
         if (jobs.length > 0) {
+            // Cache history jobs for doc modal
+            jobs.forEach(function(j) {
+                if (j.url && !_cachedJobs.find(function(c){ return c.url === j.url; })) _cachedJobs.push(j);
+            });
             body.innerHTML = jobs.map(function(j) {
+                var url = esc(j.url || '');
+                var safeUrl = url.replace(/'/g, "\\\\'");
+                var arts = j.artifacts || {};
+                var badges = '';
+                if (arts.displayJson && arts.displayJson.resume) badges += '<span class="artifact-badge" title="Resume" style="cursor:pointer;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'resume\\')">R</span>';
+                if (arts.displayJson && arts.displayJson.coverLetter) badges += '<span class="artifact-badge" title="Cover Letter" style="cursor:pointer;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'coverLetter\\')">C</span>';
+                if (arts.displayJson && arts.displayJson.interviewPrep) badges += '<span class="artifact-badge" title="Interview Prep" style="cursor:pointer;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'interviewPrep\\')">P</span>';
                 return '<tr>' +
                     '<td>' + esc(j.title || '') + '</td>' +
                     '<td>' + esc(j.company || '') + '</td>' +
                     '<td class="score-cell ' + (j.matchScore != null ? scoreClass(j.matchScore) : '') + '">' + (j.matchScore != null ? j.matchScore + '%' : '—') + '</td>' +
                     '<td><span class="status-badge ' + (j.status || '') + '">' + esc(j.status || '') + '</span></td>' +
-                    '<td>' + esc((j.artifacts?.appliedAt || '').slice(0, 10)) + '</td>' +
-                    '<td><a href="' + esc(j.url || '') + '" target="_blank" style="color:#8b9aff">Open</a></td>' +
+                    '<td>' + esc((arts.appliedAt || '').slice(0, 10)) + '</td>' +
+                    '<td class="col-docs"><div class="artifact-badges">' + (badges || '—') + '</div></td>' +
+                    '<td><a href="' + url + '" target="_blank" style="color:#8b9aff">Open</a></td>' +
                 '</tr>';
             }).join('');
             noHist.style.display = 'none';
