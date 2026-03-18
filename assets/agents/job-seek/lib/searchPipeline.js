@@ -137,7 +137,7 @@ async function _selfHealAndRetry(sessionId, platformTool, query, config, errorMs
                 title: j.title || '',
                 company: j.company || '',
                 location: j.location || query.location || '',
-                url: j.url || j.link || '',
+                url: normalizeJobUrl(j.url || j.link || ''),
                 salary: j.salary || '',
                 source: query.source,
                 fullText: j.fullText || ''
@@ -264,7 +264,34 @@ async function _expandQueries(direction, profile, gap, previousQueries, aiExpand
     return newQueries;
 }
 
-// Seen jobs: sessionId → Set<url> — persists across pipeline runs within a session
+// ─── URL Normalization ───
+// Indeed/LinkedIn URLs contain tracking params that make the same job look different.
+// Normalize to canonical form for dedup.
+const _STRIP_PARAMS = new Set(['from', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
+    'ref', 'refcode', 'trk', 'trackingId', 'currentJobId', 'eBP', 'recommendedFlavor',
+    'fccid', 'vjs', 'vjk', 'advn', 'sjdu', 'tk', 'fromage', 'attributionid']);
+
+function normalizeJobUrl(rawUrl) {
+    if (!rawUrl) return '';
+    try {
+        const u = new URL(rawUrl);
+        // Indeed: extract jk param as canonical key
+        if (u.hostname.includes('indeed.com') && u.searchParams.has('jk')) {
+            return `${u.origin}${u.pathname}?jk=${u.searchParams.get('jk')}`;
+        }
+        // LinkedIn: strip tracking, keep job ID in path
+        if (u.hostname.includes('linkedin.com')) {
+            return `${u.origin}${u.pathname}`;
+        }
+        // Generic: strip known tracking params
+        for (const p of _STRIP_PARAMS) u.searchParams.delete(p);
+        return u.toString();
+    } catch {
+        return rawUrl; // not a valid URL, use as-is
+    }
+}
+
+// Seen jobs: sessionId → Set<normalizedUrl> — persists across pipeline runs within a session
 const _seenJobs = new Map();
 
 function _getSeenJobs(sessionId) {
@@ -273,7 +300,7 @@ function _getSeenJobs(sessionId) {
 }
 
 function _addSeenJob(sessionId, url) {
-    _getSeenJobs(sessionId).add(url);
+    _getSeenJobs(sessionId).add(normalizeJobUrl(url));
 }
 
 function _clearSeenJobs(sessionId) {
@@ -445,7 +472,7 @@ function startPipeline(sessionId, config, direction, profile) {
     // Restore previously seen URLs so we skip already-processed jobs
     if (history.seenUrls?.length) {
         const seen = _getSeenJobs(sessionId);
-        for (const url of history.seenUrls) seen.add(url);
+        for (const url of history.seenUrls) seen.add(normalizeJobUrl(url));
         console.log(`[searchPipeline] Restored ${history.seenUrls.length} seen URLs + ${pipeline._allQueries.length} previous keywords + ${Object.keys(pipeline._pageOffsets).length} page offsets`);
     }
 
@@ -601,6 +628,14 @@ async function _runPipeline(sessionId) {
                             cell: 'login', status: 'error',
                             message: 'Auto-launch failed: ' + (launchResult.error || 'unknown')
                         });
+                        dashboardServer.updatePipelineProgress(sessionId, {
+                            phase: 'taskFailed',
+                            title: `${platformTool.name} — Login failed`,
+                            company: '', platform: source, failPhase: 'search',
+                            error: 'Auto-launch failed: ' + (launchResult.error || 'unknown'),
+                            at: new Date().toISOString(), currentJob: null
+                        });
+                        pipeline.progress.errors.push(`[${source}] Login failed: ${launchResult.error || 'unknown'}`);
                         _blockedSources.add(source);
                         return false;
                     }
@@ -619,6 +654,18 @@ async function _runPipeline(sessionId) {
                     cell: 'login', status: 'error',
                     message: 'Browser not open. Launch login first.'
                 });
+                // Broadcast to Workflow Progress so user can see and retry
+                dashboardServer.updatePipelineProgress(sessionId, {
+                    phase: 'taskFailed',
+                    title: `${platformTool.name} — Login required`,
+                    company: '',
+                    platform: source,
+                    failPhase: 'search',
+                    error: `No browser open for "${platformTool.name}" and no envId. Launch login first.`,
+                    at: new Date().toISOString(),
+                    currentJob: null
+                });
+                pipeline.progress.errors.push(`[${source}] Login required: no browser`);
                 _blockedSources.add(source);
                 return false;
             }
@@ -1013,7 +1060,7 @@ async function _runPipeline(sessionId) {
                             title: j.title || '',
                             company: j.company || '',
                             location: j.location || q.location || '',
-                            url: j.url || j.link || '',
+                            url: normalizeJobUrl(j.url || j.link || ''),
                             salary: j.salary || '',
                             source: q.source,
                             fullText: j.fullText || ''
@@ -1036,6 +1083,13 @@ async function _runPipeline(sessionId) {
                         dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
                             cell: 'search', status: 'error',
                             message: `Search failed: ${errMsg} — please Rebuild search tool`
+                        });
+                        dashboardServer.updatePipelineProgress(sessionId, {
+                            phase: 'taskFailed',
+                            title: `${platformTool.name} — Search failed`,
+                            company: '', platform: q.source, failPhase: 'search',
+                            error: errMsg,
+                            at: new Date().toISOString(), currentJob: null
                         });
                         pipeline.progress.errors.push(`[${q.source}] Search tool failed: ${errMsg}`);
                     }
