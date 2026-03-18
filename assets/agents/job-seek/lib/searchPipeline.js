@@ -492,6 +492,7 @@ function startPipeline(sessionId, config, direction, profile) {
         _sourceQualified: {},   // source → number of qualified jobs (persisted across rounds)
         _sourceResultCount: {}, // source → number of results fetched (persisted across rounds)
         _selfHealAttempts: {},  // source → number of self-heal attempts (max 2 per source)
+        _prevFailedSources: history.failedSources || [],  // sources that failed in previous run (for retry)
         stoppedAt: null
     };
 
@@ -559,6 +560,23 @@ async function _runPipeline(sessionId) {
     _log(`Starting search: "${jobTitle}" in "${location || 'any'}" via ${mode}`);
     _log(`Config: minScore=${config.minScore}, targetCount=${config.targetCount}/platform, maxResults=${config.maxResults}/platform`);
     _log(`AI: aiMatcher=${config.aiMatcher ? 'SET' : 'NULL'}, aiInvoke=${config.aiInvoke ? 'SET' : 'NULL'}, aiExpander=${config.aiExpander ? 'SET' : 'NULL'}`);
+    // Log previously-failed sources that will be retried in this run
+    const prevFailedSources = pipeline._prevFailedSources || [];
+    if (prevFailedSources.length > 0) {
+        _log(`Retrying ${prevFailedSources.length} previously-failed source(s): ${prevFailedSources.join(', ')}`);
+        // Ensure failed sources have queries generated for this run.
+        // If a previously-failed source has no queries yet, add a primary query for it.
+        const existingSources = new Set(queries.map(q => q.source));
+        for (const failedSource of prevFailedSources) {
+            if (!existingSources.has(failedSource)) {
+                const retryQuery = { query: jobTitle, location, source: failedSource };
+                if (config.envId) retryQuery.envId = config.envId;
+                queries.push(retryQuery);
+                _log(`+ Added retry query for failed source: [${failedSource}] "${jobTitle}"`);
+            }
+        }
+    }
+
     _log(`History: run #${totalRuns + 1}, ${previouslySeen.size} seen URLs, ${Object.keys(pipeline._pageOffsets).length} page offsets`);
     _log(`Queries: ${queries.map(q => `[${q.source}] "${q.query}" @ ${q.location || 'remote'}${q.pageOffset ? ` (page ${q.pageOffset})` : ''}`).join(' | ')}`);
 
@@ -608,6 +626,8 @@ async function _runPipeline(sessionId) {
     const _checkedPlatforms = new Set();  // platforms already validated
     const _blockedSources = new Set();    // sources that failed validation
     const _failedSources = new Set();     // sources whose search query failed at runtime
+    // Store _failedSources on pipeline so _finishPipeline can persist it for next run
+    pipeline._failedSources = _failedSources;
     // Use pipeline-level tracking for adaptive search support
     const _sourceResultCount = pipeline._sourceResultCount;
     const _sourceQualified = pipeline._sourceQualified;
@@ -1343,7 +1363,9 @@ function _finishPipeline(sessionId, reason) {
                 seenUrls: [...seenSet],
                 pageOffsets: pipeline._pageOffsets || {},
                 lastRunAt: new Date().toISOString(),
-                totalRuns: (pipeline.config._prevTotalRuns || 0) + 1
+                totalRuns: (pipeline.config._prevTotalRuns || 0) + 1,
+                // Persist sources that failed at runtime so the next workflow run retries them
+                failedSources: pipeline._failedSources ? [...pipeline._failedSources] : []
             });
             console.log(`[searchPipeline] Saved search history: ${seenSet.size} seen URLs, ${Object.keys(pipeline._pageOffsets || {}).length} page offsets`);
         } catch (err) {

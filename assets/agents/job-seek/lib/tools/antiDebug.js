@@ -13,6 +13,9 @@
 
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
 let _tsc = null;
 function getTSC() {
     if (!_tsc) _tsc = require('../core/toolServiceClient');
@@ -30,19 +33,87 @@ async function _toolCall(name, params, timeout) {
     return res.result !== undefined ? res.result : res;
 }
 
-// ─── Domain Memory ───
+// ─── Domain Memory (persisted to platform-tools.json) ───
 // Remembers which domains have debugger traps so we can pre-inject on subsequent visits.
+// Persisted under a top-level "__antiDebugDomains" key in platform-tools.json.
 const _domainTraps = new Map(); // domain → { detected: true, at: timestamp }
+
+const TOOLS_FILE = 'platform-tools.json';
+
+function _dataDir() {
+    return path.join(__dirname, '..', '..', 'data');
+}
+
+/**
+ * Load persisted anti-debug domains from platform-tools.json into _domainTraps.
+ * Called once at module load time.
+ */
+function _loadPersistedDomains() {
+    try {
+        const filePath = path.join(_dataDir(), TOOLS_FILE);
+        if (!fs.existsSync(filePath)) return;
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        const saved = data && data.__antiDebugDomains;
+        if (saved && typeof saved === 'object') {
+            for (const [domain, info] of Object.entries(saved)) {
+                _domainTraps.set(domain, info);
+            }
+            if (_domainTraps.size > 0) {
+                console.log(`[anti-debug] Loaded ${_domainTraps.size} persisted trap domains: ${Array.from(_domainTraps.keys()).join(', ')}`);
+            }
+        }
+    } catch (err) {
+        console.error('[anti-debug] Failed to load persisted domains:', err.message);
+    }
+}
+
+/**
+ * Save current _domainTraps to platform-tools.json under "__antiDebugDomains".
+ */
+function _persistDomains() {
+    try {
+        const dir = _dataDir();
+        fs.mkdirSync(dir, { recursive: true });
+        const filePath = path.join(dir, TOOLS_FILE);
+
+        let data = {};
+        try {
+            if (fs.existsSync(filePath)) {
+                data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) || {};
+            }
+        } catch (_) { /* start fresh */ }
+
+        // Serialize Map to plain object
+        const domains = {};
+        for (const [domain, info] of _domainTraps.entries()) {
+            domains[domain] = info;
+        }
+        data.__antiDebugDomains = domains;
+
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {
+        console.error('[anti-debug] Failed to persist domains:', err.message);
+    }
+}
+
+// Load on module init
+_loadPersistedDomains();
 
 /**
  * Record that a domain has debugger traps.
+ * Persists to platform-tools.json so it survives app restarts.
  * @param {string} url - Any URL from the domain
  */
 function rememberDomain(url) {
     try {
         const domain = new URL(url).hostname;
+        const isNew = !_domainTraps.has(domain);
         _domainTraps.set(domain, { detected: true, at: Date.now() });
         console.log(`[anti-debug] remembered domain: ${domain}`);
+        // Persist to disk when a new domain is detected
+        if (isNew) {
+            _persistDomains();
+        }
     } catch (_) {}
 }
 
