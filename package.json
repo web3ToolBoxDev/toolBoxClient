@@ -48,8 +48,7 @@
           "!/scripts/extensionInfo.json",
           "!agents/*/data/**",
           "!agents/*/workspace/**",
-          "!ip2location/**",
-          "!scripts/node_modules/**"
+          "!ip2location/**"
         ]
       }
     ],
