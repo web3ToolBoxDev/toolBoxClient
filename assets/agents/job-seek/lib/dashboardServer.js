@@ -2985,7 +2985,7 @@ function buildDashboardHTML(sessionId) {
         <th class="col-check"></th>
         <th>Job</th>
         <th>Location</th>
-        <th>Salary</th>
+        <th data-i18n="jobType">Job Type</th>
         <th>Score</th>
         <th>Status</th>
         <th class="col-docs" data-i18n="docs">Docs</th>
@@ -3261,6 +3261,7 @@ var _i18n = {
         statsOverview: 'Stats Overview', applicationPipeline: 'Application Pipeline', jobRecords: 'Job Records',
         startWorkflow: 'Start Workflow', stop: 'Stop', settings: 'Settings',
         addWebsite: '+ Add Website', login: 'Login', confirm: 'Confirm',
+        jobType: 'Job Type',
         jobsFound: 'Jobs Found', jobsMatched: 'Jobs Matched', jobsApplied: 'Jobs Applied',
         platformsReady: 'Platforms Ready', workflowStatus: 'Workflow Status',
         runHistory: 'Run History', noJobs: 'No jobs found yet.',
@@ -3318,6 +3319,7 @@ var _i18n = {
         statsOverview: '统计概览', applicationPipeline: '申请流水线', jobRecords: '职位记录',
         startWorkflow: '启动工作流', stop: '停止', settings: '设置',
         addWebsite: '+ 添加网站', login: '登录', confirm: '确认',
+        jobType: '工作类型',
         jobsFound: '已发现职位', jobsMatched: '已匹配职位', jobsApplied: '已申请职位',
         platformsReady: '平台就绪', workflowStatus: '工作流状态',
         runHistory: '运行历史', noJobs: '暂无职位信息。',
