@@ -2144,7 +2144,22 @@ function markApplied(sessionId, jobUrl, note) {
  */
 function getHistory(sessionId) {
     const cards = dashboardServer.getJobCards(sessionId);
-    return cards.filter(c => ['submitted', 'followed_up', 'archived'].includes(c.status));
+    return cards
+        .filter(c => ['submitted', 'followed_up', 'archived'].includes(c.status))
+        .map(c => {
+            // Ensure displayJson is present for document preview in History page
+            const arts = c.artifacts || {};
+            if (!arts.displayJson && (arts.resume || arts.coverLetter || arts.interviewPrep)) {
+                if (!c.artifacts) c.artifacts = {};
+                c.artifacts.displayJson = {
+                    jd:            c.fullText ? [{ type: 'text', title: 'Job Description', content: c.fullText }] : null,
+                    resume:        _markdownToSections(arts.resume, 'resume'),
+                    coverLetter:   _markdownToSections(arts.coverLetter, 'coverLetter'),
+                    interviewPrep: _markdownToSections(arts.interviewPrep, 'interviewPrep')
+                };
+            }
+            return c;
+        });
 }
 
 module.exports = {

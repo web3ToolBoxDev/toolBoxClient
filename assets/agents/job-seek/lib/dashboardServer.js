@@ -3309,6 +3309,8 @@ var _i18n = {
         confirmMarkApplied: 'Mark {n} job(s) as applied?',
         confirmArchive: 'Archive {n} selected job(s)?',
         noJobsSelected: 'No jobs selected',
+        generatingDocs: 'Generating docs for {n} job(s)...', configFailed: 'Config update failed',
+        workflowStarted: 'Workflow started', startFailed: 'Workflow start failed',
         generateBtn: 'Generate', docs: 'Docs', link: 'Link',
         resume: 'Resume', coverLetter: 'Cover Letter', interviewPrep: 'Interview Prep'
     },
@@ -3367,6 +3369,8 @@ var _i18n = {
         confirmMarkApplied: '确定将 {n} 个职位标记为已投递？',
         confirmArchive: '确定归档 {n} 个选中职位？',
         noJobsSelected: '未选择职位',
+        generatingDocs: '正在为 {n} 个职位生成文档...', configFailed: '配置更新失败',
+        workflowStarted: '工作流已启动', startFailed: '工作流启动失败',
         generateBtn: '生成', docs: '文档', link: '链接',
         resume: '简历', coverLetter: '求职信', interviewPrep: '面试准备'
     }
@@ -3567,26 +3571,47 @@ async function bulkGenerateDocs() {
     var doPrep = document.getElementById('genPrepCb').checked;
     if (!doResume && !doCover && !doPrep) return;
     document.getElementById('genDropdown').classList.remove('open');
+    showToast(t('generatingDocs').replace('{n}', urls.length), 'info');
     try {
         // Configure workflow: disable search + apply, enable generate with selected jobs
-        await fetch(BASE_URL + '/api/workflow/' + _wfSessionId + '/config', {
+        var cfgRes = await fetch(BASE_URL + '/api/workflow/' + _wfSessionId + '/config', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 steps: {
                     search: { enabled: false },
+                    customizeProfile: { enabled: false },
                     generate: { enabled: true, tailorResume: doResume, coverLetter: doCover, interviewPrep: doPrep, jobIds: urls },
                     apply: { enabled: false }
                 }
             })
         });
+        if (!cfgRes.ok) {
+            var cfgErr = await cfgRes.json().catch(function() { return {}; });
+            showToast(cfgErr.error || t('configFailed'), 'error');
+            return;
+        }
         // Start workflow
-        await fetch(BASE_URL + '/api/workflow/' + _wfSessionId + '/start', {
+        var startRes = await fetch(BASE_URL + '/api/workflow/' + _wfSessionId + '/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({})
         });
-    } catch (e) { alert(e.message); }
+        var startData = await startRes.json().catch(function() { return {}; });
+        if (startData.success) {
+            showToast(t('workflowStarted'), 'success');
+            // Reset workflow progress state for new run
+            _wfCurrentJob = null;
+            _wfFailedTasks = [];
+            _wfLogs = [];
+            renderCurrentJob();
+            renderFailedTasks();
+            renderWfLogs();
+            pollWfStatus();
+        } else {
+            showToast(startData.error || t('startFailed'), 'error');
+        }
+    } catch (e) { showToast(e.message, 'error'); }
 }
 
 async function bulkAutoApply() {
@@ -4651,6 +4676,12 @@ function updateWfUI(data) {
 
     // Step timeline
     renderStepTimeline(data.steps || []);
+
+    // Clear previous run's failed tasks when a new run starts
+    if (status === 'running' && prevStatus !== 'running') {
+        _wfFailedTasks = [];
+        renderFailedTasks();
+    }
 
     // Log status transitions
     if (status !== _prevWfStatus) {
