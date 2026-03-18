@@ -1174,6 +1174,18 @@
     margin-top: 0.15rem;
   }
 
+  .ai-preset-group__confirm-bar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0.5rem 0 0.2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: 0.3rem;
+  }
+
+  .ai-preset-group__confirm-btn {
+    min-width: 120px;
+  }
+
   .modal-footer {
     border-top: 1px solid $clr-sidebar-border;
     padding-top: 0.55rem;
