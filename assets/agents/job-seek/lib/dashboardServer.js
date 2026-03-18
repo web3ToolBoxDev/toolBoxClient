@@ -4494,10 +4494,7 @@ function renderFailedTasks() {
             '</div>' +
             '<div style="font-size:0.85rem;color:#e2e8f0;margin:2px 0;">' + (t.title || 'Unknown') + ' @ ' + (t.company || '?') + '</div>' +
             '<div class="fi-error">' + (t.error || 'Unknown error') + '</div>' +
-            '<div class="fi-actions">' +
-            '<button class="wf-failed-btn-retry" onclick="retryFailedTask(' + idx + ')">' + retryLabel + '</button>' +
-            '<button class="wf-failed-btn-delete" onclick="deleteFailedTask(' + idx + ')">Delete</button>' +
-            '</div></div>';
+            '</div>';
     }).join('');
 }
 
