@@ -2634,8 +2634,6 @@ function buildDashboardHTML(sessionId) {
   .artifact-badges { display: flex; gap: 4px; justify-content: center; }
   .artifact-badge { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 4px; background: #10b981; color: #fff; font-size: 0.65rem; font-weight: 700; cursor: pointer; }
   .artifact-badge:hover { background: #059669; }
-  .artifact-badge.ai-badge { background: #7c3aed; font-size: 0.55rem; width: 20px; height: 20px; }
-  .artifact-badge.ai-badge:hover { background: #6d28d9; }
 
   /* Phase dots (S/G/A task status indicators) */
   .phase-dots { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; }
@@ -3756,7 +3754,6 @@ function renderJobRow(job) {
     // Artifact badges (docs column) — click opens doc preview modal
     var badges = '';
     if (job.fullText && job.fullText.length > 20) badges += '<span class="artifact-badge" title="Job Description — click to preview" style="cursor:pointer;background:#3b82f6;width:24px;font-size:0.58rem;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'jd\\')">JD</span>';
-    if (log.generate?.aiGenerated) badges += '<span class="artifact-badge ai-badge" title="AI-generated documents">AI</span>';
     if (arts.resume && arts.resume !== 'generated' && arts.resume.length > 10) badges += '<span class="artifact-badge" title="Resume — click to preview" style="cursor:pointer;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'resume\\')">R</span>';
     if (arts.coverLetter && arts.coverLetter !== 'generated' && arts.coverLetter.length > 10) badges += '<span class="artifact-badge" title="Cover Letter — click to preview" style="cursor:pointer;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'coverLetter\\')">C</span>';
     if (arts.interviewPrep && arts.interviewPrep !== 'generated' && arts.interviewPrep.length > 10) badges += '<span class="artifact-badge" title="Interview Prep — click to preview" style="cursor:pointer;" onclick="showDocModal(\\'' + safeUrl + '\\', \\'interviewPrep\\')">P</span>';
