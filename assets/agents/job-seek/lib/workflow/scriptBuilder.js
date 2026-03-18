@@ -916,7 +916,7 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
         } catch (_) { /* best-effort */ }
 
         // Build execution context
-        const pageProxy = buildPageProxy(browserId, pageIndex);
+        const pageProxy = buildPageProxy(browserId, pageIndex, platform.url);
         const params = {
             keywords: searchParams.keywords || '',
             location: searchParams.location || '',
@@ -941,7 +941,7 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
             if (isTimeout) {
                 // Timeout → likely debugger trap. Detect + inject + retry once.
                 console.log('[search:exec] Script timed out — checking for debug traps...');
-                const ad = await getAntiDebug().ensureAntiDebug(browserId, pageIndex);
+                const ad = await getAntiDebug().ensureAntiDebug(browserId, pageIndex, platform.url);
                 if (ad.detected) {
                     console.log(`[search:exec] Debug traps found [${ad.details.join(',')}] — retrying script...`);
                     try {
@@ -1024,10 +1024,15 @@ async function executeSearchScript(sessionId, platformId, searchParams, options 
  *   page_wait_for_selector    — wait for a CSS selector
  *   page_wait_for_navigation  — wait for navigation event
  */
-function buildPageProxy(browserId, pageIndex) {
+function buildPageProxy(browserId, pageIndex, platformUrl) {
     // Longer timeout for page proxy tool calls (Phase 2 JD extraction can be slow)
     // 120s per tool call — Indeed anti-bot checks + JD extraction can exceed 60s
     const BASE_TIMEOUT = 120000;
+
+    // Pre-inject anti-debug for known trap domains (fast path — no detection needed)
+    if (platformUrl) {
+        getAntiDebug().preInjectIfKnown(browserId, pageIndex, platformUrl).catch(() => {});
+    }
 
     // Retry-with-activation wrapper: if a tool call times out:
     //   1st timeout → activate tab + retry
@@ -1052,7 +1057,7 @@ function buildPageProxy(browserId, pageIndex) {
                 // 2nd retry: anti-debug + activate tab (last chance)
                 console.log(`[pageProxy] ${name} timed out again — applying anti-debug and final retry...`);
                 _antiDebugApplied = true;
-                try { await getAntiDebug().ensureAntiDebug(browserId, pageIndex); } catch (_) {}
+                try { await getAntiDebug().ensureAntiDebug(browserId, pageIndex, platformUrl); } catch (_) {}
                 try { await toolCall('page_screenshot', { browserId, pageIndex }, 30000); } catch (_) {}
                 return toolCall(name, params, BASE_TIMEOUT);
             }

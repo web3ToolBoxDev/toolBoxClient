@@ -30,6 +30,64 @@ async function _toolCall(name, params, timeout) {
     return res.result !== undefined ? res.result : res;
 }
 
+// ─── Domain Memory ───
+// Remembers which domains have debugger traps so we can pre-inject on subsequent visits.
+const _domainTraps = new Map(); // domain → { detected: true, at: timestamp }
+
+/**
+ * Record that a domain has debugger traps.
+ * @param {string} url - Any URL from the domain
+ */
+function rememberDomain(url) {
+    try {
+        const domain = new URL(url).hostname;
+        _domainTraps.set(domain, { detected: true, at: Date.now() });
+        console.log(`[anti-debug] remembered domain: ${domain}`);
+    } catch (_) {}
+}
+
+/**
+ * Check if a domain is known to have debugger traps.
+ * @param {string} url - Any URL from the domain
+ * @returns {boolean}
+ */
+function isKnownTrapDomain(url) {
+    try {
+        const domain = new URL(url).hostname;
+        return _domainTraps.has(domain);
+    } catch (_) {
+        return false;
+    }
+}
+
+/**
+ * Pre-inject anti-debug if this domain is known to have traps.
+ * Skips detection (fast path). Returns true if injected.
+ * @param {string} browserId
+ * @param {number} pageIndex
+ * @param {string} url - Current page URL
+ * @returns {Promise<boolean>} true if pre-injected
+ */
+async function preInjectIfKnown(browserId, pageIndex, url) {
+    if (!isKnownTrapDomain(url)) return false;
+    try {
+        const domain = new URL(url).hostname;
+        console.log(`[anti-debug] known trap domain: ${domain} — pre-injecting...`);
+        await injectAntiDebug(browserId, pageIndex);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+/**
+ * Get all known trap domains (for debugging/logging).
+ * @returns {string[]}
+ */
+function getKnownDomains() {
+    return Array.from(_domainTraps.keys());
+}
+
 // ─── Helpers ───
 
 /**
@@ -168,11 +226,13 @@ async function injectAntiDebug(browserId, pageIndex) {
  * @param {number} pageIndex
  * @returns {Promise<{detected: boolean, injected: boolean, details: string[]}>}
  */
-async function ensureAntiDebug(browserId, pageIndex) {
+async function ensureAntiDebug(browserId, pageIndex, url) {
     const detection = await detectDebugTraps(browserId, pageIndex);
     if (!detection.hasTraps) {
         return { detected: false, injected: false, details: detection.details };
     }
+    // Remember this domain for future pre-injection
+    if (url) rememberDomain(url);
     const injection = await injectAntiDebug(browserId, pageIndex);
     return {
         detected: true,
@@ -181,4 +241,7 @@ async function ensureAntiDebug(browserId, pageIndex) {
     };
 }
 
-module.exports = { detectDebugTraps, injectAntiDebug, ensureAntiDebug };
+module.exports = {
+    detectDebugTraps, injectAntiDebug, ensureAntiDebug,
+    rememberDomain, isKnownTrapDomain, preInjectIfKnown, getKnownDomains
+};
