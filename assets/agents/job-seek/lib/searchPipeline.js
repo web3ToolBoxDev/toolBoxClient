@@ -1665,6 +1665,18 @@ Keep under 400 words. Reference specific requirements from the JD.
 }
 
 /**
+ * Strip markdown code fences (```markdown ... ```) that AI sometimes wraps around content.
+ */
+function _stripMarkdownFence(text) {
+    if (!text) return text;
+    // Remove opening fence: ```markdown, ```md, or bare ```
+    let s = text.replace(/^```(?:markdown|md)?\s*\n?/i, '');
+    // Remove closing fence
+    s = s.replace(/\n?```\s*$/, '');
+    return s.trim();
+}
+
+/**
  * Parse a combined AI response that contains match JSON + optional docs.
  * @param {string} raw - AI response text
  * @returns {{ matchResult: object|null, resume: string|null, coverLetter: string|null }}
@@ -1683,9 +1695,7 @@ function _parseCombinedResponse(raw) {
     // Extract docs
     const resumeMatch = raw.match(/===RESUME_START===([\s\S]*?)===RESUME_END===/);
     if (resumeMatch) {
-        // Strip the instruction text, keep only the generated content after the instructions
-        let resumeText = resumeMatch[1].trim();
-        // If the AI included the instruction text, try to find the actual resume starting with # or name
+        let resumeText = _stripMarkdownFence(resumeMatch[1].trim());
         const resumeContentStart = resumeText.search(/^#\s/m);
         if (resumeContentStart > 50) {
             resumeText = resumeText.slice(resumeContentStart).trim();
@@ -1695,7 +1705,7 @@ function _parseCombinedResponse(raw) {
 
     const coverMatch = raw.match(/===COVER_LETTER_START===([\s\S]*?)===COVER_LETTER_END===/);
     if (coverMatch) {
-        let coverText = coverMatch[1].trim();
+        let coverText = _stripMarkdownFence(coverMatch[1].trim());
         const coverContentStart = coverText.search(/^[A-Z#\*]/m);
         if (coverContentStart > 50) {
             coverText = coverText.slice(coverContentStart).trim();
