@@ -21,7 +21,12 @@ function startToolService() {
     isStarting = true;
 
     const execPath = config.getDefaultExecPath();
-    const toolServicePath = path.resolve(__dirname, '../../toolService/index.js');
+    // In packaged app: toolService is in extraResources (resources/toolService/)
+    // In dev: toolService is at repo root (../../toolService/)
+    const isBuild = config.isBuild;
+    const toolServicePath = isBuild
+        ? path.resolve(__dirname, '../../../toolService/index.js')
+        : path.resolve(__dirname, '../../toolService/index.js');
 
     // Read chromePath from savePath.json
     let chromePath = '';

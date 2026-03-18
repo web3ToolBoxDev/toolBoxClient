@@ -22,7 +22,7 @@ function startDbService() {
     const execPath = config.getDefaultExecPath();
     const isBuild = config.getIsBuild();
     const dbservicePath = isBuild
-        ? path.resolve(__dirname, '../../dbservice/index.js')
+        ? path.resolve(__dirname, '../../../dbservice/index.js')
         : path.resolve(__dirname, '../../dbservice/index.js');
 
     const savePath = config.getSavePath();

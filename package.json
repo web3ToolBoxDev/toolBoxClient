@@ -29,6 +29,16 @@
     ],
     "extraResources": [
       {
+        "from": "./toolService",
+        "to": "./toolService",
+        "filter": ["**/*", "!**/*.test.*", "!**/coverage/**", "!**/.git/**"]
+      },
+      {
+        "from": "./dbservice",
+        "to": "./dbservice",
+        "filter": ["**/*", "!**/*.test.*", "!**/coverage/**", "!**/.git/**"]
+      },
+      {
         "from": "./assets",
         "to": "./assets",
         "filter": [
