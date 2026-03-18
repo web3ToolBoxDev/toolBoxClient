@@ -648,6 +648,18 @@ async function _runPipeline(sessionId) {
     }
 
     // ── Helper: process a single job — match + optional inline generate ──
+    // Track consecutive errors — abort pipeline if too many in a row
+    let _consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 5;
+    const AI_CALL_TIMEOUT = 120_000; // 2 min max per AI call
+
+    function _withTimeout(promise, ms, label) {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms))
+        ]);
+    }
+
     async function _processJob(listing) {
         try {
             // Broadcast: currently processing this job
@@ -691,7 +703,7 @@ async function _runPipeline(sessionId) {
                         config.generateOpts || {},
                         config.userPreferences || ''
                     );
-                    const raw = await config.aiInvoke(combinedPrompt);
+                    const raw = await _withTimeout(config.aiInvoke(combinedPrompt), AI_CALL_TIMEOUT, 'Combined AI');
                     const parsed = _parseCombinedResponse(raw);
                     matchResult = parsed.matchResult;
                     aiResumeMd = parsed.resume;
@@ -708,7 +720,7 @@ async function _runPipeline(sessionId) {
             // Path B: Match-only AI (existing aiMatcher)
             if (!matchResult && config.aiMatcher && listing.fullText) {
                 try {
-                    matchResult = await config.aiMatcher(profile, listing, config.skillTaxonomy, config.userPreferences || '');
+                    matchResult = await _withTimeout(config.aiMatcher(profile, listing, config.skillTaxonomy, config.userPreferences || ''), AI_CALL_TIMEOUT, 'AI match');
                     if (matchResult) {
                         _log(`  AI match: ${matchResult.overallScore}%`);
                     } else {
@@ -905,8 +917,11 @@ async function _runPipeline(sessionId) {
                 targetCount: config.targetCount,
                 currentJob: null // done processing this job
             });
+            // Reset consecutive error counter on success
+            _consecutiveErrors = 0;
         } catch (err) {
-            _log(`ERROR processing "${listing.title}": ${err.message}`);
+            _consecutiveErrors++;
+            _log(`ERROR processing "${listing.title}": ${err.message} (consecutive: ${_consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS})`);
             pipeline.progress.errors.push(`Process error (${listing.url}): ${err.message}`);
             dashboardServer.upsertJobCard(sessionId, {
                 url: listing.url,
@@ -934,6 +949,13 @@ async function _runPipeline(sessionId) {
                 at: new Date().toISOString(),
                 currentJob: null
             });
+            // Abort pipeline if too many consecutive errors (e.g. browser died, AI provider down)
+            if (_consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                _log(`ABORT: ${MAX_CONSECUTIVE_ERRORS} consecutive errors — stopping pipeline`);
+                pipeline.running = false;
+                pipeline.progress.phase = 'error';
+                pipeline.progress.errors.push(`Pipeline aborted: ${MAX_CONSECUTIVE_ERRORS} consecutive failures`);
+            }
         }
     }
 
