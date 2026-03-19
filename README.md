@@ -4,35 +4,32 @@
 
 ## Platform Architecture
 
-```mermaid
-graph TB
-    subgraph Platform["ToolBox Platform (Electron)"]
-        direction TB
-        subgraph Foundation["Execution Foundation"]
-            FB[Fingerprint Browser Runtime<br/>Customized Chromium · C++ Blink Patches<br/>Environment Isolation · Anti-Bot]
-        end
-        subgraph Memory["Universal Memory Layer"]
-            MEM[mem0 Semantic Recall + SQLite Structured Knowledge<br/>Per-Agent Scope Isolation · Marker Protocol]
-        end
-        subgraph Tools["Shared Tool Layer"]
-            TS[toolService<br/>Browser Pool · Screenshot · HTTP · Tool Registry]
-        end
-        subgraph Core["Core Services"]
-            BE[Express Backend :30001<br/>Task Lifecycle · WebSocket Hub]
-            UI[React Frontend :3000<br/>Agent Workspace · Dashboard]
-        end
-    end
-
-    subgraph Agents["AI Agents (WebSocket Protocol)"]
-        A1[Job Seek Agent<br/>Search · Match · Generate · Apply]
-        A2[Future Agent...]
-    end
-
-    Agents -->|WebSocket Protocol| BE
-    BE --> TS
-    BE --> Memory
-    TS --> FB
-    A1 -->|SSE Dashboard :30003| UI
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    AI Agents (WebSocket Protocol)             │
+│  ┌─────────────────────┐  ┌─────────────────────┐           │
+│  │   Job Seek Agent    │  │   Future Agent...   │           │
+│  │ Search·Match·Gen    │  │                     │           │
+│  └─────────┬───────────┘  └─────────┬───────────┘           │
+└────────────┼────────────────────────┼────────────────────────┘
+             │ WebSocket Protocol     │
+┌────────────▼────────────────────────▼────────────────────────┐
+│                  ToolBox Platform (Electron)                  │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  Core Services                                         │  │
+│  │  Express Backend (:30001) ─ Task Lifecycle · WS Hub    │  │
+│  │  React Frontend  (:3000)  ─ Agent Workspace · Dashboard│  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                              │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────┐ │
+│  │  Tool Service    │ │  Memory Layer    │ │  Browser     │ │
+│  │  (:30004)        │ │  (:30002)        │ │  Runtime     │ │
+│  │  Browser Pool    │ │  SQLite (SoT)    │ │  Chromium    │ │
+│  │  Screenshot      │ │  mem0 (Semantic) │ │  C++ Patches │ │
+│  │  HTTP · Registry │ │  Scope Isolation │ │  Fingerprint │ │
+│  └──────────────────┘ └──────────────────┘ └──────────────┘ │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 The platform separates **infrastructure** from **application logic**. Each AI agent is a standalone Node.js process that connects to the platform via a [standardized WebSocket protocol](docs/ai-agent-protocol.md). The platform provides three foundational layers:
@@ -71,13 +68,13 @@ The first agent built on the platform automates end-to-end job searching with AI
 
 ```mermaid
 flowchart LR
-    A[AI Query<br/>Generation] --> B[Multi-Platform<br/>Search]
-    B --> C[AI Match<br/>Scoring]
-    C --> D{Score ≥<br/>Threshold?}
-    D -->|Yes| E[Document<br/>Generation]
+    A[AI Query Generation] --> B[Multi-Platform Search]
+    B --> C[AI Match Scoring]
+    C --> D{Score >= Threshold?}
+    D -->|Yes| E[Document Generation]
     D -->|No| F[Skip]
-    E --> G[Review /<br/>Apply]
-    B -->|Failure| H[Self-Heal<br/>Loop]
+    E --> G[Review / Apply]
+    B -->|Failure| H[Self-Heal Loop]
     H --> B
 ```
 
@@ -92,13 +89,13 @@ flowchart LR
 ```mermaid
 flowchart TD
     A[Execute Browser Script] -->|Failure| B[Capture Context]
-    B --> C[screenshot + script +<br/>error log + fix rules]
+    B --> C[screenshot + script + error log + fix rules]
     C --> D[LLM Analysis]
     D --> E[Generate Fix Rules]
     E --> F[Rebuild Script]
-    F --> G{Attempt ≤ 2?}
+    F --> G{Attempt <= 2?}
     G -->|Yes| A
-    G -->|No| H[Mark Failed +<br/>Alert Dashboard]
+    G -->|No| H[Mark Failed + Alert Dashboard]
 ```
 
 When a browser script fails (Cloudflare block, selector drift, modal popups), the system captures the full execution context and sends it to an LLM for diagnosis. Fix rules are persisted and reapplied on subsequent runs, turning each failure into a permanent improvement.
