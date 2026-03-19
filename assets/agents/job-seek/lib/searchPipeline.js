@@ -85,6 +85,77 @@ function _isCloudflareChallenge(pageContent) {
 // Track Cloudflare-blocked platforms per pipeline run
 const _cloudflareBlocked = new Map(); // sessionId → Set<source>
 
+/**
+ * Attempt to resolve Cloudflare Turnstile challenge by clicking the checkbox.
+ * Returns true if challenge was resolved, false otherwise.
+ */
+async function _handleCloudflareChallenge(sessionId, platformTool, browserId, pageIndex, _log) {
+    const toolClient = require('./core/toolServiceClient');
+
+    _log(`🛡 [${platformTool.name}] Attempting Cloudflare auto-resolve...`);
+
+    // Step 1: Screenshot to confirm challenge page
+    await toolClient.executeTool('page_screenshot', { browserId, pageIndex });
+
+    // Step 2: Try clicking the Turnstile checkbox
+    // Turnstile renders in an iframe — try multiple selectors
+    const clickSelectors = [
+        'iframe[src*="challenges.cloudflare.com"]',
+        '#turnstile-wrapper input[type="checkbox"]',
+        '.cf-turnstile input',
+        'input[type="checkbox"]'
+    ];
+
+    let clicked = false;
+    for (const selector of clickSelectors) {
+        try {
+            const clickResult = await toolClient.executeTool('page_click', {
+                browserId, pageIndex, selector
+            });
+            if (clickResult.success !== false) {
+                clicked = true;
+                _log(`🛡 [${platformTool.name}] Clicked: ${selector}`);
+                break;
+            }
+        } catch (_) { /* try next selector */ }
+    }
+
+    if (!clicked) {
+        _log(`✗ [${platformTool.name}] Could not find Turnstile checkbox`);
+        return false;
+    }
+
+    // Step 3: Wait for challenge resolution (5 seconds)
+    await new Promise(r => setTimeout(r, 5000));
+
+    // Step 4: Check if challenge is resolved
+    try {
+        const checkResult = await toolClient.executeTool('page_evaluate', {
+            browserId, pageIndex,
+            expression: `(() => {
+                const body = document.body?.innerText || '';
+                const hasCF = body.includes('Verify you are human') ||
+                              body.includes('Just a moment') ||
+                              body.includes('Checking your browser') ||
+                              document.querySelector('iframe[src*="challenges.cloudflare.com"]') !== null;
+                return { resolved: !hasCF, url: window.location.href };
+            })()`
+        });
+
+        const evalData = checkResult.result || checkResult;
+        if (evalData.resolved) {
+            _log(`✓ [${platformTool.name}] Cloudflare challenge passed`);
+            return true;
+        } else {
+            _log(`✗ [${platformTool.name}] Cloudflare challenge still present after click`);
+            return false;
+        }
+    } catch (evalErr) {
+        _log(`✗ [${platformTool.name}] Could not verify Cloudflare resolution: ${evalErr.message}`);
+        return false;
+    }
+}
+
 // ─── Markdown → Display JSON ───
 /**
  * Parse markdown into structured sections for in-page display.
@@ -1193,31 +1264,78 @@ async function _runPipeline(sessionId) {
                     } else {
                         const errMsg = scriptResult.error || 'unknown error';
 
-                        // ── Cloudflare challenge detection (skip self-heal for CF blocks) ──
+                        // ── Cloudflare challenge detection — auto-click Turnstile before giving up ──
                         if (_isCloudflareError(errMsg)) {
                             _log(`🛡 [pipeline] Cloudflare challenge detected on ${q.source} (${platformTool.name})`);
-                            if (!_cloudflareBlocked.has(sessionId)) _cloudflareBlocked.set(sessionId, new Set());
-                            _cloudflareBlocked.get(sessionId).add(q.source);
-                            _failedSources.add(q.source);
-                            dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
-                                cell: 'search', status: 'error',
-                                message: `Cloudflare challenge — please open ${platformTool.name} manually and solve the challenge`
-                            });
-                            dashboardServer.updatePipelineProgress(sessionId, {
-                                phase: 'taskFailed',
-                                title: `${platformTool.name} — Cloudflare blocked`,
-                                company: '', platform: q.source, failPhase: 'search',
-                                error: `Cloudflare anti-bot challenge. Open ${platformTool.name} in your browser and solve it manually, then retry.`,
-                                at: new Date().toISOString(), currentJob: null
-                            });
-                            alertService.dispatch(sessionId, {
-                                type: 'failure',
-                                title: `Cloudflare Block — ${platformTool.name}`,
-                                message: `${platformTool.name} is blocked by Cloudflare anti-bot protection. Please open it manually to solve the challenge before retrying.`,
-                                stepName: 'search',
-                                meta: { platform: q.source, cloudflareBlocked: true }
-                            });
-                            pipeline.progress.errors.push(`[${q.source}] Cloudflare challenge — manual intervention required`);
+
+                            // Attempt automatic Turnstile click
+                            let cfResolved = false;
+                            try {
+                                const platform = getPlatformStore().getPlatform(sessionId, platformTool.id);
+                                if (platform?._browserId) {
+                                    cfResolved = await _handleCloudflareChallenge(
+                                        sessionId, platformTool, platform._browserId, platform._pageIndex || 0, _log
+                                    );
+                                }
+                            } catch (cfErr) {
+                                _log(`✗ [${q.source}] Cloudflare auto-resolve failed: ${cfErr.message}`);
+                            }
+
+                            if (cfResolved) {
+                                _log(`✓ [${q.source}] Cloudflare challenge resolved — retrying search`);
+                                const remaining = config.maxResults - (_sourceResultCount[q.source] || 0);
+                                const retryResult = await getScriptBuilder().executeSearchScript(
+                                    sessionId,
+                                    platformTool.id,
+                                    { keywords: q.query, location: q.location, pageOffset: q.pageOffset || 0 },
+                                    { envId: q.envId || config.envId, maxResults: Math.min(remaining, config.maxResults) }
+                                );
+                                if (retryResult.success && retryResult.jobs) {
+                                    listings = retryResult.jobs.map(j => ({
+                                        title: j.title || '',
+                                        company: j.company || '',
+                                        location: j.location || q.location || '',
+                                        url: normalizeJobUrl(j.url || j.link || ''),
+                                        salary: j.salary || '',
+                                        jobType: j.jobType || '',
+                                        source: q.source,
+                                        fullText: j.fullText || ''
+                                    }));
+                                    _log(`✓ [${q.source}] Retry after CF resolve returned ${listings.length} results`);
+                                } else {
+                                    // Still failed after CF resolve
+                                    _failedSources.add(q.source);
+                                    dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                                        cell: 'search', status: 'error',
+                                        message: `Cloudflare resolved but search still failed — please Rebuild search tool`
+                                    });
+                                    pipeline.progress.errors.push(`[${q.source}] Cloudflare resolved but search retry failed`);
+                                }
+                            } else {
+                                // Could not resolve — existing failure path
+                                if (!_cloudflareBlocked.has(sessionId)) _cloudflareBlocked.set(sessionId, new Set());
+                                _cloudflareBlocked.get(sessionId).add(q.source);
+                                _failedSources.add(q.source);
+                                dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                                    cell: 'search', status: 'error',
+                                    message: `Cloudflare challenge — please open ${platformTool.name} manually and solve the challenge`
+                                });
+                                dashboardServer.updatePipelineProgress(sessionId, {
+                                    phase: 'taskFailed',
+                                    title: `${platformTool.name} — Cloudflare blocked`,
+                                    company: '', platform: q.source, failPhase: 'search',
+                                    error: `Cloudflare anti-bot challenge. Open ${platformTool.name} in your browser and solve it manually, then retry.`,
+                                    at: new Date().toISOString(), currentJob: null
+                                });
+                                alertService.dispatch(sessionId, {
+                                    type: 'failure',
+                                    title: `Cloudflare Block — ${platformTool.name}`,
+                                    message: `${platformTool.name} is blocked by Cloudflare anti-bot protection. Please open it manually to solve the challenge before retrying.`,
+                                    stepName: 'search',
+                                    meta: { platform: q.source, cloudflareBlocked: true }
+                                });
+                                pipeline.progress.errors.push(`[${q.source}] Cloudflare challenge — manual intervention required`);
+                            }
                         } else {
                             _log(`✗ [${q.source}] Platform tool failed: ${errMsg}`);
 
@@ -2279,5 +2397,6 @@ module.exports = {
     _parseSkills,
     // Cloudflare detection utilities
     _isCloudflareError,
-    _isCloudflareChallenge
+    _isCloudflareChallenge,
+    _handleCloudflareChallenge
 };
