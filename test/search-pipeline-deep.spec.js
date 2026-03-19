@@ -324,8 +324,8 @@ test.describe.serial('Search Pipeline Deep Verification', () => {
 
         const envSelect = page.locator('[aria-label="session-bind-env"]');
         await expect(envSelect).toBeVisible({ timeout: 5_000 });
-        await envSelect.selectOption({ index: 1 });
-        console.log('[pipeline-deep]   Selected environment (env1)');
+        await envSelect.selectOption({ label: 'env1' });
+        console.log('[pipeline-deep]   Selected environment: env1');
 
         const bindBtn = page.locator('button', { hasText: /bind to/i });
         await expect(bindBtn).toBeEnabled({ timeout: 5_000 });

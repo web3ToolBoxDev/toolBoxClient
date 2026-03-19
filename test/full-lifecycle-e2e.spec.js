@@ -289,8 +289,9 @@ test.describe.serial('Full Lifecycle E2E (Electron)', () => {
 
         const envSelect = page.locator('[aria-label="session-bind-env"]');
         await expect(envSelect).toBeVisible({ timeout: 5_000 });
-        await envSelect.selectOption({ index: 1 });
-        console.log('[lifecycle-e2e]   Selected environment (env1)');
+        // Select env1 by label (index:1 may pick wrong env depending on sort order)
+        await envSelect.selectOption({ label: 'env1' });
+        console.log('[lifecycle-e2e]   Selected environment: env1');
 
         const bindBtn = page.locator('button', { hasText: /bind to/i });
         await expect(bindBtn).toBeEnabled({ timeout: 5_000 });
@@ -585,6 +586,20 @@ test.describe.serial('Full Lifecycle E2E (Electron)', () => {
 
     test('8b. GATE: Verify search prerequisites before workflow', async () => {
         console.log('[lifecycle-e2e] Phase 3b — GATE: Verifying all search prerequisites...');
+
+        // Re-inject direction + profile in case login/build steps triggered a state refresh
+        const dirResp = await putJSON(`/api/direction/${sid()}`, {
+            jobTitle: 'Fullstack Developer', location: 'Ontario', workMode: 'any', salary: '80K'
+        });
+        console.log(`[lifecycle-e2e]   Direction re-injected: ${dirResp.status}`);
+        const profResp = await putJSON(`/api/profile/${sid()}/tailored`, {
+            basic: 'Ying Zhang | Ontario, Canada | Fullstack Developer',
+            skills: 'JavaScript, TypeScript, Node.js, React, Express, Python, Playwright, Puppeteer, Docker, Redis, MySQL',
+            experience: 'Senior Fullstack Developer — AI agent platform, browser automation, workflow orchestration',
+            education: 'Fanshawe College — Web Development (2026)',
+            highlights: 'Self-healing pipeline, 3-layer memory, Chromium fingerprint patches'
+        });
+        console.log(`[lifecycle-e2e]   Profile re-injected: ${profResp.status}`);
 
         const { status, body: dashData } = await fetchJSON(`/api/dashboard/${sid()}`);
         expect(status).toBe(200);
