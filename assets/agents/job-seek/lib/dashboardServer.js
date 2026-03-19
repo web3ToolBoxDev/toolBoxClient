@@ -2262,6 +2262,8 @@ function _readBody(req, cb, onError) {
 
 // ─── Platform workflow status ───
 // Keyed by sessionId → Map<platformId, PlatformStatus>
+// NOTE: This in-memory cache syncs to state.platformStatus via _stateGetter.
+// Future migration: read/write through StateClient instead of direct state mutation.
 const _platformStatus = new Map();
 const _platformStatusLoaded = new Set(); // tracks which sessions have been hydrated from state
 const LOGIN_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -2505,6 +2507,7 @@ function updatePlatformCell(sessionId, platformId, update) {
 // ─── Job workflow state ───
 // Jobs tracked per session: sessionId → Map<jobUrl, JobWorkflowCard>
 // Synced to state.jobCards for persistence across restarts.
+// NOTE: Future migration: read/write through StateClient instead of direct state mutation.
 const _jobCards = new Map();
 const _jobCardsLoaded = new Set(); // tracks which sessions have been hydrated from state
 
