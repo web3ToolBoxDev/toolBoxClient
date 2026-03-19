@@ -329,6 +329,21 @@ test.describe.serial('Full Lifecycle E2E (Electron)', () => {
         );
         console.log('[lifecycle-e2e]   Dashboard ready on :30003');
 
+        // ── Verify env binding propagated to backend ──
+        console.log('[lifecycle-e2e]   Verifying env binding via dashboard API...');
+        const envBinding = await pollUntil(
+            async () => {
+                const d = await fetchJSON(`/api/dashboard/${sid()}`);
+                return { bound: d.body.env.bound, envIds: d.body.env.envIds };
+            },
+            (r) => r.bound && r.envIds.length > 0,
+            15_000,
+            2_000
+        );
+        expect(envBinding.bound).toBe(true);
+        expect(envBinding.envIds.length).toBeGreaterThan(0);
+        console.log(`[lifecycle-e2e]   Env binding verified: envIds=${JSON.stringify(envBinding.envIds)}`);
+
         // Inject direction
         console.log('[lifecycle-e2e]   Injecting direction...');
         const dirResp = await putJSON(`/api/direction/${sid()}`, {
@@ -436,6 +451,24 @@ test.describe.serial('Full Lifecycle E2E (Electron)', () => {
             }
         } catch (err) {
             console.log(`[lifecycle-e2e]   Confirm-login failed: ${err.message} (non-fatal, continuing)`);
+        }
+
+        // Verify browserId was assigned (not just method:url fallback)
+        try {
+            const { body: platList } = await fetchJSON(`/api/platforms/${sid()}`);
+            const allPlatforms = platList.platforms || platList || [];
+            const indeed = allPlatforms.find(p => /indeed/i.test(p.name || p.id || ''));
+            if (indeed) {
+                if (indeed._browserId) {
+                    console.log(`[lifecycle-e2e]   Indeed browserId: ${indeed._browserId} (fingerprint browser)`);
+                } else {
+                    console.log('[lifecycle-e2e]   FAIL: Indeed has no _browserId — login used URL fallback instead of fingerprint browser');
+                    console.log('[lifecycle-e2e]   This means env binding did not work. Search will fail with "No browser open".');
+                    // Don't hard-fail yet — the GATE test will catch this
+                }
+            }
+        } catch (err) {
+            console.log(`[lifecycle-e2e]   browserId check error: ${err.message}`);
         }
 
         // Also try LinkedIn if available
@@ -547,6 +580,39 @@ test.describe.serial('Full Lifecycle E2E (Electron)', () => {
     });
 
     // ═══════════════════════════════════════════════════════════════════
+    // Phase 3b: GATE — Verify Search Prerequisites (Test 8b)
+    // ═══════════════════════════════════════════════════════════════════
+
+    test('8b. GATE: Verify search prerequisites before workflow', async () => {
+        console.log('[lifecycle-e2e] Phase 3b — GATE: Verifying all search prerequisites...');
+
+        const { status, body: dashData } = await fetchJSON(`/api/dashboard/${sid()}`);
+        expect(status).toBe(200);
+
+        // Direction must be set
+        expect(dashData.direction.jobTitle).toBeTruthy();
+        console.log(`[lifecycle-e2e]   Direction: ${dashData.direction.jobTitle} in ${dashData.direction.location}`);
+
+        // Profile must have skills
+        expect(dashData.profile.skills).toBeTruthy();
+        console.log(`[lifecycle-e2e]   Profile skills: ${(dashData.profile.skills || '').slice(0, 60)}...`);
+
+        // Env must be bound
+        expect(dashData.env.bound).toBe(true);
+        expect(dashData.env.envIds.length).toBeGreaterThan(0);
+        console.log(`[lifecycle-e2e]   Env bound: ${JSON.stringify(dashData.env.envIds)}`);
+
+        // At least one platform must have a browser open (_browserId)
+        const { body: platList } = await fetchJSON(`/api/platforms/${sid()}`);
+        const allPlatforms = platList.platforms || platList || [];
+        const withBrowser = allPlatforms.filter(p => p._browserId);
+        expect(withBrowser.length).toBeGreaterThan(0);
+        console.log(`[lifecycle-e2e]   Platforms with browser: ${withBrowser.map(p => p.name || p.id).join(', ')}`);
+
+        console.log('[lifecycle-e2e]   GATE PASSED: All search prerequisites met');
+    });
+
+    // ═══════════════════════════════════════════════════════════════════
     // Phase 4: Search Workflow — Run 1 (Tests 9-11)
     // ═══════════════════════════════════════════════════════════════════
 
@@ -625,35 +691,47 @@ test.describe.serial('Full Lifecycle E2E (Electron)', () => {
         run1.jobs = jobs.length;
         console.log(`[lifecycle-e2e]   Jobs found: ${run1.jobs}`);
 
-        if (jobs.length > 0) {
-            const first = jobs[0];
-            expect(first).toHaveProperty('title');
-            expect(first).toHaveProperty('company');
-            console.log(`[lifecycle-e2e]   First job: "${first.title}" at ${first.company}`);
+        // ── STRICT: 0 jobs = FAIL ──
+        expect(jobs.length).toBeGreaterThan(0);
+        console.log(`[lifecycle-e2e]   Jobs found: ${run1.jobs} (PASS: > 0)`);
 
-            // Check fields
-            const withUrl = jobs.filter(j => j.url);
-            const withScore = jobs.filter(j => j.matchScore != null || j.score != null);
-            console.log(`[lifecycle-e2e]   With URL: ${withUrl.length}/${jobs.length}`);
-            console.log(`[lifecycle-e2e]   With score: ${withScore.length}/${jobs.length}`);
+        const first = jobs[0];
+        expect(first).toHaveProperty('title');
+        expect(first).toHaveProperty('company');
+        console.log(`[lifecycle-e2e]   First job: "${first.title}" at ${first.company}`);
 
-            // Markdown contamination check (P1 #8)
-            const mdContaminated = jobs.filter(j => {
-                const title = j.title || '';
-                return title.includes('**') || title.includes('##') || title.includes('```');
-            });
-            if (mdContaminated.length > 0) {
-                console.log(`[lifecycle-e2e]   WARNING: ${mdContaminated.length} job(s) with markdown in title (P1 #8)`);
-                mdContaminated.slice(0, 3).forEach(j => console.log(`[lifecycle-e2e]     "${j.title}"`));
-            } else {
-                console.log('[lifecycle-e2e]   No markdown contamination detected');
-            }
+        // Check fields
+        const withUrl = jobs.filter(j => j.url);
+        const withScore = jobs.filter(j => j.matchScore != null || j.score != null);
+        console.log(`[lifecycle-e2e]   With URL: ${withUrl.length}/${jobs.length}`);
+        console.log(`[lifecycle-e2e]   With score: ${withScore.length}/${jobs.length}`);
 
-            // Job type field check (P1 #7)
-            const withType = jobs.filter(j => j.type || j.jobType);
-            console.log(`[lifecycle-e2e]   With job type: ${withType.length}/${jobs.length} (P1 #7)`);
+        // Markdown contamination check (P1 #8)
+        const mdContaminated = jobs.filter(j => {
+            const title = j.title || '';
+            return title.includes('**') || title.includes('##') || title.includes('```');
+        });
+        if (mdContaminated.length > 0) {
+            console.log(`[lifecycle-e2e]   WARNING: ${mdContaminated.length} job(s) with markdown in title (P1 #8)`);
+            mdContaminated.slice(0, 3).forEach(j => console.log(`[lifecycle-e2e]     "${j.title}"`));
         } else {
-            console.log('[lifecycle-e2e]   WARNING: No jobs found in Run 1');
+            console.log('[lifecycle-e2e]   No markdown contamination detected');
+        }
+
+        // Job type field check (P1 #7)
+        const withType = jobs.filter(j => j.type || j.jobType);
+        console.log(`[lifecycle-e2e]   With job type: ${withType.length}/${jobs.length} (P1 #7)`);
+
+        // ── STRICT: pipeline must have actually searched ──
+        try {
+            const { body: pipeStatus } = await fetchJSON(`/api/pipeline/${sid()}/status`);
+            if (pipeStatus.progress) {
+                const searched = pipeStatus.progress.searched || 0;
+                expect(searched).toBeGreaterThan(0);
+                console.log(`[lifecycle-e2e]   Pipeline searched: ${searched} (PASS: > 0)`);
+            }
+        } catch (err) {
+            console.log(`[lifecycle-e2e]   Pipeline status check error: ${err.message}`);
         }
 
         // Take screenshot
