@@ -477,28 +477,92 @@ class StateService {
 
     /**
      * Process incoming WS state_sync_* messages from an agent child process.
-     * Stub — will be implemented in Phase 2.
      * @param {string} agentId
      * @param {Object} message - parsed WS message with type and payload
+     * @param {Object} [options] - { sendToTask: fn } for responding back to agent
      */
-    handleMessage(agentId, message) {
-        // Phase 2: dispatch based on message.type
-        // state_sync_snapshot → restore
-        // state_sync_patch   → set/merge/delete
-        // state_sync_set     → set
-        // state_sync_request → respond with snapshot
-        console.log(`[StateService] handleMessage stub called for agent "${agentId}", type: ${message?.type}`);
+    handleMessage(agentId, message, options = {}) {
+        if (!message || !message.type) return;
+
+        switch (message.type) {
+            case 'state_sync_snapshot': {
+                // Full state restore from agent
+                const data = message.data;
+                if (data && typeof data === 'object') {
+                    this.restore(agentId, data);
+                    console.log(`[StateService] Restored snapshot for agent "${agentId}", keys: ${Object.keys(data).length}`);
+                }
+                break;
+            }
+            case 'state_sync_patch': {
+                // Array of operations: { op, path, value/partial }
+                const ops = Array.isArray(message.ops) ? message.ops : [];
+                for (const op of ops) {
+                    const fullPath = agentId + '.' + op.path;
+                    switch (op.op) {
+                        case 'set':
+                            this.set(fullPath, op.value);
+                            break;
+                        case 'merge':
+                            this.merge(fullPath, op.partial || op.value);
+                            break;
+                        case 'delete':
+                            this.delete(fullPath);
+                            break;
+                        default:
+                            console.warn(`[StateService] Unknown patch op "${op.op}" for agent "${agentId}"`);
+                    }
+                }
+                break;
+            }
+            case 'state_sync_set': {
+                // Single set operation
+                const path = message.path;
+                if (path) {
+                    this.set(agentId + '.' + path, message.value);
+                }
+                break;
+            }
+            case 'state_sync_request': {
+                // Agent requests full snapshot — respond via sendToTask callback
+                const snapshot = this.snapshot(agentId);
+                const response = {
+                    type: 'state_sync_response',
+                    data: snapshot
+                };
+                if (typeof options.sendToTask === 'function') {
+                    options.sendToTask(response);
+                } else {
+                    console.warn(`[StateService] state_sync_request received but no sendToTask callback for agent "${agentId}"`);
+                }
+                break;
+            }
+            default:
+                console.log(`[StateService] Unhandled message type "${message.type}" for agent "${agentId}"`);
+        }
     }
 
     /**
-     * Push a state patch to the frontend via WebSocket.
-     * Stub — will be implemented in Phase 2.
+     * Push a state change event to the frontend via WebSocket.
+     * Called by the WebSocket integration layer when state.changed fires.
      * @param {string} agentId
-     * @param {Object} patch - {op, path, value}
+     * @param {Object} changeEvent - { path, value, oldValue }
      */
-    broadcastToFrontend(agentId, patch) {
-        // Phase 2: use WebSocketService to send agent_state_patch
-        console.log(`[StateService] broadcastToFrontend stub called for agent "${agentId}"`);
+    broadcastToFrontend(agentId, changeEvent) {
+        try {
+            const WebSocketService = require('./webSocketService');
+            const wsService = WebSocketService.getInstance();
+            wsService.sendToFront({
+                type: 'agent_state_patch',
+                agentId,
+                path: changeEvent.path,
+                value: changeEvent.value,
+                op: changeEvent.value === undefined ? 'delete' : 'set',
+                time: new Date().toLocaleString()
+            });
+        } catch (err) {
+            console.error(`[StateService] broadcastToFrontend failed for agent "${agentId}":`, err.message);
+        }
     }
 
     // ── Internal ──

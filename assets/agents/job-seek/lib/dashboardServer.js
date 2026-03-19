@@ -2263,16 +2263,51 @@ function _readBody(req, cb, onError) {
 // ─── Platform workflow status ───
 // Keyed by sessionId → Map<platformId, PlatformStatus>
 const _platformStatus = new Map();
+const _platformStatusLoaded = new Set(); // tracks which sessions have been hydrated from state
 const LOGIN_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 /**
+ * Sync in-memory platform statuses back to state for persistence.
+ * @param {string} sessionId
+ */
+function _syncPlatformStatusToState(sessionId) {
+    if (!_stateGetter) return;
+    const state = _stateGetter();
+    if (!state.platformStatus) state.platformStatus = {};
+    const map = _platformStatus.get(sessionId);
+    if (!map) return;
+    const obj = {};
+    for (const [platformId, status] of map.entries()) {
+        obj[platformId] = status;
+    }
+    state.platformStatus[sessionId] = obj;
+    if (_scheduleSave) _scheduleSave();
+}
+
+/**
  * Get or create platform status map for a session.
+ * On first access, hydrates from state.platformStatus (persisted by sessionStore).
  * @param {string} sessionId
  * @returns {Map}
  */
 function _getPlatformStatuses(sessionId) {
     if (!_platformStatus.has(sessionId)) {
         _platformStatus.set(sessionId, new Map());
+    }
+    // Hydrate from persisted state on first access
+    if (!_platformStatusLoaded.has(sessionId) && _stateGetter) {
+        _platformStatusLoaded.add(sessionId);
+        const state = _stateGetter();
+        const persisted = state.platformStatus?.[sessionId];
+        if (persisted && typeof persisted === 'object') {
+            const map = _platformStatus.get(sessionId);
+            for (const [platformId, status] of Object.entries(persisted)) {
+                if (!map.has(platformId)) map.set(platformId, status);
+            }
+            if (Object.keys(persisted).length > 0) {
+                console.log(`[dashboardServer] Hydrated ${Object.keys(persisted).length} platform statuses for ${sessionId} from state`);
+            }
+        }
     }
     const map = _platformStatus.get(sessionId);
     // Auto-sync missing platforms from platformStore
@@ -2319,6 +2354,15 @@ function _getPlatformStatuses(sessionId) {
  */
 function clearPlatformStatuses(sessionId) {
     _platformStatus.delete(sessionId);
+    _platformStatusLoaded.delete(sessionId);
+    // Also clear from persisted state
+    if (_stateGetter) {
+        const state = _stateGetter();
+        if (state.platformStatus) {
+            delete state.platformStatus[sessionId];
+            if (_scheduleSave) _scheduleSave();
+        }
+    }
 }
 
 /**
@@ -2454,6 +2498,8 @@ function updatePlatformCell(sessionId, platformId, update) {
     }
     // Broadcast SSE update
     _broadcastSSE(sessionId, 'platformUpdate', { platformId, ...update });
+    // Sync to persisted state
+    _syncPlatformStatusToState(sessionId);
 }
 
 // ─── Job workflow state ───

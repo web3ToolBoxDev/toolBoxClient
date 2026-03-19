@@ -11,6 +11,20 @@ const { getEnvById } = require('./fingerPrintService');
 const fs = require('fs');
 const path = require('path');
 
+// Lazy-require StateService to avoid circular dependency issues at startup
+let _stateService = null;
+function getStateService() {
+    if (!_stateService) {
+        try {
+            const { StateService } = require('./stateService');
+            _stateService = StateService.getInstance();
+        } catch (err) {
+            console.warn('[TaskService] StateService not available:', err.message);
+        }
+    }
+    return _stateService;
+}
+
 const AI_SUB_TASK_KEYS = ['profile', 'search', 'match', 'resume', 'coverLetter'];
 const AI_SUB_TASK_STATUSES = ['pending', 'running', 'review', 'done', 'failed'];
 
@@ -826,6 +840,23 @@ class TaskService {
                     taskName,
                     time: new Date().toLocaleString()
                 });
+                break;
+            }
+            // ── StateService: state_sync_* from agent child process ──
+            case 'state_sync_snapshot':
+            case 'state_sync_patch':
+            case 'state_sync_set':
+            case 'state_sync_request': {
+                const stateService = getStateService();
+                if (stateService) {
+                    // Derive agentId from the message's agentName or fall back to taskName
+                    const agentId = data.agentName || taskName;
+                    stateService.handleMessage(agentId, data, {
+                        sendToTask: (response) => {
+                            this.webSocketService.sendToTask(taskName, JSON.stringify(response));
+                        }
+                    });
+                }
                 break;
             }
             default:

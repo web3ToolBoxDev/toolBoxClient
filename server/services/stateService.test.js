@@ -493,18 +493,164 @@ describe('StateService', () => {
         expect(cb).toHaveBeenCalledTimes(1);
     });
 
-    test('handleMessage stub does not throw', () => {
-        const svc = StateService.getInstance();
-        expect(() => svc.handleMessage('ag', { type: 'state_sync_set' })).not.toThrow();
-    });
-
-    test('broadcastToFrontend stub does not throw', () => {
-        const svc = StateService.getInstance();
-        expect(() => svc.broadcastToFrontend('ag', { op: 'set' })).not.toThrow();
-    });
-
     test('flushAll does not throw on empty state', () => {
         const svc = StateService.getInstance();
         expect(() => svc.flushAll()).not.toThrow();
+    });
+});
+
+// ─── handleMessage integration tests (Phase 2) ───
+
+describe('handleMessage', () => {
+    beforeEach(() => {
+        StateService._reset();
+    });
+
+    test('state_sync_snapshot restores full agent state', () => {
+        const svc = StateService.getInstance();
+        svc.handleMessage('testAgent', {
+            type: 'state_sync_snapshot',
+            data: { sessions: [1, 2], config: { model: 'gpt-4' } }
+        });
+        expect(svc.get('testAgent.sessions')).toEqual([1, 2]);
+        expect(svc.get('testAgent.config.model')).toBe('gpt-4');
+    });
+
+    test('state_sync_snapshot with no data does nothing', () => {
+        const svc = StateService.getInstance();
+        svc.set('testAgent.existing', 'value');
+        svc.handleMessage('testAgent', { type: 'state_sync_snapshot' });
+        expect(svc.get('testAgent.existing')).toBe('value');
+    });
+
+    test('state_sync_set sets a single path', () => {
+        const svc = StateService.getInstance();
+        svc.handleMessage('myAgent', {
+            type: 'state_sync_set',
+            path: 'direction.jobTitle',
+            value: 'Engineer'
+        });
+        expect(svc.get('myAgent.direction.jobTitle')).toBe('Engineer');
+    });
+
+    test('state_sync_set with no path does nothing', () => {
+        const svc = StateService.getInstance();
+        svc.handleMessage('myAgent', {
+            type: 'state_sync_set',
+            value: 'orphan'
+        });
+        // No path means no state change — agent namespace remains empty/undefined
+        expect(svc.snapshot('myAgent')).toEqual({});
+    });
+
+    test('state_sync_patch handles set operation', () => {
+        const svc = StateService.getInstance();
+        svc.handleMessage('ag', {
+            type: 'state_sync_patch',
+            ops: [{ op: 'set', path: 'foo.bar', value: 42 }]
+        });
+        expect(svc.get('ag.foo.bar')).toBe(42);
+    });
+
+    test('state_sync_patch handles merge operation', () => {
+        const svc = StateService.getInstance();
+        svc.set('ag.config', { a: 1, b: 2 });
+        svc.handleMessage('ag', {
+            type: 'state_sync_patch',
+            ops: [{ op: 'merge', path: 'config', partial: { b: 99, c: 3 } }]
+        });
+        const config = svc.get('ag.config');
+        expect(config.a).toBe(1);
+        expect(config.b).toBe(99);
+        expect(config.c).toBe(3);
+    });
+
+    test('state_sync_patch handles delete operation', () => {
+        const svc = StateService.getInstance();
+        svc.set('ag.temp', 'gone');
+        svc.handleMessage('ag', {
+            type: 'state_sync_patch',
+            ops: [{ op: 'delete', path: 'temp' }]
+        });
+        expect(svc.get('ag.temp')).toBeUndefined();
+    });
+
+    test('state_sync_patch handles multiple operations', () => {
+        const svc = StateService.getInstance();
+        svc.handleMessage('ag', {
+            type: 'state_sync_patch',
+            ops: [
+                { op: 'set', path: 'x', value: 1 },
+                { op: 'set', path: 'y', value: 2 },
+                { op: 'set', path: 'z', value: 3 }
+            ]
+        });
+        expect(svc.get('ag.x')).toBe(1);
+        expect(svc.get('ag.y')).toBe(2);
+        expect(svc.get('ag.z')).toBe(3);
+    });
+
+    test('state_sync_patch with no ops does nothing', () => {
+        const svc = StateService.getInstance();
+        expect(() => svc.handleMessage('ag', { type: 'state_sync_patch' })).not.toThrow();
+    });
+
+    test('state_sync_request sends snapshot via sendToTask', () => {
+        const svc = StateService.getInstance();
+        svc.set('ag.data', { items: [1, 2, 3] });
+        const sent = [];
+        svc.handleMessage('ag', { type: 'state_sync_request' }, {
+            sendToTask: (msg) => sent.push(msg)
+        });
+        expect(sent).toHaveLength(1);
+        expect(sent[0].type).toBe('state_sync_response');
+        expect(sent[0].data.data.items).toEqual([1, 2, 3]);
+    });
+
+    test('state_sync_request without sendToTask does not throw', () => {
+        const svc = StateService.getInstance();
+        expect(() => svc.handleMessage('ag', { type: 'state_sync_request' })).not.toThrow();
+    });
+
+    test('handleMessage with null/undefined does nothing', () => {
+        const svc = StateService.getInstance();
+        expect(() => svc.handleMessage('ag', null)).not.toThrow();
+        expect(() => svc.handleMessage('ag', undefined)).not.toThrow();
+        expect(() => svc.handleMessage('ag', {})).not.toThrow();
+    });
+
+    test('handleMessage emits state.changed events', () => {
+        const svc = StateService.getInstance();
+        const changes = [];
+        svc.eventBus.on('state.changed', (e) => changes.push(e));
+        svc.handleMessage('ag', {
+            type: 'state_sync_set',
+            path: 'counter',
+            value: 10
+        });
+        // Should have at least one state.changed event
+        expect(changes.length).toBeGreaterThanOrEqual(1);
+        const last = changes[changes.length - 1];
+        expect(last.path).toBe('ag.counter');
+        expect(last.value).toBe(10);
+    });
+});
+
+// ─── broadcastToFrontend ───
+
+describe('broadcastToFrontend', () => {
+    beforeEach(() => {
+        StateService._reset();
+    });
+
+    test('broadcastToFrontend does not throw when WebSocketService is unavailable', () => {
+        const svc = StateService.getInstance();
+        // broadcastToFrontend requires WebSocketService which requires express app
+        // In test context it should handle the error gracefully
+        expect(() => svc.broadcastToFrontend('ag', {
+            path: 'ag.test',
+            value: 42,
+            oldValue: undefined
+        })).not.toThrow();
     });
 });

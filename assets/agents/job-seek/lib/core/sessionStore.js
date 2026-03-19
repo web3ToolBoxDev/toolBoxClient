@@ -40,7 +40,8 @@ const PERSIST_KEYS = [
     'activeUserId',
     'resumeHashes',
     'searchHistory',
-    'jobCards'
+    'jobCards',
+    'platformStatus'
 ];
 
 /**

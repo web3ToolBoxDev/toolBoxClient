@@ -24,6 +24,7 @@ const dashboardServer = require('./lib/dashboardServer');
 const userStore = require('./lib/core/userStore');
 const masterProfileClient = require('./lib/core/masterProfileClient');
 const tailorProfile = require('./lib/tools/tailorProfile');
+const { StateClient } = require('../shared/stateClient');
 
 // Register domain pack at startup (before any upsert can happen).
 // Retries on failure since dbservice may not be ready yet.
@@ -73,6 +74,7 @@ let terminated = false;
 let heartBeatTimer = null;
 let reconnectTimer = null;
 let runtimeContextAnnounced = false;
+let stateClient = null;
 
 const now = () => Date.now();
 const genId = (prefix = 'id') => `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
@@ -155,7 +157,8 @@ const state = {
     intentFiles: {},
     masterProfile: {},
     activeUserId: '',
-    resumeHashes: {}
+    resumeHashes: {},
+    platformStatus: {}
 };
 
 // Track active browser instances (not persisted)
@@ -245,7 +248,34 @@ restoreState();
 let _saveTimer = null;
 function scheduleSave() {
     if (_saveTimer) clearTimeout(_saveTimer);
-    _saveTimer = setTimeout(() => { _saveTimer = null; saveState(); }, 2000);
+    _saveTimer = setTimeout(() => {
+        _saveTimer = null;
+        saveState();
+        // Sync key state paths to StateClient (additive — does not replace existing persistence)
+        _syncStateToClient();
+    }, 2000);
+}
+
+/** Sync selected state keys to StateClient for server-side persistence. */
+function _syncStateToClient() {
+    if (!stateClient) return;
+    const keysToSync = [
+        'selectedAnswers', 'profileSections', 'masterProfile',
+        'runtimeContexts', 'envs', 'sessions', 'activeSessionId',
+        'conversations', 'subtasks', 'artifacts'
+    ];
+    try {
+        stateClient.batch(() => {
+            for (const key of keysToSync) {
+                if (state[key] !== undefined) {
+                    stateClient.set(key, state[key]);
+                }
+            }
+        });
+    } catch (err) {
+        // Non-fatal — StateClient sync is additive
+        console.warn('[agent] StateClient sync failed:', err.message);
+    }
 }
 
 // Save on exit
@@ -2795,6 +2825,16 @@ function initWebSocket() {
         send({ type: 'request_task_data', data: '' });
         // Start dashboard server (idempotent — only starts once)
         dashboardServer.start(() => state, undefined, { scheduleSave });
+
+        // Initialize StateClient for syncing state to main process
+        stateClient = new StateClient(ws, 'jobSeekAgent');
+        // Hydrate StateClient with current local state keys
+        // (shallow copy — StateClient proxy will track future changes)
+        for (const key of Object.keys(state)) {
+            stateClient._data[key] = state[key];
+        }
+        // Request any server-side state that may have been persisted
+        stateClient.syncFromServer();
     });
 
     ws.on('message', (raw) => {
@@ -2915,6 +2955,13 @@ function initWebSocket() {
                 break;
             case 'agent_close_browser':
                 handleCloseBrowser(data?.payload || {});
+                break;
+            // ── StateClient: server→agent state messages ──
+            case 'state_sync_response':
+            case 'agent_state_patch':
+                if (stateClient) {
+                    stateClient.handleServerMessage(data);
+                }
                 break;
             case 'terminate_process':
                 terminated = true;

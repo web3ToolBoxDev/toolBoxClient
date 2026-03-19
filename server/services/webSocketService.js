@@ -28,8 +28,29 @@ class WebSocketService {
     async initialize(expressApp) {
         this.app = expressApp;
         this.createFrontWebSocket();
+        this._wireStateService();
         if ((!this.wsFrontServers || this.wsFrontServers.length === 0) && process.env.NODE_ENV !== 'production') {
             console.log('Frontend WebSocket will be ready after the client connects.');
+        }
+    }
+
+    /**
+     * Listen to StateService state.changed events and broadcast to frontend.
+     * Called once during initialize. Safe to call multiple times (idempotent).
+     */
+    _wireStateService() {
+        if (this._stateServiceWired) return;
+        this._stateServiceWired = true;
+        try {
+            const { StateService } = require('./stateService');
+            const stateService = StateService.getInstance();
+            stateService.eventBus.on('state.changed', (changeEvent) => {
+                const agentId = changeEvent.path ? changeEvent.path.split('.')[0] : '';
+                stateService.broadcastToFrontend(agentId, changeEvent);
+            });
+            console.log('[WebSocketService] StateService state.changed wired to frontend broadcast');
+        } catch (err) {
+            console.warn('[WebSocketService] StateService not available, skipping wire:', err.message);
         }
     }
     // Create websocket for frontend communication
