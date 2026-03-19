@@ -160,6 +160,7 @@
     "test:e2e:claude": "cross-env E2E_PROVIDER=claude-code playwright test -c test/playwright.config.js test/onboarding-e2e.spec.js --headed",
     "test:e2e:codex": "cross-env E2E_PROVIDER=codex-cli playwright test -c test/playwright.config.js test/onboarding-e2e.spec.js --headed",
     "test:e2e:workflow": "playwright test -c test/playwright.config.js test/workflow-e2e.spec.js --headed",
+    "test:e2e:lifecycle": "playwright test -c test/playwright.config.js test/full-lifecycle-e2e.spec.js --headed",
     "test:e2e:pipeline": "playwright test -c test/playwright.config.js test/search-pipeline-deep.spec.js --headed",
     "test:e2e:ui": "playwright test -c test/playwright.config.js --ui",
     "test:toolbox": "node test/test-toolbox.js",
