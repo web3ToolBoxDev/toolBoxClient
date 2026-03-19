@@ -154,6 +154,8 @@
     "test:e2e:ui": "playwright test -c test/playwright.config.js --ui",
     "test:toolbox": "node test/test-toolbox.js",
     "test:toolbox:quick": "node test/test-toolbox.js --skip-install --skip-browser",
+    "test:regression": "playwright test -c test/playwright.config.js test/v130-regression.spec.js",
+    "test:regression:electron": "playwright test -c test/playwright.config.js test/v130-electron-regression.spec.js",
     "eject": "react-scripts eject",
     "pack": "electron-builder --dir"
   },
