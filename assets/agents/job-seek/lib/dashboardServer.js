@@ -4373,6 +4373,9 @@ function openWorkflowEditor() {
         _wfePlatforms = results[1].platforms || results[1] || [];
         var rawJobs = results[2].jobs;
         _wfeJobs = Array.isArray(rawJobs) ? rawJobs : [];
+        // Force search step to always be enabled (may have been disabled by bulkGenerateDocs)
+        var searchStep = (_wfeConfig.steps || []).find(function(s) { return s.name === 'search'; });
+        if (searchStep) searchStep.enabled = true;
         console.log('[wfe] config steps:', (_wfeConfig.steps || []).length, 'platforms:', _wfePlatforms.length);
         renderWorkflowEditor();
     }).catch(function(e) {
@@ -4408,7 +4411,8 @@ function renderWorkflowEditor() {
 }
 
 function renderWfeCard(step, cfg, t) {
-    var disabled = !step.enabled;
+    // Search is always required — never disable its card even if config says enabled=false
+    var disabled = step.name === 'search' ? false : !step.enabled;
     var cls = 'wfe-card' + (disabled ? ' disabled' : '');
     var nameMap = { search: t.wfeSearch, generate: t.wfeGenerate, apply: t.wfeApply };
 
