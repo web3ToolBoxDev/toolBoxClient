@@ -199,7 +199,9 @@ test.describe.serial('Full Workflow E2E (Electron)', () => {
 
     test('2. Navigate to Agent Workspace', async () => {
         console.log('[workflow-e2e] Step 2: Navigating to Agent Workspace...');
-        await page.goto(`/#/agentWorkspace/${encodeURIComponent(TASK_NAME)}`);
+        // Electron uses file:// protocol — navigate via hash on current URL
+        const baseUrl = page.url().split('#')[0];
+        await page.goto(`${baseUrl}#/agentWorkspace/${encodeURIComponent(TASK_NAME)}`);
         await expect(page.locator('.agent-workspace-main')).toBeVisible({ timeout: 15_000 });
         console.log('[workflow-e2e]   Workspace loaded');
 
@@ -330,19 +332,19 @@ test.describe.serial('Full Workflow E2E (Electron)', () => {
         expect(htmlResp.status).toBe(200);
         const html = await htmlResp.text();
 
-        // Verify key dashboard sections exist
+        // Verify key dashboard sections exist (use actual IDs/classes from dashboardServer.js)
         expect(html).toContain('job-table');
         console.log('[workflow-e2e]   Dashboard HTML contains job table');
 
-        // Verify pipeline status bar
-        expect(html).toContain('pipeStatus');
-        expect(html).toContain('btnStart');
-        console.log('[workflow-e2e]   Dashboard HTML contains pipeline controls');
+        // Verify workflow controls
+        expect(html).toContain('wfBtnStart');
+        expect(html).toContain('Start Workflow');
+        console.log('[workflow-e2e]   Dashboard HTML contains workflow controls');
 
-        // Verify search config panel
-        expect(html).toContain('cfgMinScore');
-        expect(html).toContain('cfgTargetCount');
-        console.log('[workflow-e2e]   Dashboard HTML contains search config panel');
+        // Verify settings modal
+        expect(html).toContain('globalSettingsModal');
+        expect(html).toContain('wfe_minScore');
+        console.log('[workflow-e2e]   Dashboard HTML contains settings panel');
 
         // Try fetching dashboard JSON data
         try {
@@ -365,11 +367,24 @@ test.describe.serial('Full Workflow E2E (Electron)', () => {
         console.log('[workflow-e2e] Step 6: Starting workflow...');
 
         const sid = encodeURIComponent(sessionId || 'default');
+
+        // Step 6a: Ensure workflow config exists (GET auto-creates default config)
+        const cfgResp = await fetchJSON(`/api/workflow/${sid}/config`);
+        console.log(`[workflow-e2e]   Config status: ${cfgResp.status}`);
+        expect(cfgResp.status).toBe(200);
+        console.log(`[workflow-e2e]   Workflow config ready: ${JSON.stringify(cfgResp.body).slice(0, 150)}...`);
+
+        // Step 6b: Start workflow
         const { status, body } = await postJSON(`/api/workflow/${sid}/start`, {});
 
         console.log(`[workflow-e2e]   Start response: ${JSON.stringify(body)}`);
+        // Accept 200 (success) or 400 with "AI provider required" (no CLI available)
+        if (status === 400 && body.error?.includes('AI provider required')) {
+            console.log('[workflow-e2e]   ⚠ AI provider not available — skipping workflow execution');
+            test.skip();
+            return;
+        }
         expect(status).toBe(200);
-        // Workflow start should succeed (success=true) or already be running
         expect(body.success === true || body.error?.includes('already running')).toBeTruthy();
         console.log('[workflow-e2e]   Workflow started');
     });
@@ -518,7 +533,8 @@ test.describe.serial('Full Workflow E2E (Electron)', () => {
         console.log('[workflow-e2e] Step 11: Final screenshot...');
 
         // Navigate back to workspace to capture final state
-        await page.goto(`/#/agentWorkspace/${encodeURIComponent(TASK_NAME)}`);
+        const baseUrl = page.url().split('#')[0];
+        await page.goto(`${baseUrl}#/agentWorkspace/${encodeURIComponent(TASK_NAME)}`);
         await page.waitForTimeout(3_000);
         await page.screenshot({ path: 'test-results/workflow-e2e-final.png' });
         console.log('[workflow-e2e]   Final screenshot saved to test-results/workflow-e2e-final.png');
