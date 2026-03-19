@@ -229,17 +229,38 @@ async function _selfHealAndRetry(sessionId, platformTool, query, config, errorMs
             _log(`  Fix rule: ${analysis.rule}`);
         }
 
-        // Step 2: Heal the script using AI
-        const healResult = await getScriptBuilder().healScript(
-            sessionId, platformTool.id, 'search',
-            { error: errorMsg, screenshot, currentScript },
-            { aiInvoke: config.aiInvoke }
-        );
-        if (!healResult.success) {
-            _log(`  healScript failed: ${healResult.error}`);
-            return null;
+        // Step 2: Check if full rebuild is needed (analysis can suggest this)
+        if (analysis.needsRebuild) {
+            _log(`🔧 [${query.source}] AI recommends full tool rebuild`);
+            try {
+                const buildResult = await getScriptBuilder().buildTool(sessionId, platformTool.id, 'search', {
+                    aiInvoke: config.aiInvoke,
+                    testParams: { keywords: query.query, location: query.location }
+                });
+                if (buildResult.success) {
+                    _log(`✓ [${query.source}] Tool rebuilt successfully (v${buildResult.version || 'new'})`);
+                    // Retry with rebuilt tool — fall through to Step 3
+                } else {
+                    _log(`✗ [${query.source}] Tool rebuild failed: ${buildResult.error}`);
+                    return null;
+                }
+            } catch (rebuildErr) {
+                _log(`✗ [${query.source}] Tool rebuild error: ${rebuildErr.message}`);
+                return null;
+            }
+        } else {
+            // Step 2b: Heal the script using AI (incremental fix)
+            const healResult = await getScriptBuilder().healScript(
+                sessionId, platformTool.id, 'search',
+                { error: errorMsg, screenshot, currentScript },
+                { aiInvoke: config.aiInvoke }
+            );
+            if (!healResult.success) {
+                _log(`  healScript failed: ${healResult.error}`);
+                return null;
+            }
+            _log(`  Script healed — retrying search...`);
         }
-        _log(`  Script healed — retrying search...`);
 
         // Step 3: Retry search with healed script
         const remaining = config.maxResults - (config._sourceResultCount?.[query.source] || 0);
@@ -862,7 +883,7 @@ async function _runPipeline(sessionId) {
     // ── Helper: process a single job — match + optional inline generate ──
     // Track consecutive errors — abort pipeline if too many in a row
     let _consecutiveErrors = 0;
-    const MAX_CONSECUTIVE_ERRORS = 5;
+    const MAX_CONSECUTIVE_ERRORS = 3;
     const AI_CALL_TIMEOUT = 120_000; // 2 min max per AI call
 
     function _withTimeout(promise, ms, label) {
@@ -1165,9 +1186,16 @@ async function _runPipeline(sessionId) {
             });
             // Abort pipeline if too many consecutive errors (e.g. browser died, AI provider down)
             if (_consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                _log(`ABORT: ${MAX_CONSECUTIVE_ERRORS} consecutive errors — stopping pipeline`);
+                _log(`ABORT: ${MAX_CONSECUTIVE_ERRORS} consecutive AI/processing errors — stopping pipeline`);
                 pipeline.progress.errors.push(`Pipeline aborted: ${MAX_CONSECUTIVE_ERRORS} consecutive failures`);
-                _finishPipeline(sessionId, 'error');
+                alertService.dispatch(sessionId, {
+                    type: 'failure',
+                    title: 'AI Provider Unavailable',
+                    message: `Pipeline interrupted after ${MAX_CONSECUTIVE_ERRORS} consecutive AI failures. Switch provider or retry later.`,
+                    stepName: 'search',
+                    meta: { aiUnavailable: true }
+                });
+                _finishPipeline(sessionId, 'ai_unavailable');
             }
         }
     }
@@ -1239,8 +1267,29 @@ async function _runPipeline(sessionId) {
                         if (listings.length < LOW_RESULT_THRESHOLD) {
                             _log(`⚠ [${q.source}] Suspiciously low results (${listings.length}) — attempting self-heal`);
 
-                            // Try self-heal for low-result anomaly (may indicate Cloudflare block)
-                            if (config.aiInvoke && !(pipeline._selfHealAttempts?.[q.source] >= 2)) {
+                            // Pre-flight: check AI + browser before attempting self-heal
+                            if (!config.aiInvoke) {
+                                _log(`⚠ [${q.source}] AI provider not available — cannot self-heal`);
+                                alertService.dispatch(sessionId, {
+                                    type: 'failure',
+                                    title: `${platformTool.name} — Self-heal blocked`,
+                                    message: 'AI provider required for self-healing. Configure an AI provider and retry.',
+                                    stepName: 'search',
+                                    meta: { selfHealBlocked: true, reason: 'no_ai' }
+                                });
+                            } else {
+                                const _healPlatform = getPlatformStore().getPlatform(sessionId, platformTool.id);
+                                if (!_healPlatform?._browserId) {
+                                    _log(`⚠ [${q.source}] Browser closed — cannot self-heal`);
+                                    _failedSources.add(q.source);
+                                    alertService.dispatch(sessionId, {
+                                        type: 'failure',
+                                        title: `${platformTool.name} — Browser closed`,
+                                        message: 'Browser is no longer open. Re-login and retry.',
+                                        stepName: 'search',
+                                        meta: { selfHealBlocked: true, reason: 'browser_closed' }
+                                    });
+                                } else if (!(pipeline._selfHealAttempts?.[q.source] >= 2)) {
                                 pipeline._selfHealAttempts = pipeline._selfHealAttempts || {};
                                 pipeline._selfHealAttempts[q.source] = (pipeline._selfHealAttempts[q.source] || 0) + 1;
                                 const anomalyMsg = `Search returned only ${listings.length} result(s) — possible Cloudflare block or broken selector`;
@@ -1251,6 +1300,7 @@ async function _runPipeline(sessionId) {
                                     _log(`✓ [${q.source}] Self-heal improved results: ${listings.length} → ${healedListings.length}`);
                                     listings = healedListings;
                                 }
+                            }
                             }
 
                             // Still low after heal attempt — mark for manual rebuild
@@ -1341,7 +1391,32 @@ async function _runPipeline(sessionId) {
 
                             // ── Self-heal: attempt AI-driven script repair + retry ──
                             let healed = false;
-                            if (config.aiInvoke && !(pipeline._selfHealAttempts?.[q.source] >= 2)) {
+
+                            // Pre-flight: check AI provider availability
+                            if (!config.aiInvoke) {
+                                _log(`⚠ [${q.source}] AI provider not available — cannot self-heal`);
+                                _failedSources.add(q.source);
+                                alertService.dispatch(sessionId, {
+                                    type: 'failure',
+                                    title: `${platformTool.name} — Self-heal blocked`,
+                                    message: 'AI provider required for self-healing. Configure an AI provider and retry.',
+                                    stepName: 'search',
+                                    meta: { selfHealBlocked: true, reason: 'no_ai' }
+                                });
+                            // Pre-flight: check browser is still alive
+                            } else {
+                                const _healPlatform = getPlatformStore().getPlatform(sessionId, platformTool.id);
+                                if (!_healPlatform?._browserId) {
+                                    _log(`⚠ [${q.source}] Browser closed — cannot self-heal`);
+                                    _failedSources.add(q.source);
+                                    alertService.dispatch(sessionId, {
+                                        type: 'failure',
+                                        title: `${platformTool.name} — Browser closed`,
+                                        message: 'Browser is no longer open. Re-login and retry.',
+                                        stepName: 'search',
+                                        meta: { selfHealBlocked: true, reason: 'browser_closed' }
+                                    });
+                                } else if (!(pipeline._selfHealAttempts?.[q.source] >= 2)) {
                                 pipeline._selfHealAttempts = pipeline._selfHealAttempts || {};
                                 pipeline._selfHealAttempts[q.source] = (pipeline._selfHealAttempts[q.source] || 0) + 1;
                                 _log(`🔧 [${q.source}] Self-heal attempt ${pipeline._selfHealAttempts[q.source]}/2...`);
@@ -1369,6 +1444,7 @@ async function _runPipeline(sessionId) {
                                     _log(`✗ [${q.source}] Self-heal failed — marking source as failed`);
                                 }
                             }
+                            } // end else (browser alive + AI available)
 
                             if (!healed) {
                             _failedSources.add(q.source);

@@ -1430,11 +1430,11 @@ Keep the same function signature (receives \`page\` and \`params\`).
  * @param {string} toolType - 'search' or 'apply'
  * @param {object} errorContext - { error, script, screenshot?, promptRules? }
  * @param {object} options - { aiInvoke: function }
- * @returns {{ rule: string|null }}
+ * @returns {{ rule: string|null, needsRebuild: boolean }}
  */
 async function analyzeFailure(platformName, platformUrl, toolType, errorContext, options = {}) {
     const { aiInvoke } = options;
-    if (typeof aiInvoke !== 'function') return { rule: null };
+    if (typeof aiInvoke !== 'function') return { rule: null, needsRebuild: false };
 
     // Gather existing fix rules to avoid duplicates
     const existingFixRules = getPlatformStore().getFixRules(platformUrl, toolType);
@@ -1457,31 +1457,53 @@ ${(errorContext.promptRules || '').slice(0, 2000)}
 ${existingRulesBlock}
 The screenshot shows the page state when the error occurred.
 
-Based on this failure, write ONE concise rule (1-2 sentences) that the script generator
-should follow to prevent this failure in future scripts. Focus on the ROOT CAUSE, not the
-symptom. Write the rule as an imperative instruction.
-Do NOT repeat rules that already exist in the current prompt or fix rules above.
+Based on this failure, analyze the root cause and respond with JSON:
+{ "rule": "...", "needsRebuild": true/false }
+
+- "rule": ONE concise rule (1-2 sentences) that the script generator should follow to prevent
+  this failure in future scripts. Focus on the ROOT CAUSE, not the symptom. Write as an imperative.
+  Do NOT repeat rules that already exist above.
+- "needsRebuild": Set to true ONLY if the script has fundamental structural issues that a simple
+  fix rule cannot resolve (e.g. completely wrong page structure, outdated selectors throughout,
+  script targets a redesigned page). Set to false for minor issues fixable by a single rule.
 
 Examples of good rules:
 - "ALWAYS include &location= parameter in search URL to override stale cookie-based locations."
 - "After navigation, check for 'No results' text BEFORE waiting for job card selectors."
 - "Use page.waitForSelector with a 15s timeout for slow-loading job detail panels."
 
-Return ONLY the rule text, nothing else.`;
+Return ONLY the JSON object, nothing else.`;
 
     try {
         console.log(`[analyzeFailure] Analyzing failure for ${platformName}/${toolType}: ${(errorContext.error || '').slice(0, 100)}`);
         const response = await aiInvoke(prompt, errorContext.screenshot || null);
-        const rule = (response || '').trim().replace(/^["']|["']$/g, '').replace(/^Rule:\s*/i, '');
+        const raw = (response || '').trim();
+
+        // Try to parse as JSON first (new format)
+        let rule = null;
+        let needsRebuild = false;
+        try {
+            // Extract JSON from response (may be wrapped in markdown code block)
+            const jsonMatch = raw.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                const parsed = JSON.parse(jsonMatch[0]);
+                rule = (parsed.rule || '').trim().replace(/^["']|["']$/g, '').replace(/^Rule:\s*/i, '');
+                needsRebuild = !!parsed.needsRebuild;
+            }
+        } catch (_) {
+            // Fall back to plain text rule (backward compat)
+            rule = raw.replace(/^["']|["']$/g, '').replace(/^Rule:\s*/i, '');
+        }
+
         if (rule && rule.length > 10 && rule.length < 500) {
-            console.log(`[analyzeFailure] Generated fix rule: ${rule.slice(0, 100)}`);
-            return { rule };
+            console.log(`[analyzeFailure] Generated fix rule: ${rule.slice(0, 100)}, needsRebuild: ${needsRebuild}`);
+            return { rule, needsRebuild };
         }
         console.log(`[analyzeFailure] AI response not usable (len=${(rule || '').length})`);
-        return { rule: null };
+        return { rule: null, needsRebuild };
     } catch (err) {
         console.log(`[analyzeFailure] AI analysis failed: ${err.message}`);
-        return { rule: null };
+        return { rule: null, needsRebuild: false };
     }
 }
 
