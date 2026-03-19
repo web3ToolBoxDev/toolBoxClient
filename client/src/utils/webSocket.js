@@ -1,5 +1,6 @@
 import APIManager from "./api";
 import { sleep } from "../utils"
+import useAgentStore from "../store/agentStore";
 
 
 class WebSocketManager {
@@ -126,6 +127,22 @@ class WebSocketManager {
             return;
           }
           if (!isCurrent()) return;
+
+          // ── Agent state sync (Phase 3) ──
+          if (message.type === 'agent_state_patch' && message.patch) {
+            try {
+              useAgentStore.getState().applyPatch(message.patch);
+            } catch (err) {
+              console.warn('[WS] agent_state_patch apply failed:', err);
+            }
+          } else if (message.type === 'agent_state_snapshot' && message.agentId) {
+            try {
+              useAgentStore.getState().applySnapshot(message.agentId, message.snapshot);
+            } catch (err) {
+              console.warn('[WS] agent_state_snapshot apply failed:', err);
+            }
+          }
+
           this.pushToQueue(message);
           this._messageListeners.forEach((listener) => {
             try {
