@@ -173,8 +173,8 @@ Development mode: `yarn dev` starts Electron + backend. `yarn start` for React h
 
 - Platform: fingerprint browser runtime, 3-layer memory, toolService, WebSocket agent protocol, task lifecycle management
 - Job Seek Agent: multi-platform search, AI matching, document generation, self-healing pipeline, real-time dashboard, i18n
-- Testing: 17-test regression suite (API + unit + Electron UI)
-- Dev tooling: multi-agent coordination system (Coordinator → Dev → Tester → QA)
+- Testing: 177+ test suite (API functional, unit, Electron UI, full lifecycle E2E with real search)
+- Dev tooling: multi-agent coordination system (Coordinator → Dev → Tester → QA) with L1-L5 acceptance standards
 
 ## License
 
