@@ -15,9 +15,6 @@ const { spawn } = require('child_process');
  */
 function buildChromeArgs(env, options = {}) {
     const args = [
-        '--disable-blink-features=AutomationControlled',
-        // NOTE: --no-sandbox removed — Cloudflare detects it and blocks access
-        '--disable-infobars',
         '--no-first-run',
         '--no-default-browser-check',
         `--user-agent=${env.user_agent}`,
@@ -104,7 +101,6 @@ async function launchBrowser(params) {
     const browser = await puppeteer.launch({
         headless: false,
         executablePath: chromePath,
-        ignoreDefaultArgs: ['--enable-automation'],
         userDataDir,
         args,
         defaultViewport: null

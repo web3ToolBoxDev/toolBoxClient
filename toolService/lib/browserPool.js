@@ -91,9 +91,8 @@ async function launchWithFingerprint({ chromePath, savePath, env, headless = fal
     const browser = await puppeteer.launch({
         headless: headless ? 'new' : false,
         executablePath: chromePath,
-        ignoreDefaultArgs: ['--enable-automation'],
         userDataDir,
-        args: [...args, '--disable-blink-features=AutomationControlled', '--disable-infobars'],
+        args,
         defaultViewport: null
     });
 
@@ -117,10 +116,7 @@ async function launchWithChrome({ chromePath, headless = false }) {
     const browser = await puppeteer.launch({
         headless: headless ? 'new' : false,
         executablePath: chromePath,
-        ignoreDefaultArgs: ['--enable-automation'],
         args: [
-            '--disable-infobars',
-            '--disable-blink-features=AutomationControlled',
             '--no-first-run',
             '--no-default-browser-check'
         ],
