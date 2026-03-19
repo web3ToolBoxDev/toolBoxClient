@@ -1,112 +1,149 @@
-# Web3ToolBox — AI Agent Desktop Platform
+# Web3ToolBox — AI Agent Runtime Platform
 
-> An Electron-based platform for building and running AI agents that operate real browsers, manage multi-stage workflows, and self-heal on failure.
+> A desktop platform that provides browser execution, persistent memory, and shared tool capabilities for AI agents. Agents connect via a standard WebSocket protocol and operate real fingerprint browsers to automate complex web workflows.
 
-## Architecture Overview
+## Platform Architecture
+
+```mermaid
+graph TB
+    subgraph Platform["ToolBox Platform (Electron)"]
+        direction TB
+        subgraph Foundation["Execution Foundation"]
+            FB[Fingerprint Browser Runtime<br/>Customized Chromium · C++ Blink Patches<br/>Environment Isolation · Anti-Bot]
+        end
+        subgraph Memory["Universal Memory Layer"]
+            MEM[mem0 Semantic Recall + SQLite Structured Knowledge<br/>Per-Agent Scope Isolation · Marker Protocol]
+        end
+        subgraph Tools["Shared Tool Layer"]
+            TS[toolService<br/>Browser Pool · Screenshot · HTTP · Tool Registry]
+        end
+        subgraph Core["Core Services"]
+            BE[Express Backend :30001<br/>Task Lifecycle · WebSocket Hub]
+            UI[React Frontend :3000<br/>Agent Workspace · Dashboard]
+        end
+    end
+
+    subgraph Agents["AI Agents (WebSocket Protocol)"]
+        A1[Job Seek Agent<br/>Search · Match · Generate · Apply]
+        A2[Future Agent...]
+    end
+
+    Agents -->|WebSocket Protocol| BE
+    BE --> TS
+    BE --> Memory
+    TS --> FB
+    A1 -->|SSE Dashboard :30003| UI
+```
+
+The platform separates **infrastructure** from **application logic**. Each AI agent is a standalone Node.js process that connects to the platform via a [standardized WebSocket protocol](docs/ai-agent-protocol.md). The platform provides three foundational layers:
+
+| Layer | Responsibility | Implementation |
+|-------|---------------|----------------|
+| **Browser Runtime** | Execute automation in real, fingerprint-consistent browsers | Customized Chromium with C++ Blink patches, per-environment isolation |
+| **Memory** | Persist and recall knowledge across sessions | SQLite (structured SoT) + mem0 (semantic fuzzy recall), scoped per agent |
+| **Tool Service** | Shared capabilities any agent can invoke | Browser pool, screenshot, HTTP proxy, tool registration/discovery |
+
+## Agent Integration: WebSocket Protocol
+
+Any AI agent can plug into the platform by implementing the [Agent WebSocket Protocol](docs/ai-agent-protocol.md):
 
 ```
-Electron Main (electron.js)
-├── React Frontend (port 3000)
-│   React 18, Zustand, i18next, React Bootstrap
-├── Express Backend (port 30001)
-│   REST API + WebSocket server, task lifecycle management
-├── Dashboard Server (port 30003)
-│   Per-agent SSE-driven real-time workflow UI
-├── dbservice (port 30002)
-│   SQLite structured knowledge + mem0 semantic memory
-├── toolService (port 30004)
-│   Shared browser automation and tool capabilities
-└── Agent Runtime
-    ├── searchPipeline.js — search orchestration + self-heal
-    ├── scriptBuilder.js — LLM-generated browser scripts
-    ├── dashboardServer.js — real-time dashboard + workflow UI
-    └── workflow/ — step-based workflow engine
+Agent Process                          Platform Backend
+    │                                       │
+    │──── ws connect ──────────────────────→│
+    │←─── agent_state_snapshot ────────────│  (full state sync)
+    │──── agent_session_create ───────────→│
+    │←─── agent_conversation_update ───────│  (prompts, questions)
+    │──── agent_user_input ───────────────→│
+    │←─── agent_subtask_update ────────────│  (progress)
+    │←─── agent_artifact_update ───────────│  (generated outputs)
+    │──── agent_execution_control ────────→│  (pause/resume/cancel)
+    │                                       │
 ```
 
-Five services coordinate through HTTP, WebSocket, and SSE. The Electron main process manages window lifecycle and spawns the backend. The React client communicates with the backend via Axios and WebSocket for real-time task updates. Agents execute in isolated child processes with access to fingerprint-aware browser instances.
+The protocol covers session management, structured conversations (options + free input + file upload), subtask progress, artifact delivery, and execution control — enabling the platform to render a universal Agent Workspace UI for any connected agent.
 
-## Key Features
+## Application: Job Seek Agent
 
-- **Agent Workflow Engine** — Multi-stage pipelines (search, generate, apply) with step-level progress tracking, failure recovery, and conditional branching
-- **Self-Healing Execution** — On script failure: capture screenshot + error log + script context, send to LLM for analysis, generate fix rules, rebuild script, retry (up to 2 attempts)
-- **Browser Execution Runtime** — Fingerprint-aware Chromium with environment/wallet/session injection, proxy-geo-timezone-WebRTC consistency, and anti-bot handling
-- **3-Layer Memory System** — Hot state cache for active sessions, SQLite for structured knowledge (source of truth), mem0 for semantic recall across conversations
-- **Tool Platform** — Shared tools in toolService, domain-specific tools in vertical agents, runtime tool discovery and registration
-- **Real-Time Communication** — WebSocket protocol with heartbeat, auto-reconnect with exponential backoff, message queuing during disconnects, and SSE for dashboard streaming
-- **Multi-Language Support** — Full i18n (English + Chinese) across all UI surfaces including dynamically generated agent content
+The first agent built on the platform automates end-to-end job searching with AI-driven workflows.
 
-## System Design Highlights
-
-### 1. Agent Workflow Engine
+### Workflow Engine
 
 ```mermaid
 flowchart LR
-    A[Query Generation] --> B[Multi-Platform Search]
-    B --> C[AI Match Scoring]
-    C --> D{Score >= Threshold?}
-    D -->|Yes| E[Document Generation]
+    A[AI Query<br/>Generation] --> B[Multi-Platform<br/>Search]
+    B --> C[AI Match<br/>Scoring]
+    C --> D{Score ≥<br/>Threshold?}
+    D -->|Yes| E[Document<br/>Generation]
     D -->|No| F[Skip]
-    E --> G[Apply Pipeline]
-    G -->|Failure| H[Self-Heal Loop]
+    E --> G[Review /<br/>Apply]
+    B -->|Failure| H[Self-Heal<br/>Loop]
     H --> B
 ```
 
-Workflows are defined as ordered steps, each with its own execution logic, success criteria, and failure handler. The engine tracks per-job progress, supports pause/resume, and persists state across restarts. A coordinator manages the pipeline lifecycle and routes failures to the self-healing subsystem.
+- **Multi-platform search** — Indeed, LinkedIn, Job Bank via fingerprint browsers (anti-bot aware)
+- **AI match scoring** — LLM evaluates job-to-profile fit (60-100%), with user preference weighting
+- **Document generation** — Tailored resume, cover letter, and interview prep per job, rendered as both downloadable artifacts and in-app structured preview
+- **Self-healing pipeline** — On script failure: capture screenshot + error + context → LLM analysis → fix rule generation → script rebuild → retry (max 2 attempts)
+- **Real-time dashboard** — SSE-driven UI with workflow progress, job listings, platform status, and document preview modals
 
-### 2. Self-Healing Search Pipeline
+### Self-Healing Loop
 
 ```mermaid
 flowchart TD
     A[Execute Browser Script] -->|Failure| B[Capture Context]
-    B --> C[screenshot + script + error log + previous fix rules]
+    B --> C[screenshot + script +<br/>error log + fix rules]
     C --> D[LLM Analysis]
     D --> E[Generate Fix Rules]
-    E --> F[Rebuild Script with Rules]
-    F --> G{Attempt <= 2?}
+    E --> F[Rebuild Script]
+    F --> G{Attempt ≤ 2?}
     G -->|Yes| A
-    G -->|No| H[Mark Failed + Log for Review]
+    G -->|No| H[Mark Failed +<br/>Alert Dashboard]
 ```
 
-When a browser automation script fails, the system captures the full execution context — including a page screenshot, the failing script, error logs, and any previously applied fix rules — and sends it to an LLM. The LLM produces targeted fix rules that are injected into the script builder for the next attempt. This closed-loop approach handles dynamic page changes, selector drift, and unexpected modal dialogs without manual intervention.
+When a browser script fails (Cloudflare block, selector drift, modal popups), the system captures the full execution context and sends it to an LLM for diagnosis. Fix rules are persisted and reapplied on subsequent runs, turning each failure into a permanent improvement.
 
-### 3. Memory Architecture
+## Platform Deep Dives
+
+### Browser Execution Runtime
+
+The platform wraps a customized Chromium build with C++ patches to the Blink engine:
+
+- **Fingerprint injection** — Canvas, WebGL, audio context, navigator properties, client hints set per-environment for consistent browser identity
+- **Worker context consistency** — Patched `navigator.languages` hooks across Web Worker / Service Worker / SharedWorker contexts to pass Cloudflare Turnstile (C++ Blink layer)
+- **Environment isolation** — Each agent execution gets its own user data directory, proxy, timezone, geolocation, and WebRTC configuration
+- **Anti-bot handling** — Runtime detection of debugger traps with domain-level memory for pre-injection on known hostile sites
+
+### Memory Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│              Agent Runtime                  │
-│                                             │
-│  ┌──────────┐  ┌───────────┐  ┌──────────┐ │
-│  │ State    │  │ Knowledge │  │ Semantic  │ │
-│  │ (Hot)    │→ │ (SQLite)  │→ │ (mem0)   │ │
-│  │ In-memory│  │ SoT       │  │ Fuzzy    │ │
-│  └──────────┘  └───────────┘  └──────────┘ │
-│       ↑              ↑              ↑       │
-│       └── scope: agent:<name> ──────┘       │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│  ┌──────────┐   ┌───────────┐   ┌────────────┐ │
+│  │ State    │   │ Knowledge │   │ Semantic   │ │
+│  │ (Hot)    │ → │ (SQLite)  │ → │ (mem0)     │ │
+│  │ In-memory│   │ SoT       │   │ Fuzzy      │ │
+│  └──────────┘   └───────────┘   └────────────┘ │
+│       ↑               ↑               ↑        │
+│       └─── scope: agent:<name> ────────┘        │
+└─────────────────────────────────────────────────┘
 ```
 
-Each agent operates in an isolated memory scope. Hot state serves the active session with sub-millisecond reads. SQLite stores structured knowledge (user profiles, job history, preferences) as the source of truth. mem0 provides semantic recall — fuzzy search over past interactions and decisions. A marker protocol (`[PROFILE_SET:section=value]`) allows agents to update structured memory inline during conversation.
+- **Hot state** — Sub-millisecond reads for active session data
+- **SQLite** — Structured knowledge store (profiles, job history, preferences), source of truth
+- **mem0** — Semantic recall via embeddings, fuzzy search over past interactions
+- **Marker protocol** — Agents update structured memory inline during conversation: `[PROFILE_SET:skills=React, Node.js]`
+- **Scope isolation** — Each agent operates in its own memory namespace
 
-### 4. Browser Execution Runtime
+### Multi-Agent Development System
 
-The platform wraps a customized Chromium build with C++ patches to the Blink engine. Key capabilities:
+The platform itself is developed using a role-based multi-agent workflow:
 
-- **Fingerprint injection** — User agent, canvas, WebGL, audio context, and navigator properties are set per-environment to maintain consistent browser identity
-- **Worker context patches** — Diagnosed and fixed Cloudflare Turnstile failures caused by incomplete `navigator.languages` hooks in Web Worker contexts (C++ Blink layer patch)
-- **Environment isolation** — Each execution gets its own user data directory, proxy configuration, timezone, geolocation, and WebRTC settings
-- **Anti-bot handling** — Runtime detection of debugger traps with automatic anti-debug script injection
+- **Coordinator** dispatches tasks with conflict detection and priority scheduling
+- **Dev agents** implement features in isolated git worktrees with parallel execution
+- **Tester** runs Playwright regression suites (17 tests across API, unit, and Electron UI)
+- **QA** performs real-environment visual verification via browser automation
 
-### 5. Multi-Agent Development System
-
-Development of the platform itself uses a role-based multi-agent system:
-
-- **Coordinator** — Decomposes user requests into scoped tasks
-- **PM** — Writes acceptance criteria and approves implementation plans
-- **Dev** — Implements features with automated E2E verification
-- **Tester** — Runs Playwright tests against the live application
-- **QA** — Visual verification of dashboard state via screenshots
-
-Agents coordinate through persistent task logs with conflict detection. The scrum workflow enforces plan-before-code discipline: no implementation begins before PM approval.
+This system is defined as portable markdown workflows, reusable across projects.
 
 ## Tech Stack
 
@@ -115,11 +152,11 @@ Agents coordinate through persistent task logs with conflict detection. The scru
 | **Desktop** | Electron, Node.js |
 | **Frontend** | React 18, Zustand, React Bootstrap, SCSS, i18next |
 | **Backend** | Express, express-ws, WebSocket, SSE |
-| **AI/LLM** | OpenAI, Claude, Codex CLI integration |
-| **Memory** | SQLite, mem0 (semantic), NeDB (legacy) |
-| **Browser** | Customized Chromium (C++ patches), Playwright, Puppeteer |
-| **Infrastructure** | Docker, CI/CD, Redis |
-| **Languages** | JavaScript, Python, C++, TypeScript, Solidity |
+| **AI/LLM** | OpenAI, Claude, Codex CLI — multi-provider with runtime switching |
+| **Memory** | SQLite, mem0 (semantic embeddings), NeDB |
+| **Browser** | Customized Chromium (C++ Blink patches), Playwright, Puppeteer |
+| **Testing** | Playwright (E2E + Electron), Jest (unit) |
+| **Languages** | JavaScript, C++, Python, TypeScript |
 
 ## Getting Started
 
@@ -131,15 +168,16 @@ yarn build                  # build React frontend
 yarn dist                   # package Electron distributable (output in dist/)
 ```
 
-For development mode: `yarn dev` starts Electron + backend with hot reload on port 3000.
+Development mode: `yarn dev` starts Electron + backend. `yarn start` for React hot reload.
 
 ## Project Status
 
-**Current version: v1.2.0**
+**Current: v1.3.0**
 
-Completed: agent workflow engine, self-healing pipeline, multi-platform search (Indeed/LinkedIn/Job Bank), AI match scoring, document generation (resume/cover letter/interview prep), real-time dashboard, fingerprint browser runtime, 3-layer memory system, i18n, WebSocket communication layer.
-
-In progress (v1.3.0): workflow-level retry redesign, pipeline timeout handling, memory persistence improvements.
+- Platform: fingerprint browser runtime, 3-layer memory, toolService, WebSocket agent protocol, task lifecycle management
+- Job Seek Agent: multi-platform search, AI matching, document generation, self-healing pipeline, real-time dashboard, i18n
+- Testing: 17-test regression suite (API + unit + Electron UI)
+- Dev tooling: multi-agent coordination system (Coordinator → Dev → Tester → QA)
 
 ## License
 
