@@ -966,7 +966,8 @@ async function _runPipeline(sessionId) {
 
             // No AI result → error state (algorithm fallback removed)
             if (!matchResult) {
-                _log(`✗ AI match unavailable for "${listing.title}" — skipping`);
+                _consecutiveErrors++;
+                _log(`✗ AI match unavailable for "${listing.title}" — skipping (consecutive: ${_consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS})`);
                 pipeline.progress.matched++;
                 pipeline.progress.errors.push(`AI unavailable: ${listing.title}`);
                 dashboardServer.upsertJobCard(sessionId, {
@@ -994,6 +995,19 @@ async function _runPipeline(sessionId) {
                     error: 'AI matching failed',
                     at: new Date().toISOString()
                 });
+                // Abort pipeline if too many consecutive AI failures
+                if (_consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    _log(`ABORT: ${MAX_CONSECUTIVE_ERRORS} consecutive AI match failures — stopping pipeline`);
+                    pipeline.progress.errors.push(`Pipeline aborted: ${MAX_CONSECUTIVE_ERRORS} consecutive AI match failures`);
+                    alertService.dispatch(sessionId, {
+                        type: 'failure',
+                        title: 'AI Matching Unavailable',
+                        message: `Pipeline interrupted after ${MAX_CONSECUTIVE_ERRORS} consecutive AI match failures. Check your AI provider.`,
+                        stepName: 'search',
+                        meta: { aiUnavailable: true }
+                    });
+                    _finishPipeline(sessionId, 'ai_unavailable');
+                }
                 return;
             }
 
@@ -1196,6 +1210,7 @@ async function _runPipeline(sessionId) {
                     meta: { aiUnavailable: true }
                 });
                 _finishPipeline(sessionId, 'ai_unavailable');
+                return; // ← CRITICAL: stop processing remaining listings
             }
         }
     }
