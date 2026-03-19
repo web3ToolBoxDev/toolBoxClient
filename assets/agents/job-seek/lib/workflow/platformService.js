@@ -604,9 +604,9 @@ async function confirmLogin(sessionId, platformId) {
             return { success: true, verified: false, method: 'manual', message: verifyResult.message };
         }
 
-        // Not logged in — tell user to actually log in first
+        // Not logged in — reset to idle so user can click Login again
         _syncToDashboard(sessionId, platformId, {
-            cell: 'login', status: 'verifying',
+            cell: 'login', status: 'idle',
             name: platform.name, icon: platform.icon, url: platform.url,
             message: 'Login not detected — please log in first'
         });

@@ -838,6 +838,38 @@ async function _buildDashboardAndFinish(sessionId, opts = {}) {
         console.error('[agent] buildIntentFile on dashboard build failed:', e.message);
     }
 
+    // ── Ensure profileSections[sid] is populated ──
+    // When workflow reaches dashboard, profile data may live only in masterProfile
+    // (e.g. if seedProfileFromKnowledge failed or profile was built in a previous session).
+    // Fall back to masterProfile so the workflow engine can find profile data.
+    if (!state.profileSections[sessionId]) state.profileSections[sessionId] = {};
+    const currentProfile = state.profileSections[sessionId];
+    const profileEmpty = Object.keys(currentProfile).filter(k => currentProfile[k] && String(currentProfile[k]).trim()).length === 0;
+    if (profileEmpty && state.masterProfile && Object.keys(state.masterProfile).length > 0) {
+        const direction = state.selectedAnswers[sessionId] || {};
+        const targetRole = direction.q_job_title;
+        if (targetRole) {
+            // Auto-tailor master profile for the target direction
+            const { tailoredSections } = tailorProfile.handler({
+                masterProfile: state.masterProfile,
+                targetRole,
+                targetLocation: direction.q_location || '',
+                workMode: direction.q_work_mode || '',
+                salaryRange: direction.q_salary || ''
+            });
+            for (const [key, val] of Object.entries(tailoredSections)) {
+                if (val) state.profileSections[sessionId][key] = val;
+            }
+            console.log(`[agent] _buildDashboardAndFinish: seeded profileSections from masterProfile (tailored for "${targetRole}")`);
+        } else {
+            // No direction — copy master as-is
+            for (const [key, val] of Object.entries(state.masterProfile)) {
+                if (val && String(val).trim()) state.profileSections[sessionId][key] = val;
+            }
+            console.log('[agent] _buildDashboardAndFinish: seeded profileSections from masterProfile (no direction)');
+        }
+    }
+
     // Seed platforms from location (e.g. Ontario → canada → Indeed + LinkedIn + Job Bank)
     const platformStore = require('./lib/workflow/platformStore');
     const workflowStore = require('./lib/workflow/workflowStore');

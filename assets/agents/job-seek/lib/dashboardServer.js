@@ -617,7 +617,13 @@ function start(getState, port, options) {
                     console.log(`[pipeline:start] provider='${state.currentProvider || ''}', subProvider='${state.currentSubProvider || ''}', model='${state.currentModel || ''}', apiKey=${state.runtimeApiKey ? 'SET' : 'EMPTY'}`);
 
                     const answers = state.selectedAnswers?.[sessionId] || {};
-                    const sections = state.profileSections?.[sessionId] || {};
+                    let sections = state.profileSections?.[sessionId] || {};
+                    // Fallback: if profileSections is empty, use masterProfile
+                    const _secFilled = Object.keys(sections).filter(k => sections[k] && String(sections[k]).trim()).length > 0;
+                    if (!_secFilled && state.masterProfile && Object.keys(state.masterProfile).length > 0) {
+                        sections = state.masterProfile;
+                        console.log(`[pipeline:start] profileSections empty, falling back to masterProfile`);
+                    }
 
                     // Build AI callbacks for pipeline
                     const aiExpander = _buildAiExpander();
@@ -954,7 +960,13 @@ function start(getState, port, options) {
                     }
                     const state = _stateGetter ? _stateGetter() : {};
                     const answers = state.selectedAnswers?.[sid] || {};
-                    const sections = state.profileSections?.[sid] || {};
+                    let sections = state.profileSections?.[sid] || {};
+                    // Fallback: if profileSections is empty, use masterProfile
+                    const sectionsFilled = Object.keys(sections).filter(k => sections[k] && String(sections[k]).trim()).length > 0;
+                    if (!sectionsFilled && state.masterProfile && Object.keys(state.masterProfile).length > 0) {
+                        sections = state.masterProfile;
+                        console.log(`[dashboard:workflow] profileSections empty for ${sid.slice(0, 12)}, falling back to masterProfile`);
+                    }
                     const ctx = context || { direction: answers, profile: sections };
                     // Attach AI-generated skill taxonomy if available
                     if (!ctx.skillTaxonomy && state.skillTaxonomy?.[sid]) {
@@ -1016,7 +1028,12 @@ function start(getState, port, options) {
                     }
 
                     const state = _stateGetter ? _stateGetter() : {};
-                    const profile = state.profileSections?.[sid] || {};
+                    let profile = state.profileSections?.[sid] || {};
+                    // Fallback: if profileSections is empty, use masterProfile
+                    const _prFilled = Object.keys(profile).filter(k => profile[k] && String(profile[k]).trim()).length > 0;
+                    if (!_prFilled && state.masterProfile && Object.keys(state.masterProfile).length > 0) {
+                        profile = state.masterProfile;
+                    }
 
                     if (phase === 'generate') {
                         // Retry document generation for a single job
@@ -1108,7 +1125,13 @@ function start(getState, port, options) {
                     const wfConfig = getWorkflowStore().getConfig(sid);
                     const state = _stateGetter ? _stateGetter() : {};
                     const answers = state.selectedAnswers?.[sid] || {};
-                    const sections = state.profileSections?.[sid] || {};
+                    let sections = state.profileSections?.[sid] || {};
+                    // Fallback: if profileSections is empty, use masterProfile
+                    const _rsFilled = Object.keys(sections).filter(k => sections[k] && String(sections[k]).trim()).length > 0;
+                    if (!_rsFilled && state.masterProfile && Object.keys(state.masterProfile).length > 0) {
+                        sections = state.masterProfile;
+                        console.log(`[dashboard:resume] profileSections empty for ${sid.slice(0, 12)}, falling back to masterProfile`);
+                    }
                     const ctx = body.context || { direction: answers, profile: sections };
                     // Build AI callbacks for resumed workflow (same as start)
                     ctx.aiExpander = _buildAiExpander();
@@ -1598,10 +1621,15 @@ function start(getState, port, options) {
                 const result = await getPlatformService().confirmLogin(sid, pid);
                 if (result.success && result.verified) {
                     updatePlatformCell(sid, pid, { cell: 'login', status: 'verified', message: result.message || 'Login verified' });
+                } else if (!result.success) {
+                    // Reset to idle so user can click Login again (browser may have been closed)
+                    updatePlatformCell(sid, pid, { cell: 'login', status: 'idle', message: result.message || 'Login not detected' });
                 }
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 return res.end(JSON.stringify(result));
             } catch (err) {
+                // Error (e.g. browser closed) — reset to idle so button is clickable
+                updatePlatformCell(sid, pid, { cell: 'login', status: 'idle', message: err.message || 'Verification failed' });
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 return res.end(JSON.stringify({ success: false, error: err.message }));
             }
