@@ -64,8 +64,9 @@
           "!savePath.json",
           "!chromePath.json",
           "!/scripts/extensionInfo.json",
-          "!agents/*/data/**",
-          "!agents/*/workspace/**",
+          "!**/agents/*/data/*.json",
+          "!**/agents/*/data/**",
+          "!**/agents/*/workspace/**",
           "!ip2location/**"
         ]
       }
