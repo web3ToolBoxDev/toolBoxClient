@@ -2278,24 +2278,12 @@ async function checkAndCompleteOnboarding(sessionId) {
         const seeded = await seedProfileFromKnowledge(sessionId);
         if (seeded) {
             // Profile loaded — skip profile collection, generate dashboard
+            // seedProfileFromKnowledge already called _buildDashboardAndFinish which
+            // seeds platforms, creates dashboard artifact, and marks subtask done.
             const profileKeys = Object.keys(state.profileSections[sessionId] || {}).filter(k => state.profileSections[sessionId][k]);
             appendConversation(sessionId, 'assistant', isZh()
                 ? `我已找到你之前的档案（${profileKeys.join('、')}）。可以直接用这份档案为新目标生成简历，或者你可以上传新简历 / 通过对话修改档案。`
                 : `I found your profile from a previous session (${profileKeys.join(', ')}). I can use this to generate a resume for your new target, or you can upload a new resume / modify your profile through chat.`);
-            // Auto-generate dashboard
-            try {
-                buildIntentFile(sessionId);
-                if (!state.artifacts[sessionId]) state.artifacts[sessionId] = [];
-                state.artifacts[sessionId] = state.artifacts[sessionId].filter(a => a.type !== 'dashboard');
-                const dashUrl = dashboardServer.getDashboardURL(sessionId);
-                console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
-                const dashArt = { id: `dashboard-${sessionId}`, type: 'dashboard', title: isZh() ? '求职仪表盘' : 'Job Search Dashboard', url: dashUrl, openUrl: true };
-                state.artifacts[sessionId].push(dashArt);
-                emit('agent_artifact_replace', { sessionId, artifacts: state.artifacts[sessionId] });
-                appendRuntimeLog(sessionId, `artifact -> ${dashArt.title}`, { source: 'artifact' });
-            } catch (err) {
-                console.error('[agent] dashboard after seed failed:', err);
-            }
             syncProfileToMem0(sessionId);
         } else {
             state.profileCollectionMode[sessionId] = true;
@@ -2517,22 +2505,16 @@ async function extractProfileFromConversation(sessionId) {
 
             state.profileCollectionMode[sessionId] = false;
             state.resumeProfile = reply;
-            moveSubTaskForward(sessionId); // profile -> done
 
-            // Add dashboard artifact (live via dashboardServer)
-            try {
-                buildIntentFile(sessionId);
-                if (!state.artifacts[sessionId]) state.artifacts[sessionId] = [];
-                state.artifacts[sessionId] = state.artifacts[sessionId].filter(a => a.type !== 'dashboard');
-                const dashUrl = dashboardServer.getDashboardURL(sessionId);
-                console.log(`[agent] ★ Dashboard URL: ${dashUrl}`);
-                const dashArt = { id: `dashboard-${sessionId}`, type: 'dashboard', title: isZh() ? '求职仪表盘' : 'Job Search Dashboard', url: dashUrl, openUrl: true };
-                state.artifacts[sessionId].push(dashArt);
-                emit('agent_artifact_replace', { sessionId, artifacts: state.artifacts[sessionId] });
-                appendRuntimeLog(sessionId, `artifact -> ${dashArt.title}`, { source: 'artifact' });
-            } catch (dashErr) {
-                console.error('[agent] dashboard artifact after extraction failed:', dashErr);
-            }
+            // Mark profile subtask as done before building dashboard
+            updateSubTasks(sessionId, (list) => {
+                const p = list.find(i => i.key === 'profile');
+                if (p && p.status === 'running') { p.status = 'done'; p.updatedAt = now(); }
+                return list;
+            });
+
+            // Build dashboard: seed platforms, create artifact, mark dashboard subtask done
+            await _buildDashboardAndFinish(sessionId);
 
             appendConversation(sessionId, 'assistant', isZh()
                 ? `个人档案已构建完成！已存储 ${stored} 个分区（${sectionKeys.join('、')}）。你现在可以开始搜索工作了。`
