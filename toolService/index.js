@@ -67,9 +67,36 @@ app.get('/config', (_req, res) => {
 const browserPool = require('./lib/browserPool');
 
 // Launch browser, navigate to URL, return title
+// Accepts either full `env` object or `envId` string (auto-loads from main backend)
 app.post('/browser/launch', async (req, res) => {
     try {
-        const { env, headless } = req.body;
+        let { env, envId, headless } = req.body;
+
+        // If envId provided but no full env, fetch from main backend
+        if (!env && envId) {
+            try {
+                const http = require('http');
+                const envData = await new Promise((resolve, reject) => {
+                    http.get(`http://localhost:30001/api/getEnvById/${envId}`, (resp) => {
+                        let data = '';
+                        resp.on('data', chunk => data += chunk);
+                        resp.on('end', () => {
+                            try {
+                                const parsed = JSON.parse(data);
+                                resolve(parsed.data || parsed);
+                            } catch (e) { reject(e); }
+                        });
+                    }).on('error', reject);
+                });
+                if (envData && (envData.id || envData._id)) {
+                    env = envData;
+                    if (!env.id) env.id = env._id;
+                }
+            } catch (e) {
+                console.warn('[browser/launch] Failed to fetch env by ID:', e.message);
+            }
+        }
+
         const { browserId, mode } = await browserPool.launch({
             chromePath: CHROME_PATH,
             savePath: SAVE_PATH,

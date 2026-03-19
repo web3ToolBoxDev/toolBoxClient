@@ -91,9 +91,9 @@ async function launchWithFingerprint({ chromePath, savePath, env, headless = fal
     const browser = await puppeteer.launch({
         headless: headless ? 'new' : false,
         executablePath: chromePath,
-        // ignoreDefaultArgs: ['--enable-automation'],
+        ignoreDefaultArgs: ['--enable-automation'],
         userDataDir,
-        args,
+        args: [...args, '--disable-blink-features=AutomationControlled', '--disable-infobars'],
         defaultViewport: null
     });
 
