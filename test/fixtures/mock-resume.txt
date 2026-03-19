@@ -1,0 +1,44 @@
+RESUME - Jane Doe (E2E Test Profile)
+
+CONTACT
+- Name: Jane Doe
+- Location: Ontario, Canada
+- Phone: +1 555-0199
+- Email: jane.doe@e2e-test.example.com
+- LinkedIn: linkedin.com/in/janedoe-e2e
+
+SUMMARY
+Fullstack Developer with 6 years of experience building web applications.
+Seeking remote or hybrid roles in Ontario, Canada. Target salary: 80K+ CAD.
+
+SKILLS
+- Frontend: React, TypeScript, Next.js, Vue.js, Tailwind CSS, HTML5, CSS3
+- Backend: Node.js, Express, NestJS, Python, Django, REST API, GraphQL
+- Cloud: AWS (EC2, S3, Lambda, RDS), GCP, Docker, Kubernetes, CI/CD
+- Databases: PostgreSQL, MongoDB, Redis, MySQL
+- Tools: Git, GitHub Actions, Jest, Playwright, Webpack, Vite
+
+EXPERIENCE
+- Fullstack Developer at CloudSoft Inc. (2021-2025)
+  Built and maintained SaaS platform serving 50K+ users.
+  Led migration from monolith to microservices architecture.
+  Implemented real-time features using WebSocket and Redis pub/sub.
+
+- Frontend Developer at WebWorks Agency (2019-2021)
+  Developed responsive web applications for enterprise clients.
+  Introduced component library reducing development time by 30%.
+
+- Junior Developer at StartupHub (2018-2019)
+  Built MVP features for early-stage startup.
+  Wrote unit and integration tests with Jest and Cypress.
+
+EDUCATION
+- University of Waterloo - BSc Computer Science (2018)
+
+CERTIFICATIONS
+- AWS Certified Developer Associate (2023)
+- Google Professional Cloud Developer (2022)
+
+PROJECTS
+- open-source-dashboard: React + D3.js analytics dashboard (200+ GitHub stars)
+- api-toolkit: Node.js middleware library for REST API validation
