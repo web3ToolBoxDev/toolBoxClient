@@ -2091,9 +2091,65 @@ function start(getState, port, options) {
 
 /**
  * Attempt to take over the port from a stale dashboard server process.
- * Sends POST /shutdown to the old server, waits, then retries start.
+ * Strategy:
+ * 1. Send POST /shutdown to the old server (graceful)
+ * 2. If that fails, force-kill the process holding the port (platform-specific)
+ * 3. Retry start with exponential backoff (up to 3 attempts)
  */
-function _takeOverPort(port, getState) {
+function _takeOverPort(port, getState, attempt = 1) {
+    const MAX_ATTEMPTS = 3;
+
+    function _retryStart(delayMs) {
+        setTimeout(() => {
+            _server = null;
+            try {
+                start(getState, port);
+            } catch (retryErr) {
+                console.error(`[dashboardServer] Retry start failed: ${retryErr.message}`);
+                if (attempt < MAX_ATTEMPTS) {
+                    _takeOverPort(port, getState, attempt + 1);
+                } else {
+                    console.error(`[dashboardServer] Giving up after ${MAX_ATTEMPTS} attempts on port ${port}`);
+                }
+            }
+        }, delayMs);
+    }
+
+    function _forceKillPort() {
+        try {
+            if (process.platform === 'win32') {
+                // Find and kill the process using the port on Windows
+                const output = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, {
+                    encoding: 'utf-8', timeout: 5000
+                }).trim();
+                const lines = output.split('\n').filter(Boolean);
+                const pids = new Set();
+                for (const line of lines) {
+                    const parts = line.trim().split(/\s+/);
+                    const pid = parseInt(parts[parts.length - 1], 10);
+                    if (pid && pid !== process.pid) pids.add(pid);
+                }
+                for (const pid of pids) {
+                    console.log(`[dashboardServer] Force-killing PID ${pid} on port ${port}`);
+                    try { execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore', timeout: 5000 }); } catch {}
+                }
+                return pids.size > 0;
+            } else {
+                // Unix: use lsof + kill
+                const output = execSync(`lsof -ti :${port}`, { encoding: 'utf-8', timeout: 5000 }).trim();
+                const pids = output.split('\n').filter(Boolean).map(Number).filter(p => p && p !== process.pid);
+                for (const pid of pids) {
+                    console.log(`[dashboardServer] Force-killing PID ${pid} on port ${port}`);
+                    try { process.kill(pid, 'SIGKILL'); } catch {}
+                }
+                return pids.length > 0;
+            }
+        } catch (e) {
+            console.warn(`[dashboardServer] Force-kill failed: ${e.message}`);
+            return false;
+        }
+    }
+
     const shutdownReq = http.request({
         hostname: '127.0.0.1',
         port,
@@ -2105,21 +2161,20 @@ function _takeOverPort(port, getState) {
         res.on('data', c => { body += c; });
         res.on('end', () => {
             console.log(`[dashboardServer] Old server responded to shutdown: ${body}`);
-            // Wait for old server to close, then retry
-            setTimeout(() => {
-                _server = null;
-                start(getState, port);
-            }, 500);
+            _retryStart(500);
         });
     });
     shutdownReq.on('error', (e) => {
-        // Old server didn't respond — it's a zombie or different service
-        console.error(`[dashboardServer] Shutdown request failed: ${e.message}. Port ${port} is occupied by another process.`);
-        console.error('[dashboardServer] Please kill the process using port ' + port + ' and restart.');
+        // Old server didn't respond — try force-killing the process
+        console.warn(`[dashboardServer] Shutdown request failed: ${e.message}. Attempting force-kill...`);
+        _forceKillPort();
+        _retryStart(1000);
     });
     shutdownReq.on('timeout', () => {
         shutdownReq.destroy();
-        console.error(`[dashboardServer] Shutdown request timed out. Port ${port} is occupied.`);
+        console.warn(`[dashboardServer] Shutdown request timed out. Attempting force-kill...`);
+        _forceKillPort();
+        _retryStart(1000);
     });
     shutdownReq.end();
 }
@@ -2541,6 +2596,9 @@ function getJobStats(sessionId) {
     return stats;
 }
 
+// Track sessions that have already logged an empty-data warning (avoids log spam from 5s refresh)
+const _emptyDataWarned = new Set();
+
 function getDashboardData(sessionId) {
     const state = _stateGetter ? _stateGetter() : {};
     const answers = state.selectedAnswers?.[sessionId] || {};
@@ -2554,18 +2612,31 @@ function getDashboardData(sessionId) {
     const knownSessions = hasState ? Object.keys(state.selectedAnswers) : [];
     const sessionMatch = knownSessions.includes(sessionId);
 
-    // Diagnostic logging disabled — too noisy with 5s auto-refresh
-    // if (answerKeys.length === 0 && sectionKeys.length === 0) {
-    //     console.log(`[dashboard:data] session=${sessionId.slice(0, 12)} | EMPTY`);
-    // }
+    // Log once per session if data is empty (helps diagnose stale-server / session-mismatch issues)
+    if (answerKeys.length === 0 && sectionKeys.length === 0 && !_emptyDataWarned.has(sessionId)) {
+        _emptyDataWarned.add(sessionId);
+        console.warn(`[dashboard:data] EMPTY data for session=${sessionId.slice(0, 20)} | ` +
+            `sessionMatch=${sessionMatch} | activeSession=${state.activeSessionId?.slice(0, 20) || '?'} | ` +
+            `knownSessions=${knownSessions.length} | instanceId=${_instanceId}`);
+    }
+    // Clear warning flag when data appears (so we re-warn if it goes empty again)
+    if (answerKeys.length > 0 || sectionKeys.length > 0) {
+        _emptyDataWarned.delete(sessionId);
+    }
 
     // Environment binding info
     const runtimeCtx = state.runtimeContexts?.[sessionId] || {};
     let boundEnvIds = Array.isArray(runtimeCtx.envIds) ? runtimeCtx.envIds.filter(Boolean) : [];
-    const boundEnvs = Array.isArray(runtimeCtx.envs) ? runtimeCtx.envs : [];
+    let boundEnvs = Array.isArray(runtimeCtx.envs) ? runtimeCtx.envs : [];
     // Fallback: extract IDs from envs array if envIds is empty
     if (boundEnvIds.length === 0 && boundEnvs.length > 0) {
         boundEnvIds = boundEnvs.map(e => e.id || e._id || e.name).filter(Boolean);
+    }
+    // Fallback: use top-level state.envs if per-session runtimeContexts has no env data
+    // (can happen when frontend re-sends context without env info after page refresh)
+    if (boundEnvIds.length === 0 && Array.isArray(state.envs) && state.envs.length > 0) {
+        boundEnvIds = state.envs.map(e => e.id || e._id || e.name).filter(Boolean);
+        boundEnvs = state.envs;
     }
     const envNames = boundEnvs.map(e => e.name || e.id || e._id).filter(Boolean);
 

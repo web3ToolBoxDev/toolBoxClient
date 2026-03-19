@@ -2277,9 +2277,8 @@ async function checkAndCompleteOnboarding(sessionId) {
     if (!hasResume) {
         const seeded = await seedProfileFromKnowledge(sessionId);
         if (seeded) {
-            // Profile loaded — skip profile collection, generate dashboard
-            // seedProfileFromKnowledge already called _buildDashboardAndFinish which
-            // seeds platforms, creates dashboard artifact, and marks subtask done.
+            // Profile loaded — seedProfileFromKnowledge already called _buildDashboardAndFinish
+            // which seeds platforms, creates the dashboard artifact, and finishes the subtask.
             const profileKeys = Object.keys(state.profileSections[sessionId] || {}).filter(k => state.profileSections[sessionId][k]);
             appendConversation(sessionId, 'assistant', isZh()
                 ? `我已找到你之前的档案（${profileKeys.join('、')}）。可以直接用这份档案为新目标生成简历，或者你可以上传新简历 / 通过对话修改档案。`
@@ -2513,7 +2512,7 @@ async function extractProfileFromConversation(sessionId) {
                 return list;
             });
 
-            // Build dashboard: seed platforms, create artifact, mark dashboard subtask done
+            // Build dashboard + seed platforms + auto-finish dashboard subtask
             await _buildDashboardAndFinish(sessionId);
 
             appendConversation(sessionId, 'assistant', isZh()
@@ -2587,14 +2586,26 @@ function handleSessionContextUpdate(payload = {}) {
         emit('agent_error', { code: 4001, message: 'session not found' }, payload.requestId);
         return;
     }
-    const runtimeContext = (payload.runtimeContext && typeof payload.runtimeContext === 'object') ? payload.runtimeContext : {};
-    updateModel(payload?.model || runtimeContext?.model);
-    const nextProvider = String(payload?.provider || runtimeContext?.provider || '').trim();
-    const nextSubProvider = String(payload?.subProvider || runtimeContext?.subProvider || '').trim();
+    const incomingContext = (payload.runtimeContext && typeof payload.runtimeContext === 'object') ? payload.runtimeContext : {};
+    updateModel(payload?.model || incomingContext?.model);
+    const nextProvider = String(payload?.provider || incomingContext?.provider || '').trim();
+    const nextSubProvider = String(payload?.subProvider || incomingContext?.subProvider || '').trim();
     if (nextProvider) state.currentProvider = nextProvider;
     if (nextSubProvider) state.currentSubProvider = nextSubProvider;
-    const nextApiKey = String(payload?.apiKey || runtimeContext?.apiKey || '').trim();
+    const nextApiKey = String(payload?.apiKey || incomingContext?.apiKey || '').trim();
     if (nextApiKey) state.runtimeApiKey = nextApiKey;
+    // Merge incoming context with existing, preserving env/wallet binding if the
+    // incoming payload has none (can happen after page refresh loses frontend state)
+    const prevCtx = state.runtimeContexts[sessionId] || {};
+    const runtimeContext = { ...prevCtx, ...incomingContext };
+    // Preserve env binding: if incoming has empty envIds but previous had real ones, keep previous
+    const incomingEnvIds = Array.isArray(incomingContext.envIds) ? incomingContext.envIds.filter(Boolean) : [];
+    const prevEnvIds = Array.isArray(prevCtx.envIds) ? prevCtx.envIds.filter(Boolean) : [];
+    if (incomingEnvIds.length === 0 && prevEnvIds.length > 0) {
+        runtimeContext.envIds = prevCtx.envIds;
+        runtimeContext.envs = prevCtx.envs || [];
+        runtimeContext.mode = prevCtx.mode || runtimeContext.mode;
+    }
     state.runtimeContexts[sessionId] = runtimeContext;
     extractEnvWalletData(runtimeContext);
     const providerDisplay = state.currentProvider || 'auto';
