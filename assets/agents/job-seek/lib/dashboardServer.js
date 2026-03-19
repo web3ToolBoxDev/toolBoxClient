@@ -3524,12 +3524,12 @@ function renderItem(label, value, fullWidth, editKey) {
         return '<div class="' + cls + '"><label>' + esc(label) + '</label>' +
             '<div class="val-edit-wrap">' +
             '<input type="text" class="val-edit" data-dir-key="' + esc(editKey) + '" value="' + esc(value || '') + '" ' +
-            'onblur="autoSaveDirection(this)" onkeydown="if(event.key===\'Enter\'){this.blur();}">' +
+            'onblur="autoSaveDirection(this)" onkeydown="if(event.key===&#39;Enter&#39;){this.blur();}">' +
             '<span class="val-edit-status"></span>' +
             '</div></div>';
     }
     const valCls = value ? 'val' : 'val empty';
-    return '<div class="' + cls + '"><label>' + esc(label) + '</label><div class="' + valCls + '">' + esc(value || '\\u2014') + '</div></div>';
+    return '<div class="' + cls + '"><label>' + esc(label) + '</label><div class="' + valCls + '">' + esc(value || '\u2014') + '</div></div>';
 }
 
 // ─── Direction auto-save ───
