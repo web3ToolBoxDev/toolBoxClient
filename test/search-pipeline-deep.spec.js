@@ -374,6 +374,18 @@ test.describe.serial('Search Pipeline Deep Verification', () => {
         });
         console.log(`[pipeline-deep]   Direction injected: ${JSON.stringify(dirResp.body)}`);
         expect(dirResp.status).toBe(200);
+
+        // Inject mock profile directly into session via PUT /api/profile/:sid/tailored
+        const profileData = {
+            basic: 'Ying Zhang | Ontario, Canada | Fullstack Developer | 10 years experience',
+            skills: 'JavaScript, TypeScript, Node.js, React, Express, Python, C++, Playwright, Puppeteer, Docker, Redis, MySQL, SQLite',
+            experience: 'Senior Fullstack Developer — Built AI agent platform with browser automation, workflow orchestration, and memory systems. Previously: product lead at China Mobile healthcare platform, blockchain marketplace founder.',
+            education: 'Fanshawe College — Web Development and Internet Applications (2026). Sichuan Normal University — B.Eng Electronic Information Engineering (2013).',
+            highlights: 'Designed self-healing browser automation pipeline. Built 3-layer memory architecture (state/SQLite/mem0). Chromium C++ fingerprint patches for anti-bot bypass.'
+        };
+        const profResp = await putJSON(`/api/profile/${sid}/tailored`, profileData);
+        console.log(`[pipeline-deep]   Profile injected: ${JSON.stringify(profResp.body)}`);
+        expect(profResp.status).toBe(200);
     });
 
     // ── Test 4: First Search Run ──

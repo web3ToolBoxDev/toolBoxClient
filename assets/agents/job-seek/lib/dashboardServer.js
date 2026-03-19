@@ -1918,6 +1918,27 @@ function start(getState, port, options) {
             return;
         }
 
+        // PUT /api/profile/:sessionId/tailored — inject session profile (for E2E testing)
+        const tailoredPutMatch = url.match(/^\/api\/profile\/([^/]+)\/tailored$/);
+        if (tailoredPutMatch && req.method === 'PUT') {
+            const sid = decodeURIComponent(tailoredPutMatch[1]);
+            _readBody(req, (body) => {
+                const state = _stateGetter ? _stateGetter() : {};
+                if (!state.profileSections) state.profileSections = {};
+                if (!state.profileSections[sid]) state.profileSections[sid] = {};
+                for (const [key, val] of Object.entries(body)) {
+                    if (typeof val === 'string') state.profileSections[sid][key] = val;
+                }
+                _scheduleSave?.();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true, sections: Object.keys(state.profileSections[sid]) }));
+            }, (err) => {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: err.message }));
+            });
+            return;
+        }
+
         // GET /api/profile/:sessionId/tailored — session-tailored profile
         const tailoredMatch = url.match(/^\/api\/profile\/([^/]+)\/tailored$/);
         if (tailoredMatch && req.method === 'GET') {
