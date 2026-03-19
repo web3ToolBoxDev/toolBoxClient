@@ -361,15 +361,14 @@ test.describe.serial('Full Lifecycle E2E (Electron)', () => {
         }
         console.log('[lifecycle-e2e]   Preset modal opened');
 
+        // Fill all input questions first (no per-item confirm — use "Confirm All")
         // 1. Job Title
         const jobTitleItem = page.locator('.ai-preset-question-item').filter({
             has: page.locator('.ai-option-title', { hasText: /job title/i })
         });
         await expect(jobTitleItem).toBeVisible({ timeout: 5_000 });
         await jobTitleItem.locator('input[type="text"]').fill('Fullstack Developer');
-        await jobTitleItem.locator('button', { hasText: /confirm/i }).click();
         console.log('[lifecycle-e2e]   Filled: Job Title = Fullstack Developer');
-        await page.waitForTimeout(1000);
 
         // 2. Location
         const locationItem = page.locator('.ai-preset-question-item').filter({
@@ -377,9 +376,7 @@ test.describe.serial('Full Lifecycle E2E (Electron)', () => {
         });
         await expect(locationItem).toBeVisible({ timeout: 5_000 });
         await locationItem.locator('input[type="text"]').fill('Ontario');
-        await locationItem.locator('button', { hasText: /confirm/i }).click();
         console.log('[lifecycle-e2e]   Filled: Location = Ontario');
-        await page.waitForTimeout(1000);
 
         // 3. Salary
         try {
@@ -388,21 +385,30 @@ test.describe.serial('Full Lifecycle E2E (Electron)', () => {
             });
             await salaryItem.scrollIntoViewIfNeeded();
             await salaryItem.locator('input[type="text"]').fill('80K');
-            await salaryItem.locator('button', { hasText: /confirm/i }).click();
             console.log('[lifecycle-e2e]   Filled: Salary = 80K');
-            await page.waitForTimeout(1000);
         } catch {
             console.log('[lifecycle-e2e]   Salary field not found (optional)');
         }
 
-        // 4. Work Mode (Selection group — expand if collapsed)
+        // 4. Click "Confirm All" to submit all input questions at once
+        const confirmAllBtn = presetModal.locator('button').filter({ hasText: /confirm|确认/i });
+        await expect(confirmAllBtn).toBeVisible({ timeout: 5_000 });
+        await confirmAllBtn.click();
+        console.log('[lifecycle-e2e]   Clicked Confirm All');
+        await page.waitForTimeout(2000);
+
+        // 5. Work Mode (Selection group — expand if collapsed, click option)
         try {
             const selectionGroup = page.locator('.ai-preset-group').filter({
                 has: page.locator('.ai-preset-group__title', { hasText: /selection/i })
             });
-            await selectionGroup.locator('.ai-preset-group__header').scrollIntoViewIfNeeded();
-            if (await selectionGroup.locator('.ai-preset-group__caret').textContent() === '+') {
-                await selectionGroup.locator('.ai-preset-group__header').click();
+            const groupHeader = selectionGroup.locator('.ai-preset-group__header');
+            await groupHeader.scrollIntoViewIfNeeded();
+            // Expand if collapsed
+            const caret = selectionGroup.locator('.ai-preset-group__caret');
+            if (await caret.isVisible() && (await caret.textContent()).trim() === '+') {
+                await groupHeader.click();
+                await page.waitForTimeout(500);
             }
             const workModeItem = page.locator('.ai-preset-question-item').filter({
                 has: page.locator('.ai-option-title', { hasText: /work mode/i })
@@ -415,10 +421,16 @@ test.describe.serial('Full Lifecycle E2E (Electron)', () => {
             console.log('[lifecycle-e2e]   Work Mode selection skipped');
         }
 
-        // 5. Close preset modal
+        // 6. Close preset modal
         console.log('[lifecycle-e2e]   Closing preset modal...');
-        await page.locator('.ai-preset-modal .modal-footer button', { hasText: /close/i }).click();
-        await expect(presetModal).not.toBeVisible({ timeout: 5_000 });
+        const closeBtn = presetModal.locator('.modal-footer button', { hasText: /close|关闭/i });
+        if (await closeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+            await closeBtn.click();
+        } else {
+            // Try modal header close button
+            await presetModal.locator('button.btn-close').click().catch(() => {});
+        }
+        await expect(presetModal).not.toBeVisible({ timeout: 5_000 }).catch(() => {});
         console.log('[lifecycle-e2e]   Preset modal closed');
 
         // 6. Wait for dashboard artifact (direction+profile seeded via UI flow)
