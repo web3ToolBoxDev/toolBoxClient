@@ -1,0 +1,556 @@
+/**
+ * StateService — Unified state management singleton for multi-agent architecture.
+ *
+ * Modules:
+ *   EventBus    — Node EventEmitter, domain events pub/sub, circular event log (100)
+ *   StateStore  — Path-based state tree, namespaced by agentId
+ *   Persistence — Per-agent JSON file, 2s debounce, atomic write (.tmp → rename)
+ *   AgentBridge — Stubs for Phase 2 WS integration
+ */
+
+const EventEmitter = require('events');
+const fs = require('fs');
+const path = require('path');
+
+// ─── Helpers ───────────────────────────────────────────────
+
+/**
+ * Get a value from an object by dot-path.
+ * @param {Object} obj
+ * @param {string} dotPath - e.g. 'a.b.c'
+ * @returns {*}
+ */
+function getByPath(obj, dotPath) {
+    if (!dotPath) return obj;
+    const parts = dotPath.split('.');
+    let current = obj;
+    for (const part of parts) {
+        if (current == null || typeof current !== 'object') return undefined;
+        current = current[part];
+    }
+    return current;
+}
+
+/**
+ * Set a value on an object by dot-path, creating intermediate objects as needed.
+ * @param {Object} obj
+ * @param {string} dotPath
+ * @param {*} value
+ */
+function setByPath(obj, dotPath, value) {
+    const parts = dotPath.split('.');
+    let current = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+        const part = parts[i];
+        if (current[part] == null || typeof current[part] !== 'object') {
+            current[part] = {};
+        }
+        current = current[part];
+    }
+    current[parts[parts.length - 1]] = value;
+}
+
+/**
+ * Delete a key on an object by dot-path.
+ * @param {Object} obj
+ * @param {string} dotPath
+ * @returns {boolean} true if key existed and was deleted
+ */
+function deleteByPath(obj, dotPath) {
+    const parts = dotPath.split('.');
+    let current = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+        const part = parts[i];
+        if (current[part] == null || typeof current[part] !== 'object') return false;
+        current = current[part];
+    }
+    const lastKey = parts[parts.length - 1];
+    if (!(lastKey in current)) return false;
+    delete current[lastKey];
+    return true;
+}
+
+/**
+ * Deep merge source into target (mutates target).
+ * Arrays are replaced, not merged.
+ * @param {Object} target
+ * @param {Object} source
+ * @returns {Object} target
+ */
+function deepMerge(target, source) {
+    for (const key of Object.keys(source)) {
+        if (
+            source[key] &&
+            typeof source[key] === 'object' &&
+            !Array.isArray(source[key]) &&
+            target[key] &&
+            typeof target[key] === 'object' &&
+            !Array.isArray(target[key])
+        ) {
+            deepMerge(target[key], source[key]);
+        } else {
+            target[key] = source[key];
+        }
+    }
+    return target;
+}
+
+/**
+ * Deep clone via JSON serialization (sufficient for plain state data).
+ */
+function deepClone(obj) {
+    if (obj === undefined) return undefined;
+    return JSON.parse(JSON.stringify(obj));
+}
+
+// ─── EventBus ──────────────────────────────────────────────
+
+class EventBus extends EventEmitter {
+    constructor(maxLogSize = 100) {
+        super();
+        this._log = [];
+        this._maxLogSize = maxLogSize;
+    }
+
+    /**
+     * Emit an event and record it in the circular log.
+     */
+    emit(eventName, ...args) {
+        const entry = {
+            event: eventName,
+            timestamp: Date.now(),
+            data: args.length === 1 ? args[0] : args
+        };
+        this._log.push(entry);
+        if (this._log.length > this._maxLogSize) {
+            this._log.shift();
+        }
+        return super.emit(eventName, ...args);
+    }
+
+    /**
+     * Return a copy of the event log.
+     */
+    getLog() {
+        return [...this._log];
+    }
+
+    /**
+     * Clear the event log.
+     */
+    clearLog() {
+        this._log = [];
+    }
+}
+
+// ─── StateStore ────────────────────────────────────────────
+
+class StateStore {
+    constructor(eventBus) {
+        this._state = {};       // root state tree
+        this._eventBus = eventBus;
+        this._subscriptions = []; // {pathPrefix, callback}
+    }
+
+    /**
+     * Get value by dot-path.
+     * @param {string} dotPath - e.g. 'jobSeekAgent.session_xxx.direction.jobTitle'
+     * @returns {*} deep-cloned value (isolation)
+     */
+    get(dotPath) {
+        const raw = getByPath(this._state, dotPath);
+        return deepClone(raw);
+    }
+
+    /**
+     * Set value at dot-path. Emits `state.changed` event.
+     * @param {string} dotPath
+     * @param {*} value
+     */
+    set(dotPath, value) {
+        const oldValue = deepClone(getByPath(this._state, dotPath));
+        setByPath(this._state, dotPath, deepClone(value));
+        const changeEvent = { path: dotPath, value: deepClone(value), oldValue };
+        this._eventBus.emit('state.changed', changeEvent);
+        this._notifySubscribers(dotPath, changeEvent);
+    }
+
+    /**
+     * Deep merge a partial object at dot-path. Emits `state.changed`.
+     * @param {string} dotPath
+     * @param {Object} partial
+     */
+    merge(dotPath, partial) {
+        const oldValue = deepClone(getByPath(this._state, dotPath));
+        let current = getByPath(this._state, dotPath);
+        if (current == null || typeof current !== 'object') {
+            current = {};
+        } else {
+            // Work on the actual reference so deepMerge mutates state in-place
+            // We already have oldValue cloned above
+        }
+        // Ensure the path exists in state tree
+        if (getByPath(this._state, dotPath) === undefined) {
+            setByPath(this._state, dotPath, {});
+        }
+        const target = getByPath(this._state, dotPath);
+        deepMerge(target, deepClone(partial));
+
+        const newValue = deepClone(getByPath(this._state, dotPath));
+        const changeEvent = { path: dotPath, value: newValue, oldValue };
+        this._eventBus.emit('state.changed', changeEvent);
+        this._notifySubscribers(dotPath, changeEvent);
+    }
+
+    /**
+     * Delete a key at dot-path. Emits `state.changed` with value=undefined.
+     * @param {string} dotPath
+     * @returns {boolean}
+     */
+    delete(dotPath) {
+        const oldValue = deepClone(getByPath(this._state, dotPath));
+        const deleted = deleteByPath(this._state, dotPath);
+        if (deleted) {
+            const changeEvent = { path: dotPath, value: undefined, oldValue };
+            this._eventBus.emit('state.changed', changeEvent);
+            this._notifySubscribers(dotPath, changeEvent);
+        }
+        return deleted;
+    }
+
+    /**
+     * Subscribe to changes under a path prefix.
+     * @param {string} pathPrefix - e.g. 'jobSeekAgent' or 'jobSeekAgent.session_1'
+     * @param {Function} callback - receives {path, value, oldValue}
+     * @returns {Function} unsubscribe function
+     */
+    subscribe(pathPrefix, callback) {
+        const sub = { pathPrefix, callback };
+        this._subscriptions.push(sub);
+        return () => {
+            const idx = this._subscriptions.indexOf(sub);
+            if (idx !== -1) this._subscriptions.splice(idx, 1);
+        };
+    }
+
+    /**
+     * Return a deep clone of the full state for a given agentId.
+     * @param {string} agentId
+     * @returns {Object}
+     */
+    snapshot(agentId) {
+        return deepClone(this._state[agentId]) || {};
+    }
+
+    /**
+     * Bulk restore state for an agent (e.g., on restart recovery).
+     * @param {string} agentId
+     * @param {Object} data
+     */
+    restore(agentId, data) {
+        this._state[agentId] = deepClone(data);
+        this._eventBus.emit('state.changed', {
+            path: agentId,
+            value: deepClone(data),
+            oldValue: undefined
+        });
+    }
+
+    /**
+     * Notify subscribers whose pathPrefix matches the changed path.
+     * A subscriber matches if the changed path starts with its prefix or vice versa.
+     */
+    _notifySubscribers(changedPath, changeEvent) {
+        for (const sub of this._subscriptions) {
+            if (
+                changedPath.startsWith(sub.pathPrefix) ||
+                sub.pathPrefix.startsWith(changedPath)
+            ) {
+                try {
+                    sub.callback(changeEvent);
+                } catch (err) {
+                    console.error(`[StateStore] Subscriber error for prefix "${sub.pathPrefix}":`, err);
+                }
+            }
+        }
+    }
+}
+
+// ─── Persistence ───────────────────────────────────────────
+
+class Persistence {
+    /**
+     * @param {string} basePath - e.g. assets/agents
+     * @param {number} debounceMs - write debounce in ms (default 2000)
+     */
+    constructor(basePath, debounceMs = 2000) {
+        this._basePath = basePath;
+        this._debounceMs = debounceMs;
+        this._timers = {};    // agentName → timeout id
+        this._loaded = {};    // agentName → boolean
+    }
+
+    /**
+     * Resolve path to an agent's state file.
+     * @param {string} agentName - e.g. 'job-seek'
+     * @returns {string}
+     */
+    getFilePath(agentName) {
+        return path.join(this._basePath, agentName, 'data', 'state.json');
+    }
+
+    /**
+     * Load state from JSON file. Returns {} if file doesn't exist.
+     * @param {string} agentName
+     * @returns {Object}
+     */
+    load(agentName) {
+        const filePath = this.getFilePath(agentName);
+        try {
+            if (fs.existsSync(filePath)) {
+                const raw = fs.readFileSync(filePath, 'utf-8');
+                this._loaded[agentName] = true;
+                return JSON.parse(raw);
+            }
+        } catch (err) {
+            console.error(`[Persistence] Failed to load state for "${agentName}":`, err.message);
+        }
+        this._loaded[agentName] = true;
+        return {};
+    }
+
+    /**
+     * Schedule a debounced save. Only the last call within the debounce window fires.
+     * @param {string} agentName
+     * @param {Object} data
+     */
+    scheduleSave(agentName, data) {
+        if (this._timers[agentName]) {
+            clearTimeout(this._timers[agentName]);
+        }
+        this._timers[agentName] = setTimeout(() => {
+            this._atomicWrite(agentName, data);
+            delete this._timers[agentName];
+        }, this._debounceMs);
+    }
+
+    /**
+     * Force immediate save (bypass debounce). Used for shutdown.
+     * @param {string} agentName
+     * @param {Object} data
+     */
+    saveNow(agentName, data) {
+        if (this._timers[agentName]) {
+            clearTimeout(this._timers[agentName]);
+            delete this._timers[agentName];
+        }
+        this._atomicWrite(agentName, data);
+    }
+
+    /**
+     * Atomic write: write to .tmp then rename.
+     * @param {string} agentName
+     * @param {Object} data
+     */
+    _atomicWrite(agentName, data) {
+        const filePath = this.getFilePath(agentName);
+        const tmpPath = filePath + '.tmp';
+        try {
+            const dir = path.dirname(filePath);
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+            fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
+            fs.renameSync(tmpPath, filePath);
+        } catch (err) {
+            console.error(`[Persistence] Atomic write failed for "${agentName}":`, err.message);
+            // Clean up tmp file if rename failed
+            try { fs.unlinkSync(tmpPath); } catch (_) { /* ignore */ }
+        }
+    }
+
+    /**
+     * Cancel all pending debounce timers.
+     */
+    cancelAll() {
+        for (const agentName of Object.keys(this._timers)) {
+            clearTimeout(this._timers[agentName]);
+        }
+        this._timers = {};
+    }
+
+    /**
+     * Check if a given agent's state has been loaded.
+     */
+    isLoaded(agentName) {
+        return !!this._loaded[agentName];
+    }
+}
+
+// ─── StateService (Singleton) ──────────────────────────────
+
+class StateService {
+    static instance = null;
+
+    constructor() {
+        if (StateService.instance) {
+            return StateService.instance;
+        }
+        StateService.instance = this;
+
+        this.eventBus = new EventBus(100);
+        this.store = new StateStore(this.eventBus);
+
+        // Resolve base path for agents directory
+        const Config = require('../../config');
+        const config = Config.getInstance();
+        this.persistence = new Persistence(config.defaultAgentPath);
+
+        // Auto-persist on state changes
+        this.eventBus.on('state.changed', (changeEvent) => {
+            const agentId = changeEvent.path.split('.')[0];
+            if (agentId) {
+                this._schedulePersist(agentId);
+            }
+        });
+    }
+
+    static getInstance() {
+        if (!StateService.instance) {
+            StateService.instance = new StateService();
+        }
+        return StateService.instance;
+    }
+
+    /**
+     * Reset singleton (for testing).
+     */
+    static _reset() {
+        if (StateService.instance) {
+            StateService.instance.persistence.cancelAll();
+            StateService.instance.eventBus.removeAllListeners();
+        }
+        StateService.instance = null;
+    }
+
+    // ── State accessors (delegate to store) ──
+
+    get(dotPath) {
+        // Auto-load from disk on first access for the agent
+        const agentId = dotPath.split('.')[0];
+        this._ensureLoaded(agentId);
+        return this.store.get(dotPath);
+    }
+
+    set(dotPath, value) {
+        const agentId = dotPath.split('.')[0];
+        this._ensureLoaded(agentId);
+        return this.store.set(dotPath, value);
+    }
+
+    merge(dotPath, partial) {
+        const agentId = dotPath.split('.')[0];
+        this._ensureLoaded(agentId);
+        return this.store.merge(dotPath, partial);
+    }
+
+    delete(dotPath) {
+        const agentId = dotPath.split('.')[0];
+        this._ensureLoaded(agentId);
+        return this.store.delete(dotPath);
+    }
+
+    subscribe(pathPrefix, callback) {
+        return this.store.subscribe(pathPrefix, callback);
+    }
+
+    snapshot(agentId) {
+        this._ensureLoaded(agentId);
+        return this.store.snapshot(agentId);
+    }
+
+    restore(agentId, data) {
+        return this.store.restore(agentId, data);
+    }
+
+    // ── AgentBridge stubs (Phase 2) ──
+
+    /**
+     * Process incoming WS state_sync_* messages from an agent child process.
+     * Stub — will be implemented in Phase 2.
+     * @param {string} agentId
+     * @param {Object} message - parsed WS message with type and payload
+     */
+    handleMessage(agentId, message) {
+        // Phase 2: dispatch based on message.type
+        // state_sync_snapshot → restore
+        // state_sync_patch   → set/merge/delete
+        // state_sync_set     → set
+        // state_sync_request → respond with snapshot
+        console.log(`[StateService] handleMessage stub called for agent "${agentId}", type: ${message?.type}`);
+    }
+
+    /**
+     * Push a state patch to the frontend via WebSocket.
+     * Stub — will be implemented in Phase 2.
+     * @param {string} agentId
+     * @param {Object} patch - {op, path, value}
+     */
+    broadcastToFrontend(agentId, patch) {
+        // Phase 2: use WebSocketService to send agent_state_patch
+        console.log(`[StateService] broadcastToFrontend stub called for agent "${agentId}"`);
+    }
+
+    // ── Internal ──
+
+    /**
+     * Map agentId (e.g. 'jobSeekAgent') to directory name (e.g. 'job-seek').
+     * Convention: agentId uses camelCase, directory uses kebab-case.
+     * Override this mapping as needed.
+     */
+    _agentIdToName(agentId) {
+        // Simple mapping — extend as more agents are added
+        const map = {
+            'jobSeekAgent': 'job-seek'
+        };
+        return map[agentId] || agentId;
+    }
+
+    _ensureLoaded(agentId) {
+        const agentName = this._agentIdToName(agentId);
+        if (!this.persistence.isLoaded(agentName)) {
+            const data = this.persistence.load(agentName);
+            if (data && Object.keys(data).length > 0) {
+                // Restore without emitting change events to avoid re-persist loop
+                this.store._state[agentId] = data;
+            }
+        }
+    }
+
+    _schedulePersist(agentId) {
+        const agentName = this._agentIdToName(agentId);
+        const data = this.store.snapshot(agentId);
+        this.persistence.scheduleSave(agentName, data);
+    }
+
+    /**
+     * Flush all pending writes immediately (call on shutdown).
+     */
+    flushAll() {
+        // Persist all known agents
+        for (const agentId of Object.keys(this.store._state)) {
+            const agentName = this._agentIdToName(agentId);
+            this.persistence.saveNow(agentName, this.store.snapshot(agentId));
+        }
+    }
+}
+
+// Export classes for testing and the singleton accessor
+module.exports = {
+    StateService,
+    EventBus,
+    StateStore,
+    Persistence,
+    // Helper functions exported for unit testing
+    _helpers: { getByPath, setByPath, deleteByPath, deepMerge, deepClone }
+};
