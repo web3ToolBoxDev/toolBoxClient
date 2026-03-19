@@ -10,6 +10,50 @@ const { getEnvById } = require('./fingerPrintService');
 
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+
+const TOOL_SERVICE_PORT = 30004;
+const TOOL_SERVICE_URL = `http://127.0.0.1:${TOOL_SERVICE_PORT}`;
+
+// Tasks that are migrated to toolService — no longer spawn child processes
+const TOOL_SERVICE_TASKS = new Set(['openChrome', 'openWallet', 'initWallet', 'checkEmail']);
+
+/**
+ * Make an HTTP request to toolService.
+ * @param {string} method - 'GET' or 'POST'
+ * @param {string} urlPath - e.g. '/browser/open-chrome'
+ * @param {object} [body] - request body
+ * @param {number} [timeoutMs=120000] - timeout
+ * @returns {Promise<{statusCode: number, data: object}>}
+ */
+function callToolService(method, urlPath, body, timeoutMs = 120000) {
+    return new Promise((resolve, reject) => {
+        const options = {
+            hostname: '127.0.0.1',
+            port: TOOL_SERVICE_PORT,
+            path: urlPath,
+            method,
+            headers: { 'Content-Type': 'application/json' }
+        };
+        const req = http.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+                try {
+                    resolve({ statusCode: res.statusCode, data: JSON.parse(data) });
+                } catch {
+                    resolve({ statusCode: res.statusCode, data: { success: false, error: data } });
+                }
+            });
+        });
+        req.on('error', (err) => reject(err));
+        req.setTimeout(timeoutMs, () => {
+            req.destroy(new Error('toolService request timed out'));
+        });
+        if (body) req.write(JSON.stringify(body));
+        req.end();
+    });
+}
 
 // Lazy-require StateService to avoid circular dependency issues at startup
 let _stateService = null;
@@ -652,7 +696,11 @@ class TaskService {
 
                 }
                 console.log('taskNameNew:', taskNameNew);
-                this.runTask(taskNameNew, taskData, task.execPath || this.defaultExecPath, task.scriptPath);
+                if (TOOL_SERVICE_TASKS.has(task.taskName)) {
+                    this.runTaskViaToolService(taskNameNew, task.taskName, taskData);
+                } else {
+                    this.runTask(taskNameNew, taskData, task.execPath || this.defaultExecPath, task.scriptPath);
+                }
                 startedAny = true;
                 break;
             }
@@ -668,9 +716,13 @@ class TaskService {
                     if (this.isRunning[taskNameForEnv]) {
                         continue;
                     }
-                    this.runTask(taskNameForEnv, taskDataPayload, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
+                    if (TOOL_SERVICE_TASKS.has(task.taskName)) {
+                        await this.runTaskViaToolService(taskNameForEnv, task.taskName, taskDataPayload, taskSuccessCallBack);
+                    } else {
+                        this.runTask(taskNameForEnv, taskDataPayload, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
+                        await this.checkCompleted(taskNameForEnv);
+                    }
                     startedAny = true;
-                    await this.checkCompleted(taskNameForEnv);
                 }
                 break;
             case 'execByAsync':
@@ -681,9 +733,13 @@ class TaskService {
                     if (this.isRunning[taskNameForEnv]) {
                         return;
                     }
-                    this.runTask(taskNameForEnv, taskDataPayload, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
+                    if (TOOL_SERVICE_TASKS.has(task.taskName)) {
+                        this.runTaskViaToolService(taskNameForEnv, task.taskName, taskDataPayload, taskSuccessCallBack);
+                    } else {
+                        this.runTask(taskNameForEnv, taskDataPayload, task.execPath || this.defaultExecPath, task.scriptPath, taskSuccessCallBack);
+                        this.checkCompleted(taskNameForEnv);
+                    }
                     startedAny = true;
-                    this.checkCompleted(taskNameForEnv);
                 }));
                 break;
             case 'execAll':
@@ -1011,6 +1067,127 @@ class TaskService {
             finishTask(this, taskName, false, `Task run error: ${err.message}`);
         }
     }
+    /**
+     * Run a migrated task via toolService HTTP API instead of spawning a child process.
+     * Handles the same lifecycle (isRunning, logs, completion) as runTask.
+     *
+     * @param {string} taskName - Runtime task name (e.g. "envId_openChrome")
+     * @param {string} baseTaskName - The base task name (e.g. "openChrome")
+     * @param {object} taskData - Task payload including env, envData, etc.
+     * @param {function} [taskSuccessCallBack] - Optional callback on success
+     */
+    async runTaskViaToolService(taskName, baseTaskName, taskData, taskSuccessCallBack) {
+        try {
+            if (!this._sentCompleted) this._sentCompleted = {};
+            this._sentCompleted[taskName] = false;
+            this.isRunning[taskName] = true;
+            this.isCompleted[taskName] = false;
+            this.isSuccess[taskName] = false;
+
+            // Handle proxy setup (same as runTask)
+            if (taskData.env) {
+                taskData.env = { ...taskData.env };
+                if (taskData.env.proxy && taskData.env.proxy.ipType && taskData.env.proxy.ipHost && taskData.env.proxy.ipPort) {
+                    const proxyRes = await checkAndStartProxy(taskName, taskData.env.proxy.ipType, taskData.env.proxy.ipHost, taskData.env.proxy.ipPort, taskData.env.proxy.ipUsername, taskData.env.proxy.ipPassword);
+                    if (proxyRes.success && proxyRes.data) {
+                        const { url, ip, position, country, timeZone } = proxyRes.data;
+                        taskData.env.position = position;
+                        taskData.env.country = country;
+                        taskData.env.timeZone = timeZone;
+                        taskData.env.webrtc_public = ip;
+                        taskData.env.proxyUrl = url;
+                        taskData.env.useProxy = true;
+                        this.isUseProxy[taskName] = true;
+                    } else {
+                        const fallbackUrl = await startProxy(taskName, taskData.env.proxy.ipType, taskData.env.proxy.ipHost, taskData.env.proxy.ipPort, taskData.env.proxy.ipUsername, taskData.env.proxy.ipPassword);
+                        if (fallbackUrl) {
+                            taskData.env.proxyUrl = fallbackUrl;
+                            taskData.env.useProxy = true;
+                            this.isUseProxy[taskName] = true;
+                        }
+                    }
+                }
+            }
+
+            this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} started (toolService)`, 0, taskName));
+            this.webSocketService.sendToFront({
+                type: 'task_started',
+                taskName,
+                time: new Date().toLocaleString()
+            });
+
+            let result;
+            const env = taskData.env;
+            const walletExtensionPath = taskData.walletExtensionPath || '';
+
+            switch (baseTaskName) {
+                case 'openChrome': {
+                    result = await callToolService('POST', '/browser/open-chrome', {
+                        env,
+                        keepAlive: true
+                    });
+                    break;
+                }
+                case 'openWallet': {
+                    const walletPassword = taskData.envData?.wallet?.password || 'web3toolbox';
+                    result = await callToolService('POST', '/browser/open-wallet', {
+                        env,
+                        walletPassword,
+                        walletExtensionPath
+                    });
+                    break;
+                }
+                case 'initWallet': {
+                    const seedPhrase = taskData.envData?.wallet?.mnemonic || '';
+                    const password = taskData.envData?.wallet?.password || 'web3toolbox';
+                    result = await callToolService('POST', '/browser/init-wallet', {
+                        env,
+                        seedPhrase,
+                        password,
+                        walletExtensionPath
+                    });
+                    break;
+                }
+                case 'checkEmail': {
+                    const cfg = taskData.taskDataFromFront?.config || {};
+                    result = await callToolService('POST', '/email/send', {
+                        smtpServer: cfg.smtpServer,
+                        smtpPort: cfg.smtpPort,
+                        sendMailAccount: cfg.sendMailAccount,
+                        sendMailPassword: cfg.sendMailPassword,
+                        receiveMailAccount: cfg.receiveMailAccount
+                    });
+                    break;
+                }
+                default:
+                    throw new Error(`Unknown toolService task: ${baseTaskName}`);
+            }
+
+            const success = result && result.data && result.data.success;
+            const message = success
+                ? `Task completed via toolService`
+                : `Task failed: ${result?.data?.error || 'unknown error'}`;
+
+            this.webSocketService.sendToFront(
+                this.taskLogMessage(`Task:${this.shortTaskName(taskName)} ${message}`, 0, taskName)
+            );
+
+            if (success && taskSuccessCallBack) {
+                try {
+                    taskSuccessCallBack(taskData);
+                } catch (err) {
+                    console.error('taskSuccessCallBack error:', err);
+                }
+            }
+
+            finishTask(this, taskName, !!success, message);
+        } catch (err) {
+            console.error('runTaskViaToolService error:', err);
+            this.webSocketService.sendToFront(this.taskErrorMessge(err.message));
+            finishTask(this, taskName, false, `toolService error: ${err.message}`);
+        }
+    }
+
     async checkCompleted(taskName) {
         try {
             while (true) {

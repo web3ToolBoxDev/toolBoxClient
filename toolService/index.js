@@ -63,46 +63,63 @@ app.get('/config', (_req, res) => {
     });
 });
 
+// ─── Helpers ───
+const http = require('http');
+
+/**
+ * Fetch env data from main backend by ID.
+ * @param {string} envId
+ * @returns {Promise<object|null>}
+ */
+async function fetchEnvById(envId) {
+    return new Promise((resolve) => {
+        http.get(`http://localhost:30001/api/getEnvById/${envId}`, (resp) => {
+            let data = '';
+            resp.on('data', chunk => data += chunk);
+            resp.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    const env = parsed.data || parsed;
+                    if (env && (env.id || env._id)) {
+                        if (!env.id) env.id = env._id;
+                        resolve(env);
+                    } else {
+                        resolve(null);
+                    }
+                } catch (e) { resolve(null); }
+            });
+        }).on('error', () => resolve(null));
+    });
+}
+
 // ─── Browser Pool endpoints ───
 const browserPool = require('./lib/browserPool');
+const walletTools = require('./lib/walletTools');
 
 // Launch browser, navigate to URL, return title
 // Accepts either full `env` object or `envId` string (auto-loads from main backend)
 app.post('/browser/launch', async (req, res) => {
     try {
-        let { env, envId, headless } = req.body;
+        let { env, envId, headless, keepAlive, walletExtensionPath } = req.body;
 
         // If envId provided but no full env, fetch from main backend
         if (!env && envId) {
-            try {
-                const http = require('http');
-                const envData = await new Promise((resolve, reject) => {
-                    http.get(`http://localhost:30001/api/getEnvById/${envId}`, (resp) => {
-                        let data = '';
-                        resp.on('data', chunk => data += chunk);
-                        resp.on('end', () => {
-                            try {
-                                const parsed = JSON.parse(data);
-                                resolve(parsed.data || parsed);
-                            } catch (e) { reject(e); }
-                        });
-                    }).on('error', reject);
-                });
-                if (envData && (envData.id || envData._id)) {
-                    env = envData;
-                    if (!env.id) env.id = env._id;
-                }
-            } catch (e) {
-                console.warn('[browser/launch] Failed to fetch env by ID:', e.message);
-            }
+            env = await fetchEnvById(envId);
+            if (!env) console.warn('[browser/launch] Failed to fetch env by ID:', envId);
         }
 
         const { browserId, mode } = await browserPool.launch({
             chromePath: CHROME_PATH,
             savePath: SAVE_PATH,
             env: env || undefined,
-            headless: headless !== false
+            headless: headless !== false,
+            walletExtensionPath: walletExtensionPath || undefined,
+            keepAlive: !!keepAlive
         });
+
+        // Auto-remove from pool on browser disconnect
+        browserPool.onDisconnected(browserId);
+
         res.json({ success: true, browserId, mode });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -122,6 +139,155 @@ app.post('/browser/close', async (req, res) => {
 // List active browsers
 app.get('/browser/list', (_req, res) => {
     res.json({ success: true, browsers: browserPool.listBrowsers() });
+});
+
+// ─── Migrated script routes ───
+
+// POST /browser/open-chrome — opens Chrome with fingerprint env, keeps alive
+app.post('/browser/open-chrome', async (req, res) => {
+    try {
+        let { env, envId, keepAlive } = req.body;
+        if (!env && envId) {
+            env = await fetchEnvById(envId);
+        }
+        if (!env || !env.id) {
+            return res.status(400).json({ success: false, error: 'env or envId is required' });
+        }
+
+        const { browserId, mode } = await browserPool.launch({
+            chromePath: CHROME_PATH,
+            savePath: SAVE_PATH,
+            env,
+            headless: false,
+            keepAlive: keepAlive !== false // default true
+        });
+
+        browserPool.onDisconnected(browserId);
+        res.json({ success: true, browserId, mode });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST /browser/open-wallet — opens Chrome with MetaMask, unlocks wallet
+app.post('/browser/open-wallet', async (req, res) => {
+    try {
+        let { env, envId, walletPassword, walletExtensionPath } = req.body;
+        if (!env && envId) {
+            env = await fetchEnvById(envId);
+        }
+        if (!env || !env.id) {
+            return res.status(400).json({ success: false, error: 'env or envId is required' });
+        }
+
+        const extPath = walletExtensionPath || '';
+        const { browserId, mode } = await browserPool.launch({
+            chromePath: CHROME_PATH,
+            savePath: SAVE_PATH,
+            env,
+            headless: false,
+            walletExtensionPath: extPath,
+            keepAlive: true
+        });
+
+        browserPool.onDisconnected(browserId);
+
+        // Wait for MetaMask extension to load, then unlock
+        const browser = browserPool.getBrowser(browserId);
+        const password = walletPassword || 'web3toolbox';
+        let unlocked = false;
+
+        // Wait for MetaMask page to appear (extension opens a tab)
+        for (let attempt = 0; attempt < 30; attempt++) {
+            await new Promise(r => setTimeout(r, 1000));
+            const pages = await browser.pages();
+            if (pages.length >= 2) {
+                const page = pages[pages.length - 1];
+                const extensionId = await walletTools.loadMetaMaskId(browserId, browser);
+                let retries = 0;
+                while (retries < 3) {
+                    try {
+                        await page.goto(`chrome-extension://${extensionId}/home.html#unlock`);
+                        await walletTools.unlockWallet(page, password);
+                        unlocked = true;
+                        break;
+                    } catch (e) {
+                        retries++;
+                        console.log(`[open-wallet] Unlock attempt ${retries} failed:`, e.message);
+                    }
+                }
+                break;
+            }
+        }
+
+        res.json({ success: true, browserId, mode, unlocked });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST /browser/init-wallet — opens Chrome with MetaMask, runs full onboarding
+app.post('/browser/init-wallet', async (req, res) => {
+    try {
+        let { env, envId, seedPhrase, password, walletExtensionPath } = req.body;
+        if (!env && envId) {
+            env = await fetchEnvById(envId);
+        }
+        if (!env || !env.id) {
+            return res.status(400).json({ success: false, error: 'env or envId is required' });
+        }
+        if (!seedPhrase) {
+            return res.status(400).json({ success: false, error: 'seedPhrase is required' });
+        }
+
+        const extPath = walletExtensionPath || '';
+        const { browserId, mode } = await browserPool.launch({
+            chromePath: CHROME_PATH,
+            savePath: SAVE_PATH,
+            env,
+            headless: false,
+            walletExtensionPath: extPath,
+            keepAlive: true
+        });
+
+        browserPool.onDisconnected(browserId);
+
+        const browser = browserPool.getBrowser(browserId);
+        const walletPassword = password || 'web3toolbox';
+        const extensionId = await walletTools.loadMetaMaskId(browserId, browser);
+
+        const page = await browser.newPage();
+        await page.goto(`chrome-extension://${extensionId}/home.html#onboarding/welcome`);
+
+        let initialized = false;
+        try {
+            await walletTools.initWalletOnPage(page, seedPhrase, walletPassword);
+            initialized = true;
+        } catch (err) {
+            console.error('[init-wallet] Onboarding failed:', err.message);
+            // Close browser on failure
+            await browserPool.close(browserId);
+            return res.status(500).json({ success: false, error: 'MetaMask onboarding failed: ' + err.message });
+        }
+
+        res.json({ success: true, browserId, mode, initialized });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST /email/send — send email via SMTP
+app.post('/email/send', async (req, res) => {
+    try {
+        const result = await toolRegistry.execute('email_send', req.body);
+        if (result.success) {
+            res.json(result);
+        } else {
+            res.status(500).json(result);
+        }
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // E2E test endpoint — launch, navigate, get title, close
@@ -164,6 +330,11 @@ captchaSolver.registerAll();
 
 const artifactRenderer = require('./lib/artifactRenderer');
 artifactRenderer.registerAll();
+
+walletTools.registerAll();
+
+const emailTools = require('./lib/emailTools');
+emailTools.registerAll();
 
 // ─── Start ───
 const server = app.listen(PORT, '127.0.0.1', () => {
