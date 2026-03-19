@@ -1624,6 +1624,9 @@ function start(getState, port, options) {
                 } else if (!result.success) {
                     // Reset to idle so user can click Login again (browser may have been closed)
                     updatePlatformCell(sid, pid, { cell: 'login', status: 'idle', message: result.message || 'Login not detected' });
+                } else if (result.success && !result.verified && result.method !== 'manual' && result.method !== 'manual-fallback') {
+                    // Success but not verified (e.g. no_browser) and not manual — reset to idle
+                    updatePlatformCell(sid, pid, { cell: 'login', status: 'idle', message: result.message || 'Login not detected' });
                 }
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 return res.end(JSON.stringify(result));
@@ -4137,19 +4140,26 @@ function render(data) {
 
     // Cache jobs for doc modal
     _cachedJobs = data.jobs || [];
-    // Job table
-    var jobs = _cachedJobs;
-    var jobBody = document.getElementById('jobTableBody');
-    var noJobsEl = document.getElementById('noJobs');
-    if (jobs.length > 0) {
-        jobBody.innerHTML = jobs.map(renderJobRow).join('');
-        noJobsEl.style.display = 'none';
-        document.getElementById('jobTable').style.display = 'table';
-        _restoreCheckboxes();
+    // Job table — if a filter is active, re-apply it instead of showing all jobs
+    var activeFilter = document.getElementById('jobFilterStatus');
+    var activeMinScore = document.getElementById('jobFilterMinScore');
+    var hasFilter = (activeFilter && activeFilter.value) || (activeMinScore && activeMinScore.value);
+    if (hasFilter) {
+        refreshJobRecords();
     } else {
-        jobBody.innerHTML = '';
-        noJobsEl.style.display = 'block';
-        document.getElementById('jobTable').style.display = 'none';
+        var jobs = _cachedJobs;
+        var jobBody = document.getElementById('jobTableBody');
+        var noJobsEl = document.getElementById('noJobs');
+        if (jobs.length > 0) {
+            jobBody.innerHTML = jobs.map(renderJobRow).join('');
+            noJobsEl.style.display = 'none';
+            document.getElementById('jobTable').style.display = 'table';
+            _restoreCheckboxes();
+        } else {
+            jobBody.innerHTML = '';
+            noJobsEl.style.display = 'block';
+            document.getElementById('jobTable').style.display = 'none';
+        }
     }
 
     document.getElementById('meta').textContent =
@@ -4608,7 +4618,13 @@ async function confirmWorkflow() {
         var profItems = document.querySelectorAll('#profile .item');
         function _valOf(container, idx) {
             var items = container;
-            if (idx < items.length) { var v = items[idx].querySelector('.val'); return v ? v.textContent.trim() : ''; }
+            if (idx < items.length) {
+                var v = items[idx].querySelector('.val');
+                if (v) return v.textContent.trim();
+                var inp = items[idx].querySelector('.val-edit');
+                if (inp) return (inp.value || '').trim();
+                return '';
+            }
             return '';
         }
         var ctxPayload = {
@@ -5137,10 +5153,12 @@ async function confirmLogin(platformId) {
         } else {
             showAlert('Confirm', data.message || data.error || 'Login not detected — please log in first');
             if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
+            refreshWorkflowStatus();
         }
     } catch (e) {
         showAlert('Error', e.message);
         if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
+        refreshWorkflowStatus();
     }
 }
 

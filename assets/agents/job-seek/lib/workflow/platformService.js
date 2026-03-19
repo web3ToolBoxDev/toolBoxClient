@@ -605,6 +605,19 @@ async function confirmLogin(sessionId, platformId) {
         }
 
         // Not logged in — reset to idle so user can click Login again
+        // Clear stale _browserId if browser is dead (prevents stuck state on next attempt)
+        if (platform._browserId) {
+            try {
+                const probe = await toolServiceClient.executeTool('page_screenshot', { browserId: platform._browserId });
+                if (!probe.success) {
+                    delete platform._browserId;
+                    delete platform._pageIndex;
+                }
+            } catch (_) {
+                delete platform._browserId;
+                delete platform._pageIndex;
+            }
+        }
         _syncToDashboard(sessionId, platformId, {
             cell: 'login', status: 'idle',
             name: platform.name, icon: platform.icon, url: platform.url,
