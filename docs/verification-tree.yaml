@@ -1,0 +1,436 @@
+# Executable Verification Tree
+# Converted from docs/e2e-verification-tree.md
+# Used by scripts/verify-tree.js to evaluate test results against the tree structure
+
+meta:
+  project: web3toolbox
+  version: v1.4.0
+  failure_categories:
+    environment: "Service not running, port conflict, Chrome not found, API key missing"
+    build: "React/Electron build error, dependency missing, script compilation failure"
+    data_propagation: "State not synced between layers"
+    extraction: "AI parsing failure, scraper error, wrong selectors, anti-bot block"
+    verification: "Assertion wrong, test logic error, timing issue, flaky selector"
+    ux_state_sync: "UI shows stale data, session switch not reflected, status not updated"
+  tiers:
+    smoke: ["1", "2", "3", "4", "5", "6", "10.1"]
+    critical_path: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "10.1"]
+    full_acceptance: all
+
+nodes:
+  - id: "1"
+    name: "Start Services"
+    gate: blocking
+    evidence: [api_response]
+    failure_category: environment
+    pass_criteria: "Backend :30001 and frontend :3000 respond 200"
+    test_mapping:
+      file: test/full-lifecycle-e2e.spec.js
+      test_name: "Phase 0.1: Start frontend + backend"
+    retry:
+      re_entry: "1"
+      auto: false
+      manual_step: "Check ports 3000/30001 are free, restart services"
+    children:
+      - id: "2"
+        name: "Navigate to Workspace"
+        gate: blocking
+        evidence: [dom_state]
+        failure_category: build
+        pass_criteria: "Page URL contains #/agentWorkspace; workspace container visible"
+        test_mapping:
+          file: test/full-lifecycle-e2e.spec.js
+          test_name: "Phase 0.2: Navigate to workspace"
+        retry:
+          re_entry: "2"
+          auto: true
+          manual_step: null
+        children:
+          - id: "3"
+            name: "Create Session + Bind Env"
+            gate: blocking
+            evidence: [api_response, dom_state]
+            failure_category: data_propagation
+            pass_criteria: "Session ID returned from API; environment bound; provider configured"
+            test_mapping:
+              file: test/full-lifecycle-e2e.spec.js
+              test_name: "Phase 0-1: Create session, bind env, configure provider, fill presets with resume upload"
+            retry:
+              re_entry: "3"
+              auto: true
+              manual_step: null
+            children:
+              - id: "4"
+                name: "Fill Preset Questions + Upload Resume"
+                gate: blocking
+                evidence: [api_response, file_output]
+                failure_category: data_propagation
+                pass_criteria: "All 5 preset questions answered (5/5); resume file uploaded via API"
+                test_mapping:
+                  file: test/full-lifecycle-e2e.spec.js
+                  test_name: "Phase 0-1: Create session, bind env, configure provider, fill presets with resume upload"
+                retry:
+                  re_entry: "4"
+                  auto: true
+                  manual_step: null
+                children:
+                  - id: "5"
+                    name: "Profile Collection"
+                    gate: blocking
+                    evidence: [api_response, dom_state]
+                    failure_category: extraction
+                    pass_criteria: "AI processing completes within timeout; profile sections populated; Finish button clickable"
+                    test_mapping:
+                      file: test/full-lifecycle-e2e.spec.js
+                      test_name: "Phase 2: Wait for profile collection, click Finish, verify dashboard"
+                    retry:
+                      re_entry: "5"
+                      auto: false
+                      manual_step: "Check AI provider connectivity and retry profile collection"
+                    children:
+                      - id: "6"
+                        name: "Dashboard Verification"
+                        gate: blocking
+                        evidence: [api_response, dom_state]
+                        failure_category: data_propagation
+                        pass_criteria: "Direction fields non-empty (q_job_title, q_location); environment bound; provider set; at least 1 platform"
+                        test_mapping:
+                          file: test/full-lifecycle-e2e.spec.js
+                          test_name: "Phase 3: Verify dashboard data (direction, env, provider, platforms)"
+                        retry:
+                          re_entry: "5"
+                          auto: false
+                          manual_step: "Re-run profile collection or manually set direction fields"
+                        children:
+                          - id: "7"
+                            name: "Login (Open Browser)"
+                            gate: blocking
+                            evidence: [browser_verify, api_response]
+                            failure_category: environment
+                            pass_criteria: "Browser launches; login page loads; user confirms login; confirm API returns success"
+                            test_mapping:
+                              file: test/full-lifecycle-e2e.spec.js
+                              test_name: "Phase 4: Login to Indeed (requires manual intervention)"
+                            retry:
+                              re_entry: "7"
+                              auto: false
+                              manual_step: "Click Cloudflare checkbox if blocked, then complete login manually"
+                            children:
+                              - id: "7.1"
+                                name: "Login Confirm Failure Reset"
+                                gate: observation
+                                evidence: [dom_state, api_response]
+                                failure_category: ux_state_sync
+                                pass_criteria: "After browser closes, confirm endpoint resets platform status to login state; UI reflects reset"
+                                test_mapping:
+                                  file: test/full-lifecycle-e2e.spec.js
+                                  test_name: "Branch F: F.1-F.2: Login -> close browser -> Confirm should reset to Login"
+                                retry:
+                                  re_entry: "7"
+                                  auto: false
+                                  manual_step: "Re-open browser and close again to reproduce"
+                              - id: "7.2"
+                                name: "Cloudflare Detection + Auto-click"
+                                gate: observation
+                                evidence: [screenshot, log_check]
+                                failure_category: extraction
+                                pass_criteria: "Cloudflare challenge detected; auto-click attempted; page proceeds or retries"
+                                test_mapping:
+                                  file: test/tool-service-captcha.spec.js
+                                  test_name: "CAPTCHA tools E2E"
+                                retry:
+                                  re_entry: "7"
+                                  auto: false
+                                  manual_step: "Click Cloudflare checkbox manually"
+                          - id: "8"
+                            name: "Build Search Tool"
+                            gate: blocking
+                            evidence: [api_response, file_output]
+                            failure_category: build
+                            pass_criteria: "Build API returns success; platform-tools.json updated with valid script; JD verify passes"
+                            test_mapping:
+                              file: test/full-lifecycle-e2e.spec.js
+                              test_name: "Phase 4.5: Build search tool for platforms"
+                            retry:
+                              re_entry: "8"
+                              auto: true
+                              manual_step: null
+                            children:
+                              - id: "8.1"
+                                name: "Build Failure -> AI Analyze -> Rebuild"
+                                gate: observation
+                                evidence: [file_output, api_response, log_check]
+                                failure_category: extraction
+                                pass_criteria: "Fault injected; selfHeal triggers needsRebuild=true; AI rebuild produces new script; rebuilt script passes"
+                                test_mapping:
+                                  file: test/full-lifecycle-e2e.spec.js
+                                  test_name: "Branch A: A.1-A.4: Inject fault script, verify selfHeal + rebuild"
+                                retry:
+                                  re_entry: "8"
+                                  auto: true
+                                  manual_step: null
+                              - id: "8.2"
+                                name: "Build Success but JD Verify Fail -> Rebuild"
+                                gate: observation
+                                evidence: [api_response, log_check]
+                                failure_category: extraction
+                                pass_criteria: "Build succeeds but JD structure validation fails; triggers re-build; second build passes"
+                                test_mapping:
+                                  file: null
+                                  test_name: null
+                                retry:
+                                  re_entry: "8"
+                                  auto: true
+                                  manual_step: null
+                          - id: "9"
+                            name: "Start Workflow"
+                            gate: blocking
+                            evidence: [api_response, ws_event]
+                            failure_category: data_propagation
+                            pass_criteria: "Workflow starts; pipeline status transitions through stages; completes or reaches terminal state"
+                            test_mapping:
+                              file: test/full-lifecycle-e2e.spec.js
+                              test_name: "Phase 5: Start workflow and poll until completion"
+                            retry:
+                              re_entry: "9"
+                              auto: true
+                              manual_step: null
+                            children:
+                              - id: "9.1"
+                                name: "Direction Empty -> Interrupt"
+                                gate: blocking
+                                evidence: [log_check, ws_event]
+                                failure_category: data_propagation
+                                pass_criteria: "Pipeline detects empty direction fields; interrupts with actionable error; does not proceed to search"
+                                test_mapping:
+                                  file: test/search-pipeline-deep.spec.js
+                                  test_name: "10. Verify pipeline error handling"
+                                retry:
+                                  re_entry: "6"
+                                  auto: false
+                                  manual_step: "Fill direction fields in dashboard, then restart workflow"
+                              - id: "9.2"
+                                name: "AI Unavailable -> 3-strike Interrupt"
+                                gate: blocking
+                                evidence: [log_check, ws_event, api_response]
+                                failure_category: environment
+                                pass_criteria: "AI provider returns errors; consecutive error count reaches 3; pipeline interrupts; notification sent; restart recovers"
+                                test_mapping:
+                                  file: test/full-lifecycle-e2e.spec.js
+                                  test_name: "Branch D: D.1-D.6: Simulate AI unavailable, verify interrupt + restart recovery"
+                                retry:
+                                  re_entry: "9"
+                                  auto: false
+                                  manual_step: "Verify AI provider API key and connectivity, then restart workflow"
+                          - id: "10"
+                            name: "Search Results Verification"
+                            gate: blocking
+                            evidence: [api_response, log_check]
+                            failure_category: extraction
+                            pass_criteria: "Jobs array length > 0; each job has title, company, URL; no duplicate URLs"
+                            test_mapping:
+                              file: test/full-lifecycle-e2e.spec.js
+                              test_name: "Phase 6: Verify search results (ZERO TOLERANCE: 0 results = FAIL)"
+                            retry:
+                              re_entry: "9"
+                              auto: true
+                              manual_step: null
+                            children:
+                              - id: "10.1"
+                                name: "Search Success (jobs > 0)"
+                                gate: blocking
+                                evidence: [api_response, log_check]
+                                failure_category: extraction
+                                pass_criteria: "results.length > 0; jobs contain required fields; no malformed entries"
+                                test_mapping:
+                                  file: test/full-lifecycle-e2e.spec.js
+                                  test_name: "Phase 6: Verify search results (ZERO TOLERANCE: 0 results = FAIL)"
+                                retry:
+                                  re_entry: "9"
+                                  auto: true
+                                  manual_step: null
+                              - id: "10.2"
+                                name: "Search Failure -> selfHeal"
+                                gate: blocking
+                                evidence: [api_response, log_check]
+                                failure_category: extraction
+                                pass_criteria: "selfHeal function invoked; produces diagnosis with actionable fix rules"
+                                test_mapping:
+                                  file: test/full-lifecycle-e2e.spec.js
+                                  test_name: "Phase 7: Check fix rules, selfHeal, and summary report"
+                                retry:
+                                  re_entry: "10"
+                                  auto: true
+                                  manual_step: null
+                                children:
+                                  - id: "10.2.1"
+                                    name: "selfHeal -> needsRebuild=true -> AI Rebuild"
+                                    gate: observation
+                                    evidence: [api_response, file_output, log_check]
+                                    failure_category: extraction
+                                    pass_criteria: "selfHeal returns needsRebuild:true; AI rebuild triggers; new script deployed"
+                                    test_mapping:
+                                      file: test/full-lifecycle-e2e.spec.js
+                                      test_name: "Branch A: A.1-A.4: Inject fault script, verify selfHeal + rebuild"
+                                    retry:
+                                      re_entry: "10"
+                                      auto: true
+                                      manual_step: null
+                                  - id: "10.2.2"
+                                    name: "selfHeal -> AI Unavailable -> Interrupt + Notify"
+                                    gate: blocking
+                                    evidence: [ws_event, log_check]
+                                    failure_category: environment
+                                    pass_criteria: "selfHeal calls AI; AI returns error; interrupt triggered; user notified via WebSocket"
+                                    test_mapping:
+                                      file: test/full-lifecycle-e2e.spec.js
+                                      test_name: "Branch D"
+                                    retry:
+                                      re_entry: "9"
+                                      auto: false
+                                      manual_step: "Verify AI provider API key and connectivity, then restart workflow"
+                                  - id: "10.2.3"
+                                    name: "selfHeal -> Browser Closed -> Interrupt + Notify"
+                                    gate: blocking
+                                    evidence: [ws_event, log_check]
+                                    failure_category: environment
+                                    pass_criteria: "Browser closes mid-selfHeal; pipeline detects disconnection; interrupts with browser closed notification"
+                                    test_mapping:
+                                      file: null
+                                      test_name: null
+                                    retry:
+                                      re_entry: "7"
+                                      auto: false
+                                      manual_step: "Re-open browser and login, then restart workflow"
+                              - id: "10.3"
+                                name: "Cloudflare Block -> Auto-click -> Retry"
+                                gate: observation
+                                evidence: [screenshot, log_check, browser_verify]
+                                failure_category: extraction
+                                pass_criteria: "Cloudflare challenge detected during search; auto-click resolves; search retries and returns results"
+                                test_mapping:
+                                  file: test/tool-service-captcha.spec.js
+                                  test_name: "CAPTCHA tools E2E"
+                                retry:
+                                  re_entry: "10"
+                                  auto: false
+                                  manual_step: "Click Cloudflare checkbox manually, then retry search"
+                              - id: "10.4"
+                                name: "Second Search -> URL Dedup + Keyword Expansion"
+                                gate: observation
+                                evidence: [api_response, log_check]
+                                failure_category: verification
+                                pass_criteria: "Second search uses expanded/rotated keywords; results deduplicated against first run; new unique jobs found"
+                                test_mapping:
+                                  file: test/full-lifecycle-e2e.spec.js
+                                  test_name: "Branch G: G.1-G.5: Run second workflow, verify dedup + keyword expansion"
+                                retry:
+                                  re_entry: "10.4"
+                                  auto: true
+                                  manual_step: null
+                                children:
+                                  - id: "10.5"
+                                    name: "Page Advancement on High Overlap"
+                                    gate: observation
+                                    evidence: [log_check, api_response]
+                                    failure_category: verification
+                                    pass_criteria: "When overlap ratio exceeds threshold, search advances to next page; page number increments"
+                                    test_mapping:
+                                      file: test/search-pipeline-deep.spec.js
+                                      test_name: "9. Verify page advancement behavior"
+                                    retry:
+                                      re_entry: "10.4"
+                                      auto: true
+                                      manual_step: null
+                          - id: "11"
+                            name: "Document Generation (Resume/Cover Letter/Interview Prep)"
+                            gate: observation
+                            evidence: [api_response, file_output]
+                            failure_category: extraction
+                            pass_criteria: "AI generates tailored resume/cover letter for selected job; documents stored and retrievable"
+                            test_mapping:
+                              file: test/dashboard-workflow.spec.js
+                              test_name: "Dashboard job workflow E2E"
+                            retry:
+                              re_entry: "11"
+                              auto: true
+                              manual_step: null
+                          - id: "12"
+                            name: "Filter + Auto-refresh"
+                            gate: observation
+                            evidence: [api_response, dom_state]
+                            failure_category: ux_state_sync
+                            pass_criteria: "Filter by keyword/location returns subset; auto-refresh merges new results; filter state persists"
+                            test_mapping:
+                              file: test/full-lifecycle-e2e.spec.js
+                              test_name: "Branch H: H.1-H.4: Test job filters via API"
+                            retry:
+                              re_entry: "12"
+                              auto: true
+                              manual_step: null
+      - id: "13"
+        name: "Legacy Features"
+        gate: observation
+        evidence: []
+        failure_category: null
+        pass_criteria: "All child nodes pass"
+        test_mapping:
+          file: null
+          test_name: null
+        retry:
+          re_entry: null
+          auto: false
+          manual_step: null
+        children:
+          - id: "13.1"
+            name: "Fingerprint Browser CRUD"
+            gate: observation
+            evidence: [api_response, dom_state]
+            failure_category: verification
+            pass_criteria: "Create fingerprint profile; read list; update name/proxy; delete single and batch"
+            test_mapping:
+              file: test/legacy-pages.spec.js
+              test_name: "ChromeManager"
+            retry:
+              re_entry: "13.1"
+              auto: true
+              manual_step: null
+          - id: "13.2"
+            name: "Wallet CRUD + Import/Export"
+            gate: observation
+            evidence: [api_response, dom_state]
+            failure_category: verification
+            pass_criteria: "Create wallet; read list; update name; view detail; bind env; initialize; batch delete; import/export"
+            test_mapping:
+              file: test/legacy-pages.spec.js
+              test_name: "WalletManager"
+            retry:
+              re_entry: "13.2"
+              auto: true
+              manual_step: null
+          - id: "13.3"
+            name: "Task Import/Execute"
+            gate: observation
+            evidence: [api_response, ws_event, log_check]
+            failure_category: environment
+            pass_criteria: "Import task config; configure settings; start task; monitor execution; task completes"
+            test_mapping:
+              file: test/legacy-pages.spec.js
+              test_name: "TaskManage"
+            retry:
+              re_entry: "13.3"
+              auto: true
+              manual_step: null
+          - id: "13.4"
+            name: "Sync Config"
+            gate: observation
+            evidence: [api_response, dom_state]
+            failure_category: verification
+            pass_criteria: "Sync config page loads; settings saved and retrievable via API"
+            test_mapping:
+              file: test/legacy-pages.spec.js
+              test_name: "SyncFunction"
+            retry:
+              re_entry: "13.4"
+              auto: true
+              manual_step: null

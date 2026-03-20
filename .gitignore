@@ -14,4 +14,6 @@ dbservice/node_modules/
 assets/agents/*/workspace/.git/
 assets/agents/*/data/
 tmp/
-docs/
+docs/*
+!docs/verification-tree.yaml
+!docs/e2e-verification-tree.md
