@@ -775,27 +775,29 @@ test.describe.serial('Full Lifecycle E2E -- Happy Path', () => {
             console.log(`[e2e] Building search tool for ${plat.name}...`);
 
             try {
-                const { status, body } = await postJSON(
-                    `/api/platforms/${sid()}/${pid}/build-tool`,
-                    { toolType: 'search' }
-                );
-                console.log(`[e2e] Build response: ${status} -- ${JSON.stringify(body).slice(0, 200)}`);
+                // Fire-and-forget: build API is long-running, don't wait for response
+                fetch(`${DASHBOARD}/api/platforms/${sid()}/${pid}/tools/search/build`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                }).catch(() => {}); // ignore response timeout
+                console.log(`[e2e] Build triggered for ${plat.name}, polling for completion...`);
 
-                if (status === 200 && body.success) {
-                    // Poll until build complete
-                    await pollUntil(
-                        async () => {
-                            const { body: p } = await fetchJSON(`/api/platforms/${sid()}`);
-                            const updated = (p.platforms || p || []).find(x => (x.id || x.name) === (plat.id || plat.name));
-                            return updated?.tools?.search;
-                        },
-                        (tool) => tool && tool.status === 'ready',
-                        120_000, 5_000
-                    );
-                    console.log(`[e2e] ${plat.name}: search tool built successfully`);
-                }
+                // Poll until build complete (up to 2 min)
+                await pollUntil(
+                    async () => {
+                        const { body: p } = await fetchJSON(`/api/platforms/${sid()}`);
+                        const updated = (p.platforms || p || []).find(x => (x.id || x.name) === (plat.id || plat.name));
+                        const st = updated?.tools?.search?.status;
+                        console.log(`[e2e]   ${plat.name} search tool status: ${st || 'unknown'}`);
+                        return updated?.tools?.search;
+                    },
+                    (tool) => tool && tool.status === 'ready',
+                    120_000, 5_000
+                );
+                console.log(`[e2e] ${plat.name}: search tool built successfully`);
             } catch (err) {
-                console.log(`[e2e] ${plat.name} build error: ${err.message}`);
+                console.log(`[e2e] ${plat.name} build error/timeout: ${err.message}`);
             }
         }
 
