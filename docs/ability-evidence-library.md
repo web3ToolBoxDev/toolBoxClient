@@ -687,9 +687,9 @@ Resume-ready phrasing:
 ### #37 — E2E Verification Tree Architecture
 - **Date**: 2026-03-20
 - **Context**: v1.3->v1.4 development revealed systematic QA failures: 7+ human interventions needed, false-positive pass rates, missing test steps (build tool), 0-result searches marked as pass
-- **Capability**: Designed tree-structured E2E verification framework where test nodes have explicit parent dependencies, enabling coverage gap detection and preventing skipped steps
-- **Evidence**: 15/15 E2E tests passing after tree-driven redesign; previously 6/7 with core search untested
-- **Skills**: Test Architecture, Quality Engineering, Dependency Graph Design, CI/CD Pipeline Design
+- **Capability**: Designed tree-structured E2E verification framework where test nodes have explicit parent dependencies, enabling coverage gap detection and preventing skipped steps. Enhanced with 4 dimensions: (1) blocking vs observation gate classification so parent failures either SKIP children or emit warnings; (2) per-node evidence requirements (screenshot, dom_state, api_response, ws_event, file_output, browser_verify, log_check) defining what proof is needed for PASS; (3) failure category tagging (environment, build, data_propagation, extraction, verification, ux_state_sync) for faster root-cause triage; (4) retry/re-entry paths with auto_retry flags and manual_step instructions for systematic recovery
+- **Evidence**: 15/15 E2E tests passing after tree-driven redesign; previously 6/7 with core search untested. 30 nodes classified across 16 blocking gates and 14 observation nodes, with 3 test tiers (smoke/critical_path/full_acceptance)
+- **Skills**: Test Architecture, Quality Engineering, Dependency Graph Design, CI/CD Pipeline Design, Failure Taxonomy Design, Evidence-Based Verification
 
 ## Suggested Top 6 for Resume
 
