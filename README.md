@@ -26,9 +26,13 @@
 │  │  Tool Service    │ │  Memory Layer    │ │  Browser     │ │
 │  │  (:30004)        │ │  (:30002)        │ │  Runtime     │ │
 │  │  Browser Pool    │ │  SQLite (SoT)    │ │  Chromium    │ │
-│  │  Screenshot      │ │  mem0 (Semantic) │ │  C++ Patches │ │
-│  │  HTTP · Registry │ │  Scope Isolation │ │  Fingerprint │ │
+│  │  Wallet Tools    │ │  mem0 (Semantic) │ │  C++ Patches │ │
+│  │  Email · Registry│ │  Scope Isolation │ │  Fingerprint │ │
 │  └──────────────────┘ └──────────────────┘ └──────────────┘ │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  StateService (Unified State Management)              │   │
+│  │  EventBus · StateStore · Persistence · Agent Bridge   │   │
+│  └──────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -137,10 +141,10 @@ The platform itself is developed using a role-based multi-agent workflow:
 
 - **Coordinator** dispatches tasks with conflict detection and priority scheduling
 - **Dev agents** implement features in isolated git worktrees with parallel execution
-- **Tester** runs Playwright regression suites (17 tests across API, unit, and Electron UI)
-- **QA** performs real-environment visual verification via browser automation
+- **Tester** runs Playwright regression suites (600+ tests across API, unit, E2E lifecycle)
+- **QA** executes verification tree (30 nodes, blocking/observation gates, 3 tiers) with evidence collection
 
-This system is defined as portable markdown workflows, reusable across projects.
+This system is defined as portable markdown workflows, reusable across projects. The [verification tree](docs/e2e-verification-tree.md) is an executable YAML config that can be generated for any project via `npm run test:generate-tree`.
 
 ## Tech Stack
 
@@ -169,11 +173,14 @@ Development mode: `yarn dev` starts Electron + backend. `yarn start` for React h
 
 ## Project Status
 
-**Current: v1.3.0**
+**Current: v1.4.0**
 
-- Platform: fingerprint browser runtime, 3-layer memory, toolService, WebSocket agent protocol, task lifecycle management
-- Job Seek Agent: multi-platform search, AI matching, document generation, self-healing pipeline, real-time dashboard, i18n
-- Testing: 177+ test suite (API functional, unit, Electron UI, full lifecycle E2E with real search)
+- Platform: fingerprint browser runtime, 3-layer memory, toolService, WebSocket agent protocol, **unified StateService**, task lifecycle management
+- Job Seek Agent: multi-platform search, AI matching, document generation, self-healing pipeline, real-time dashboard, **AI interrupt (3-strike)**, i18n
+- StateService: EventBus + StateStore + Agent SDK (Proxy-wrapped) + persistence, enabling cross-layer state consistency and restart recovery
+- Scripts migration: openChrome/openWallet/initWallet/checkEmail migrated from spawn-based scripts to toolService HTTP API (~90MB saved)
+- Testing: 600+ test suite (127 StateService, 371 client, 128 server, 15 E2E lifecycle with real search)
+- Verification tree: executable YAML-based tree with blocking/observation gates, evidence types, failure categories, retry paths, and 3-tier test levels
 - Dev tooling: multi-agent coordination system (Coordinator → Dev → Tester → QA) with L1-L5 acceptance standards
 
 ## License
