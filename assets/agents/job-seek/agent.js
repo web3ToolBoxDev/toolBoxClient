@@ -1348,6 +1348,7 @@ function resolveProvider() {
 function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default', options = {}) {
     return new Promise((resolve, reject) => {
         const workspaceDir = path.join(__dirname, 'workspace');
+        if (!fs.existsSync(workspaceDir)) fs.mkdirSync(workspaceDir, { recursive: true });
         const execDir = options.cwd || workspaceDir;
 
         // Build full prompt with context inlined
