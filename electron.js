@@ -140,16 +140,68 @@ function createBackendProcess() {
 
 }
 
-app.whenReady().then(() => {
+// ─── First-launch dependency install ───
+function needsInstall() {
+  if (!isBuild) return false;
+  // Check if node_modules exists in the asar-extracted app dir
+  const appDir = path.dirname(__dirname);
+  const nmPath = path.join(appDir, 'app.asar.unpacked', 'node_modules');
+  const nmPath2 = path.join(__dirname, 'node_modules');
+  return !fs.existsSync(nmPath) && !fs.existsSync(nmPath2) && !fs.existsSync(path.join(__dirname, 'node_modules', 'express'));
+}
+
+function showInstallPage(win) {
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#0d1117; color:#c9d1d9; display:flex; align-items:center; justify-content:center; height:100vh; flex-direction:column; }
+  .logo { font-size:48px; margin-bottom:20px; }
+  h2 { margin:0 0 10px; font-weight:400; }
+  .progress { width:300px; height:4px; background:#21262d; border-radius:2px; margin:20px 0; overflow:hidden; }
+  .bar { height:100%; background:#58a6ff; width:0%; transition:width 0.5s; border-radius:2px; }
+  #status { color:#8b949e; font-size:13px; }
+</style></head><body>
+  <div class="logo">🔧</div>
+  <h2>Initializing Web3 ToolBox...</h2>
+  <div class="progress"><div class="bar" id="bar"></div></div>
+  <div id="status">Installing dependencies, please wait...</div>
+</body></html>`;
+  win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+}
+
+function runInstall() {
+  return new Promise((resolve, reject) => {
+    const execPath = config.getDefaultExecPath();
+    const npmPath = path.join(path.dirname(execPath), process.platform === 'win32' ? 'npm.cmd' : 'npm');
+    const appDir = __dirname;
+    console.log(`[install] Running npm install in ${appDir} using ${npmPath}`);
+    const { spawn } = require('child_process');
+    const env = { ...process.env };
+    if (process.platform === 'win32' && !env.ComSpec) {
+      env.ComSpec = `${process.env.SystemRoot || 'C:\\Windows'}\\system32\\cmd.exe`;
+    }
+    const child = spawn(npmPath, ['install', '--production', '--no-optional'], {
+      cwd: appDir,
+      env,
+      shell: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let output = '';
+    child.stdout.on('data', d => { output += d; console.log(`[install] ${d.toString().trim()}`); });
+    child.stderr.on('data', d => { output += d; console.log(`[install:err] ${d.toString().trim()}`); });
+    child.on('close', code => {
+      if (code === 0) resolve(output);
+      else reject(new Error(`npm install failed (code ${code}): ${output.slice(-500)}`));
+    });
+    child.on('error', reject);
+  });
+}
+
+app.whenReady().then(async () => {
   ipcMain.handle('dialog:openFile', handleFileOpen)
   ipcMain.handle('dialog:chooseDirectory', chooseDirectory)
   ipcMain.handle('dialog:openLink', (event, url) => openLink(url))
   ipcMain.handle('dialog:revealInFolder', (event, payload) => revealInFolder(payload))
 
-  // Allow renderer to request webContents focus (fixes modal input focus on Windows).
-  // Electron on Windows sometimes loses keyboard event routing to the renderer.
-  // blur()+focus() on the BrowserWindow simulates the user switching away and back,
-  // which triggers the 'focus' event handler that calls webContents.focus().
   ipcMain.handle('window:focusWebContents', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.blur();
@@ -157,9 +209,6 @@ app.whenReady().then(() => {
     }
   })
 
-  // Use Electron's dialog API instead of native alert()/confirm() to avoid
-  // keyboard focus loss bug (https://github.com/electron/electron/issues/20821).
-  // Must use synchronous IPC (sendSync/returnValue) because alert() blocks JS.
   ipcMain.on('dialog:alertSync', (event, message) => {
     dialog.showMessageBoxSync(mainWindow, {
       type: 'info',
@@ -174,11 +223,29 @@ app.whenReady().then(() => {
       message: String(message),
       buttons: ['OK', 'Cancel']
     });
-    event.returnValue = result === 0; // 0 = OK, 1 = Cancel
+    event.returnValue = result === 0;
   })
+
+  // First-launch: install dependencies if missing
+  if (needsInstall()) {
+    createWindow();
+    showInstallPage(mainWindow);
+    try {
+      await runInstall();
+      console.log('[install] Dependencies installed successfully');
+      // Reload the main app
+      const startURL = `file://${path.join(__dirname, './client/build/index.html')}`;
+      mainWindow.loadURL(startURL);
+    } catch (err) {
+      console.error('[install] Failed:', err.message);
+      dialog.showErrorBox('Initialization Failed', `Could not install dependencies:\n${err.message}\n\nPlease check your network connection and try again.`);
+      app.quit();
+      return;
+    }
+  }
+
   if (mainWindow === null) {
     createWindow();
-    // createBackendProcess();
   }
   if (backendProcess === null) {
     createBackendProcess();

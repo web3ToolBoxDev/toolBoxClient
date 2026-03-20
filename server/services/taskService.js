@@ -970,6 +970,8 @@ class TaskService {
             if (process.platform === 'win32' && !childEnv.ComSpec && !childEnv.COMSPEC) {
                 childEnv.ComSpec = `${process.env.SystemRoot || 'C:\\Windows'}\\system32\\cmd.exe`;
             }
+            // Pass savePath so agent can store user data outside app resources
+            if (this.savePath) childEnv.AGENT_SAVE_PATH = this.savePath;
             const childProcess = spawn(execPath, [scriptPath, url], { env: childEnv });
             this.taskProcesses[taskName] = childProcess;
             this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} started`, 0, taskName));

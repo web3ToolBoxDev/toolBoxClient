@@ -57,8 +57,35 @@ async function ensurePack() {
     return false;
 }
 
-// Persistent data directory for this agent
-const _dataDir = path.join(__dirname, 'data');
+// Persistent data directory — prefer user's savePath over app resources
+// This ensures user data survives app upgrades
+const _dataDir = (function() {
+    const savePath = process.env.AGENT_SAVE_PATH;
+    if (savePath) {
+        const userDataDir = path.join(savePath, 'agents', 'job-seek', 'data');
+        fs.mkdirSync(userDataDir, { recursive: true });
+        // Auto-migrate: if old data exists in __dirname/data but not in new location, copy it
+        const oldDir = path.join(__dirname, 'data');
+        const oldSessions = path.join(oldDir, 'sessions.json');
+        const newSessions = path.join(userDataDir, 'sessions.json');
+        if (fs.existsSync(oldSessions) && !fs.existsSync(newSessions)) {
+            console.log('[agent] Migrating data from app resources to savePath...');
+            for (const f of ['sessions.json', 'users.json', 'state.json']) {
+                const src = path.join(oldDir, f);
+                const dst = path.join(userDataDir, f);
+                if (fs.existsSync(src)) {
+                    try { fs.copyFileSync(src, dst); console.log(`[agent] Migrated ${f}`); } catch (e) { console.warn(`[agent] Migration failed for ${f}:`, e.message); }
+                }
+            }
+        }
+        return userDataDir;
+    }
+    // Fallback for dev mode or when savePath not set
+    const fallback = path.join(__dirname, 'data');
+    fs.mkdirSync(fallback, { recursive: true });
+    return fallback;
+})();
+console.log('[agent] Data dir:', _dataDir);
 
 // Ensure workspace dir has git init (required by Codex CLI)
 const _workspaceDir = path.join(__dirname, 'workspace');
