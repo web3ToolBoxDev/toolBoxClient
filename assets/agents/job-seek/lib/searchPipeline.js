@@ -38,6 +38,24 @@ function getPlatformService() {
 // Active pipeline runs: sessionId → PipelineState
 const _pipelines = new Map();
 
+/**
+ * Set keepAlive on all platform browsers to prevent idle cleanup during long AI operations.
+ * @param {string} sessionId
+ * @param {string[]} platformIds
+ * @param {boolean} keepAlive
+ */
+function _setBrowserKeepAlive(sessionId, platformIds, keepAlive) {
+    const toolClient = require('./core/toolServiceClient');
+    for (const pid of platformIds) {
+        const platform = getPlatformStore().getPlatform(sessionId, pid);
+        if (platform?._browserId) {
+            toolClient.request('POST', '/browser/keepalive', {
+                browserId: platform._browserId, keepAlive
+            }).catch(err => console.warn(`[pipeline] keepAlive(${keepAlive}) failed for ${pid}:`, err.message));
+        }
+    }
+}
+
 // ─── Cloudflare Detection ───
 const _CLOUDFLARE_SIGNATURES = [
     'cloudflare', 'just a moment', 'checking your browser',
@@ -737,6 +755,9 @@ async function _runPipeline(sessionId) {
     // ── Search + Match (merged): process each job inline as it's found ──
     // Wrap in try/finally to guarantee _finishPipeline is called even on unexpected errors
     try {
+
+    // Set keepAlive on all platform browsers to prevent idle cleanup during long AI operations
+    _setBrowserKeepAlive(sessionId, config.platforms || [], true);
 
     pipeline.progress.phase = 'searching';
     let _totalFetched = 0;  // total listings fetched across all sources (replaces allListings.length)
@@ -1632,6 +1653,9 @@ function _finishPipeline(sessionId, reason) {
 
     // Idempotent: skip if already finished (prevents double history-save)
     if (!pipeline.running && pipeline.stoppedAt) return;
+
+    // Release keepAlive on all browsers now that pipeline is done
+    _setBrowserKeepAlive(sessionId, pipeline.config.platforms || [], false);
 
     pipeline.running = false;
     pipeline.progress.phase = reason;

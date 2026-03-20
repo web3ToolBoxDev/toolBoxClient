@@ -141,6 +141,14 @@ app.get('/browser/list', (_req, res) => {
     res.json({ success: true, browsers: browserPool.listBrowsers() });
 });
 
+// Set keepAlive on browser (prevent idle cleanup during long AI operations)
+app.post('/browser/keepalive', (req, res) => {
+    const { browserId, keepAlive } = req.body;
+    if (!browserId) return res.status(400).json({ success: false, error: 'browserId required' });
+    browserPool.setKeepAlive(browserId, keepAlive !== false);
+    res.json({ success: true, browserId, keepAlive: keepAlive !== false });
+});
+
 // ─── Migrated script routes ───
 
 // POST /browser/open-chrome — opens Chrome with fingerprint env, keeps alive
