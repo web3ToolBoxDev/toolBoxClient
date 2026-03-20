@@ -965,7 +965,12 @@ class TaskService {
             let url = this.webSocketService.createTaskWebSocket(taskName, (msg) => {
                 this.processMsg(taskName, msg, taskDataJson)
             });
-            const childProcess = spawn(execPath, [scriptPath, url]);
+            // Ensure OS env vars survive Electron → Express → child spawn chain
+            const childEnv = { ...process.env };
+            if (process.platform === 'win32' && !childEnv.ComSpec && !childEnv.COMSPEC) {
+                childEnv.ComSpec = `${process.env.SystemRoot || 'C:\\Windows'}\\system32\\cmd.exe`;
+            }
+            const childProcess = spawn(execPath, [scriptPath, url], { env: childEnv });
             this.taskProcesses[taskName] = childProcess;
             this.webSocketService.sendToFront(this.taskLogMessage(`Task:${this.shortTaskName(taskName)} started`, 0, taskName));
             this.webSocketService.sendToFront({
