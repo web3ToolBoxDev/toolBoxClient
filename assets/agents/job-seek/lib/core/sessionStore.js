@@ -51,7 +51,8 @@ const PERSIST_KEYS = [
     'resumeHashes',
     'searchHistory',
     'jobCards',
-    'platformStatus'
+    'platformStatus',
+    'workflowTasks'
 ];
 
 /**

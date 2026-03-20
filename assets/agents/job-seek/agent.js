@@ -25,6 +25,7 @@ const userStore = require('./lib/core/userStore');
 const masterProfileClient = require('./lib/core/masterProfileClient');
 const tailorProfile = require('./lib/tools/tailorProfile');
 const { StateClient } = require('../shared/stateClient');
+const taskManager = require('./lib/workflow/taskManager');
 
 // Register domain pack at startup (before any upsert can happen).
 // Retries on failure since dbservice may not be ready yet.
@@ -158,7 +159,8 @@ const state = {
     masterProfile: {},
     activeUserId: '',
     resumeHashes: {},
-    platformStatus: {}
+    platformStatus: {},
+    workflowTasks: {}
 };
 
 // Track active browser instances (not persisted)
@@ -215,6 +217,28 @@ function saveState() {
 
 // Restore on startup
 restoreState();
+
+// Initialize taskManager with persistence bridge
+taskManager.init({
+    persist: (tasks) => {
+        state.workflowTasks = tasks;
+        scheduleSave();
+    },
+    notify: (taskId, event, data) => {
+        console.log(`[taskManager] ${event} for ${taskId}:`, JSON.stringify(data).slice(0, 200));
+        // Will be wired to notifyService in Phase C
+    },
+    savedTasks: state.workflowTasks || {}
+});
+
+// Recover tasks that were running when agent last shut down
+const _recoveredTasks = taskManager.recoverFromRestart();
+if (_recoveredTasks.length > 0) {
+    console.log(`[agent] Recovered ${_recoveredTasks.length} task(s) from restart → paused`);
+}
+
+// Periodic timeout check for waiting_human tasks (every 60s)
+setInterval(() => { taskManager.checkTimeouts(); }, 60_000);
 
 // Initialize multi-user store and migrate existing data
 (function initUserStore() {

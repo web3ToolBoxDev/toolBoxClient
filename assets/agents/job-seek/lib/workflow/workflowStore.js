@@ -57,7 +57,7 @@ function deleteConfig(sessionId) {
 /** Step status enum. */
 const STEP_STATUS = ['idle', 'waiting_login', 'ready', 'running', 'done', 'error', 'skipped', 'stuck'];
 /** Workflow status enum. */
-const WORKFLOW_STATUS = ['idle', 'blocked', 'ready', 'running', 'paused', 'failed', 'completed'];
+const WORKFLOW_STATUS = ['idle', 'blocked', 'ready', 'running', 'waiting_human', 'paused', 'failed', 'completed'];
 
 /**
  * Initialize a new run for a session.

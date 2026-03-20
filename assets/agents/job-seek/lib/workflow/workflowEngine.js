@@ -10,6 +10,7 @@
  */
 
 const store = require('./workflowStore');
+const taskManager = require('./taskManager');
 const { validateConfig, getSourceMeta } = require('./workflowConfig');
 
 // Step handlers — lazy-loaded to avoid circular deps
@@ -67,9 +68,20 @@ async function start(sessionId, config, context) {
         return { success: false, error: 'Workflow already running' };
     }
 
-    // Initialize run
+    // Initialize run (workflowStore — backward compat)
     const run = store.initRun(sessionId, config);
     store.updateRunStatus(sessionId, 'running');
+
+    // Create persistent task (taskManager — new lifecycle)
+    const task = taskManager.createTask({
+        sessionId,
+        config: { region: config.region, location: config.location, sources: config.sources, steps: config.steps },
+        context,
+        steps: config.steps || []
+    });
+    taskManager.transition(task.id, 'running');
+    // Store taskId on run for cross-reference
+    run._taskId = task.id;
 
     // Check login requirements before proceeding
     const blocked = await checkLoginRequirements(sessionId, config);
@@ -86,9 +98,10 @@ async function start(sessionId, config, context) {
     _executePipeline(sessionId, config, context).catch(err => {
         console.error(`[workflowEngine] Pipeline error (${sessionId}):`, err.message);
         store.updateRunStatus(sessionId, 'failed');
+        if (run._taskId) taskManager.transition(run._taskId, 'failed', { error: err.message });
     });
 
-    return { success: true, run };
+    return { success: true, run, taskId: task.id };
 }
 
 /**
@@ -100,6 +113,7 @@ function stop(sessionId) {
     if (run.status !== 'running') return { success: false, error: `Cannot stop: status is ${run.status}` };
 
     store.updateRunStatus(sessionId, 'paused');
+    if (run._taskId) taskManager.transition(run._taskId, 'paused');
     return { success: true };
 }
 
@@ -227,6 +241,7 @@ async function _executePipeline(sessionId, config, context) {
         }
 
         store.updateStepStatus(sessionId, step.name, 'running');
+        if (run._taskId) taskManager.updateStep(run._taskId, step.name, 'running');
         _broadcastStatus(sessionId);
 
         try {
@@ -234,20 +249,24 @@ async function _executePipeline(sessionId, config, context) {
                 sessionId,
                 config,
                 context,
-                step: config.steps.find(s => s.name === step.name)
+                step: config.steps.find(s => s.name === step.name),
+                taskId: run._taskId  // pass taskId so handlers can use taskManager
             });
 
             store.updateStepStatus(sessionId, step.name, 'done', { result });
+            if (run._taskId) taskManager.updateStep(run._taskId, step.name, 'done', { result });
             _broadcastStatus(sessionId);
         } catch (err) {
             store.updateStepStatus(sessionId, step.name, 'error', {
                 error: err.message
             });
+            if (run._taskId) taskManager.updateStep(run._taskId, step.name, 'error', { error: err.message });
             _broadcastStatus(sessionId);
 
             // If a critical step fails, stop the pipeline
             if (['search'].includes(step.name)) {
                 store.updateRunStatus(sessionId, 'failed');
+                if (run._taskId) taskManager.transition(run._taskId, 'failed', { error: err.message });
                 _broadcastStatus(sessionId);
                 return;
             }
@@ -259,6 +278,7 @@ async function _executePipeline(sessionId, config, context) {
     if (finalRun && finalRun.status === 'running') {
         store.updateRunStatus(sessionId, 'completed');
         store.archiveRun(sessionId);
+        if (finalRun._taskId) taskManager.transition(finalRun._taskId, 'completed');
         _broadcastStatus(sessionId);
     }
 }
@@ -353,6 +373,7 @@ module.exports = {
     checkStuckSteps,
     retryStep,
     skipStep,
+    taskManager,
     STEP_TIMEOUTS,
     DEFAULT_STEP_TIMEOUT
 };
