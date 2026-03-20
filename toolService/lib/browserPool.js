@@ -93,7 +93,8 @@ async function launchWithFingerprint({ chromePath, savePath, env, headless = fal
         executablePath: chromePath,
         userDataDir,
         args,
-        defaultViewport: null
+        defaultViewport: null,
+        ignoreDefaultArgs: ['--enable-automation']
     });
 
     const id = genId();
