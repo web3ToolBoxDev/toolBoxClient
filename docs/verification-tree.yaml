@@ -4,34 +4,48 @@
 
 meta:
   project: web3toolbox
-  version: v1.4.0
+  version: v1.4.1
   failure_categories:
-    environment: "Service not running, port conflict, Chrome not found, API key missing"
+    environment: "Service not running, port conflict, Chrome not found, API key missing, CLI spawn failure, ComSpec missing"
     build: "React/Electron build error, dependency missing, script compilation failure"
-    data_propagation: "State not synced between layers"
+    data_propagation: "State not synced between layers, memory not cleared across scopes"
     extraction: "AI parsing failure, scraper error, wrong selectors, anti-bot block"
     verification: "Assertion wrong, test logic error, timing issue, flaky selector"
     ux_state_sync: "UI shows stale data, session switch not reflected, status not updated"
   tiers:
-    smoke: ["1", "2", "3", "4", "5", "6", "10.1"]
-    critical_path: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "10.1"]
+    smoke: ["0", "1", "2", "3", "3.1", "4", "5", "5.1", "6", "10.1"]
+    critical_path: ["0", "1", "2", "3", "3.1", "4", "5", "5.1", "6", "7", "8", "9", "10", "10.1"]
     full_acceptance: all
 
 nodes:
-  - id: "1"
-    name: "Start Services"
+  - id: "0"
+    name: "Pre-flight: CLI & Environment"
     gate: blocking
     evidence: [api_response]
     failure_category: environment
-    pass_criteria: "Backend :30001 and frontend :3000 respond 200"
+    pass_criteria: "CLI available for configured provider (claude/codex); ComSpec env var present on Windows; spawn test succeeds without ENOENT"
     test_mapping:
       file: test/full-lifecycle-e2e.spec.js
-      test_name: "Phase 0.1: Start frontend + backend"
+      test_name: "Phase 0.0: Verify CLI availability and environment"
     retry:
-      re_entry: "1"
+      re_entry: "0"
       auto: false
-      manual_step: "Check ports 3000/30001 are free, restart services"
+      manual_step: "Install CLI (npm i -g @anthropic-ai/claude-code), verify PATH, check ComSpec env var"
     children:
+      - id: "1"
+        name: "Start Services"
+        gate: blocking
+        evidence: [api_response]
+        failure_category: environment
+        pass_criteria: "Backend :30001 and frontend :3000 respond 200"
+        test_mapping:
+          file: test/full-lifecycle-e2e.spec.js
+          test_name: "Phase 0.1: Start frontend + backend"
+        retry:
+          re_entry: "1"
+          auto: false
+          manual_step: "Check ports 3000/30001 are free, restart services"
+        children:
       - id: "2"
         name: "Navigate to Workspace"
         gate: blocking
@@ -60,6 +74,19 @@ nodes:
               auto: true
               manual_step: null
             children:
+              - id: "3.1"
+                name: "Reset All Memory Verification"
+                gate: observation
+                evidence: [api_response]
+                failure_category: data_propagation
+                pass_criteria: "Reset clears ALL scopes (agent:*, user:*, session:*); knowledge store docs = 0; state.masterProfile = {}; state.resumeHashes = {}; new session shows no previous profile"
+                test_mapping:
+                  file: test/memory-recall.spec.js
+                  test_name: "Reset all memory clears all scopes"
+                retry:
+                  re_entry: "3.1"
+                  auto: true
+                  manual_step: null
               - id: "4"
                 name: "Fill Preset Questions + Upload Resume"
                 gate: blocking
@@ -88,6 +115,19 @@ nodes:
                       auto: false
                       manual_step: "Check AI provider connectivity and retry profile collection"
                     children:
+                      - id: "5.1"
+                        name: "AI Conversation Smoke"
+                        gate: blocking
+                        evidence: [api_response, dom_state]
+                        failure_category: environment
+                        pass_criteria: "Send chat message via UI → AI responds within 60s without ENOENT/spawn error; response is non-empty and contextually relevant"
+                        test_mapping:
+                          file: test/memory-recall.spec.js
+                          test_name: "AI conversation smoke test"
+                        retry:
+                          re_entry: "0"
+                          auto: false
+                          manual_step: "Check CLI installation, ComSpec env var, provider configuration"
                       - id: "6"
                         name: "Dashboard Verification"
                         gate: blocking

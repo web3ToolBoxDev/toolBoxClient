@@ -556,11 +556,11 @@ async function resetAllMemory() {
     console.log('[agent] resetAllMemory — clearing all data');
     const errors = [];
 
-    // 1. Clear knowledge store (all job-seek types)
-    const types = ['profile', 'direction', 'job_listing', 'match_result'];
+    // 1. Clear knowledge store — remove ALL docs by type (no scope filter = clears all scopes)
+    const types = ['profile', 'direction', 'job_listing', 'match_result', 'job_requirement', 'resume_variant', 'outreach_message'];
     for (const type of types) {
         try {
-            const result = await knowledgeClient.remove({ type, scope: 'agent:job-seek' });
+            const result = await knowledgeClient.remove({ type });
             console.log(`[agent] knowledge remove type=${type}:`, JSON.stringify(result));
             if (result && !result.success) errors.push(`knowledge/${type}: ${result.error || 'failed'}`);
         } catch (err) {
@@ -582,6 +582,8 @@ async function resetAllMemory() {
 
     // 3. Clear global state
     state.resumeProfile = '';
+    state.masterProfile = {};
+    state.resumeHashes = {};
 
     // 4. Clear per-session state
     for (const sid of Object.keys(state.profileSections)) {
@@ -1260,10 +1262,18 @@ function buildIntentFile(sessionId) {
 
 // --------------- provider detection & CLI ---------------
 
+function _ensureComSpec(env) {
+    if (process.platform === 'win32' && !env.ComSpec && !env.COMSPEC) {
+        env.ComSpec = `${process.env.SystemRoot || 'C:\\Windows'}\\system32\\cmd.exe`;
+    }
+    return env;
+}
+
 function checkCliAvailable(cmd) {
     try {
         const check = process.platform === 'win32' ? `where ${cmd}` : `which ${cmd}`;
-        execSync(check, { stdio: 'ignore', timeout: 5000 });
+        const env = _ensureComSpec({ ...process.env });
+        execSync(check, { stdio: 'ignore', timeout: 5000, env });
         return true;
     } catch (_) {
         return false;
@@ -1361,13 +1371,13 @@ function invokeCliAsync(provider, prompt, memoryContext = '', model = 'default',
         console.log(`[agent:cli] ${bin} ${args.join(' ')} (${provider}, prompt via stdin)`);
         let stdout = '';
         let stderr = '';
-        const cleanEnv = { ...process.env };
+        const cleanEnv = _ensureComSpec({ ...process.env });
         delete cleanEnv.CLAUDECODE; // Allow nested Claude Code invocation
         // shell: true to resolve .cmd/.ps1 wrappers; prompt piped via stdin
         const child = spawn(bin, args, {
             stdio: ['pipe', 'pipe', 'pipe'],
             timeout: 120000,
-            shell: true,
+            shell: process.platform === 'win32' ? cleanEnv.ComSpec || true : true,
             cwd: execDir,
             env: cleanEnv
         });
