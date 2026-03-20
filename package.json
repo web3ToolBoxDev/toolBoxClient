@@ -181,6 +181,10 @@
     "test:toolbox:quick": "node test/test-toolbox.js --skip-install --skip-browser",
     "test:regression": "playwright test -c test/playwright.config.js test/v130-regression.spec.js",
     "test:regression:electron": "playwright test -c test/playwright.config.js test/v130-electron-regression.spec.js",
+    "test:verify": "node scripts/verify-tree.js",
+    "test:verify:smoke": "node scripts/verify-tree.js --tier smoke",
+    "test:verify:full": "node scripts/verify-tree.js --tier full_acceptance",
+    "test:generate-tree": "node scripts/generate-tree.js",
     "eject": "react-scripts eject",
     "pack": "electron-builder --dir"
   },
