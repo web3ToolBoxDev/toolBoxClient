@@ -143,11 +143,14 @@ function createBackendProcess() {
 // ─── First-launch dependency install ───
 function needsInstall() {
   if (!isBuild) return false;
-  // Check if node_modules exists in the asar-extracted app dir
-  const appDir = path.dirname(__dirname);
-  const nmPath = path.join(appDir, 'app.asar.unpacked', 'node_modules');
-  const nmPath2 = path.join(__dirname, 'node_modules');
-  return !fs.existsSync(nmPath) && !fs.existsSync(nmPath2) && !fs.existsSync(path.join(__dirname, 'node_modules', 'express'));
+  const resourcesDir = path.resolve(__dirname, '..');
+  // Check main app, toolService, dbservice
+  const dirs = [
+    path.join(__dirname, 'node_modules', 'express'),
+    path.join(resourcesDir, 'toolService', 'node_modules'),
+    path.join(resourcesDir, 'dbservice', 'node_modules')
+  ];
+  return dirs.some(d => !fs.existsSync(d));
 }
 
 function showInstallPage(win) {
@@ -168,32 +171,45 @@ function showInstallPage(win) {
   win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
 }
 
-function runInstall() {
+function _npmInstall(cwd, label) {
   return new Promise((resolve, reject) => {
     const execPath = config.getDefaultExecPath();
     const npmPath = path.join(path.dirname(execPath), process.platform === 'win32' ? 'npm.cmd' : 'npm');
-    const appDir = __dirname;
-    console.log(`[install] Running npm install in ${appDir} using ${npmPath}`);
+    console.log(`[install] npm install in ${cwd} (${label})`);
     const { spawn } = require('child_process');
     const env = { ...process.env };
     if (process.platform === 'win32' && !env.ComSpec) {
       env.ComSpec = `${process.env.SystemRoot || 'C:\\Windows'}\\system32\\cmd.exe`;
     }
     const child = spawn(npmPath, ['install', '--production', '--no-optional'], {
-      cwd: appDir,
+      cwd,
       env,
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
     let output = '';
-    child.stdout.on('data', d => { output += d; console.log(`[install] ${d.toString().trim()}`); });
-    child.stderr.on('data', d => { output += d; console.log(`[install:err] ${d.toString().trim()}`); });
+    child.stdout.on('data', d => { output += d; console.log(`[install:${label}] ${d.toString().trim()}`); });
+    child.stderr.on('data', d => { output += d; });
     child.on('close', code => {
       if (code === 0) resolve(output);
-      else reject(new Error(`npm install failed (code ${code}): ${output.slice(-500)}`));
+      else reject(new Error(`npm install (${label}) failed: code ${code}`));
     });
     child.on('error', reject);
   });
+}
+
+async function runInstall() {
+  const resourcesDir = path.resolve(__dirname, '..');
+  const dirs = [
+    { cwd: __dirname, label: 'app' },
+    { cwd: path.join(resourcesDir, 'toolService'), label: 'toolService' },
+    { cwd: path.join(resourcesDir, 'dbservice'), label: 'dbservice' }
+  ];
+  for (const { cwd, label } of dirs) {
+    if (fs.existsSync(path.join(cwd, 'package.json')) && !fs.existsSync(path.join(cwd, 'node_modules'))) {
+      await _npmInstall(cwd, label);
+    }
+  }
 }
 
 app.whenReady().then(async () => {
