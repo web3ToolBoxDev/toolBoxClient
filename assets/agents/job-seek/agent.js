@@ -26,6 +26,7 @@ const masterProfileClient = require('./lib/core/masterProfileClient');
 const tailorProfile = require('./lib/tools/tailorProfile');
 const { StateClient } = require('../shared/stateClient');
 const taskManager = require('./lib/workflow/taskManager');
+const taskArchiver = require('./lib/workflow/taskArchiver');
 
 // Register domain pack at startup (before any upsert can happen).
 // Retries on failure since dbservice may not be ready yet.
@@ -239,6 +240,9 @@ if (_recoveredTasks.length > 0) {
 
 // Periodic timeout check for waiting_human tasks (every 60s)
 setInterval(() => { taskManager.checkTimeouts(); }, 60_000);
+
+// Start archiver scheduled scan (hourly by default)
+taskArchiver.startScheduledScan();
 
 // Initialize multi-user store and migrate existing data
 (function initUserStore() {
