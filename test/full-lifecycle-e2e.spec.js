@@ -51,6 +51,7 @@ const E2E_SUB_PROVIDER = process.env.E2E_SUB_PROVIDER || '';
 const E2E_API_KEY = process.env.E2E_API_KEY || '';
 const E2E_TIMEOUT = parseInt(process.env.E2E_TIMEOUT || '300000'); // 5 min
 const E2E_SKIP_LOGIN = process.env.E2E_SKIP_LOGIN === '1';
+const E2E_ENV = process.env.E2E_ENV || 'env1';
 const POLL_INTERVAL = 5_000;
 
 const PLATFORM_TOOLS_PATH = path.join(
@@ -365,7 +366,7 @@ test.describe.serial('Full Lifecycle E2E -- Happy Path', () => {
         const envSelect = page.locator('[aria-label="session-bind-env"]');
         await expect(envSelect).toBeVisible({ timeout: 5_000 });
         try {
-            await envSelect.selectOption({ label: 'env1' });
+            await envSelect.selectOption({ label: E2E_ENV });
         } catch {
             try {
                 await envSelect.selectOption({ label: '\u73AF\u58831' }); // 环境1
@@ -719,6 +720,22 @@ test.describe.serial('Full Lifecycle E2E -- Happy Path', () => {
             console.log(`[e2e] Login flow error: ${err.message} (non-fatal)`);
         }
 
+        // Also open LinkedIn browser (LinkedIn doesn't require login for public search)
+        const linkedinPlatform = allPlatforms.find(p =>
+            (p.name || p.id || '').toLowerCase().includes('linkedin')
+        );
+        if (linkedinPlatform) {
+            const lpid = encodeURIComponent(linkedinPlatform.id || linkedinPlatform.name);
+            try {
+                const { status: liStatus, body: liBody } = await postJSON(
+                    `/api/platforms/${sid()}/${lpid}/login`, {}
+                );
+                console.log(`[e2e] LinkedIn login response: ${liStatus} -- browserId=${liBody.browserId || 'none'}`);
+            } catch (err) {
+                console.log(`[e2e] LinkedIn login error: ${err.message} (non-fatal)`);
+            }
+        }
+
         // Check at least 1 platform has browser
         const { body: updatedPlatList } = await fetchJSON(`/api/platforms/${sid()}`);
         const updatedPlatforms = updatedPlatList.platforms || updatedPlatList || [];
@@ -730,6 +747,67 @@ test.describe.serial('Full Lifecycle E2E -- Happy Path', () => {
 
         // GATE
         console.log(`[e2e] GATE loginReady: ${gatesPassed.loginReady}`);
+    });
+
+    // ── Phase 4.5: Build Search Tool ──
+
+    test('Phase 4.5: Build search tool for platforms', async () => {
+        test.setTimeout(180_000); // 3 min for AI build
+        test.skip(!gatesPassed.dashboardValid, 'GATE: Dashboard invalid -- skipping');
+
+        console.log('[e2e] Phase 4.5 -- Building search tools...');
+
+        const { body: platList } = await fetchJSON(`/api/platforms/${sid()}`);
+        const platforms = platList.platforms || platList || [];
+
+        for (const plat of platforms) {
+            const toolStatus = plat.tools?.search?.status;
+            if (toolStatus === 'ready') {
+                console.log(`[e2e] ${plat.name}: search tool already ready (v${plat.tools.search.version})`);
+                continue;
+            }
+            if (!plat._browserId) {
+                console.log(`[e2e] ${plat.name}: no browser open -- skipping build`);
+                continue;
+            }
+
+            const pid = encodeURIComponent(plat.id || plat.name);
+            console.log(`[e2e] Building search tool for ${plat.name}...`);
+
+            try {
+                // Fire-and-forget: build API is long-running, don't wait for response
+                fetch(`${DASHBOARD}/api/platforms/${sid()}/${pid}/tools/search/build`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                }).catch(() => {}); // ignore response timeout
+                console.log(`[e2e] Build triggered for ${plat.name}, polling for completion...`);
+
+                // Poll until build complete (up to 2 min)
+                await pollUntil(
+                    async () => {
+                        const { body: p } = await fetchJSON(`/api/platforms/${sid()}`);
+                        const updated = (p.platforms || p || []).find(x => (x.id || x.name) === (plat.id || plat.name));
+                        const st = updated?.tools?.search?.status;
+                        console.log(`[e2e]   ${plat.name} search tool status: ${st || 'unknown'}`);
+                        return updated?.tools?.search;
+                    },
+                    (tool) => tool && tool.status === 'ready',
+                    120_000, 5_000
+                );
+                console.log(`[e2e] ${plat.name}: search tool built successfully`);
+            } catch (err) {
+                console.log(`[e2e] ${plat.name} build error/timeout: ${err.message}`);
+            }
+        }
+
+        // Verify at least one platform has search tool ready
+        const { body: finalPlats } = await fetchJSON(`/api/platforms/${sid()}`);
+        const readyPlatforms = (finalPlats.platforms || finalPlats || []).filter(p => p.tools?.search?.status === 'ready');
+        console.log(`[e2e] Platforms with search tool ready: ${readyPlatforms.map(p => p.name).join(', ') || 'NONE'}`);
+        expect(readyPlatforms.length).toBeGreaterThan(0);
+
+        gatesPassed.toolsReady = true;
     });
 
     // ── Phase 5: Start Workflow ──
@@ -752,8 +830,24 @@ test.describe.serial('Full Lifecycle E2E -- Happy Path', () => {
         console.log(`[e2e] Workflow config: ${cfgResp.status}`);
         expect(cfgResp.status).toBe(200);
 
+        // Fetch direction + profile from dashboard API to pass as context
+        // (avoids reliance on state.selectedAnswers which may not be synced for new sessions)
+        const dashData = await fetchJSON(`/api/dashboard/${sid()}`);
+        const ctx = {};
+        if (dashData.body?.direction) {
+            ctx.context = {
+                direction: {
+                    q_job_title: dashData.body.direction.jobTitle || '',
+                    q_location: dashData.body.direction.location || '',
+                    q_work_mode: dashData.body.direction.workMode || '',
+                    q_salary: (dashData.body.direction.salary || '').replace(/K$/i, '')
+                },
+                profile: dashData.body.profile || {}
+            };
+        }
+
         // Start workflow
-        const { status, body } = await postJSON(`/api/workflow/${sid()}/start`, {});
+        const { status, body } = await postJSON(`/api/workflow/${sid()}/start`, ctx);
         console.log(`[e2e] Start response: ${status} -- ${JSON.stringify(body)}`);
 
         if (status === 400 && body.error?.includes('AI provider required')) {

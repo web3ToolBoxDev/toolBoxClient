@@ -14,7 +14,7 @@ const fs = require('fs');
  * Each browser gets a unique ID for lifecycle management.
  */
 
-const _browsers = new Map(); // id → { browser, mode, createdAt, lastUsed }
+const _browsers = new Map(); // id → { browser, mode, createdAt, lastUsed, keepAlive }
 const _idleTimeoutMs = 5 * 60 * 1000; // 5 min idle cleanup
 let _cleanupInterval = null;
 
@@ -79,25 +79,26 @@ function ensureUserDataDir(savePath, envId) {
  * @param {boolean} [params.headless=false]
  * @returns {Promise<string>} browserId
  */
-async function launchWithFingerprint({ chromePath, savePath, env, headless = false }) {
+async function launchWithFingerprint({ chromePath, savePath, env, headless = false, walletExtensionPath, keepAlive = false }) {
     if (!chromePath) throw new Error('chromePath is required for fingerprint mode');
     if (!savePath) throw new Error('savePath is required for fingerprint mode');
     if (!env || !env.id) throw new Error('env with id is required');
 
     const puppeteer = _getPuppeteer();
     const userDataDir = ensureUserDataDir(savePath, env.id);
-    const args = buildChromeArgs(env);
+    const args = buildChromeArgs(env, { walletExtensionPath });
 
     const browser = await puppeteer.launch({
         headless: headless ? 'new' : false,
         executablePath: chromePath,
         userDataDir,
         args,
-        defaultViewport: null
+        defaultViewport: null,
+        ignoreDefaultArgs: ['--enable-automation']
     });
 
     const id = genId();
-    _browsers.set(id, { browser, mode: 'fingerprint', createdAt: Date.now(), lastUsed: Date.now() });
+    _browsers.set(id, { browser, mode: 'fingerprint', createdAt: Date.now(), lastUsed: Date.now(), keepAlive });
     _ensureCleanup();
     return id;
 }
@@ -161,11 +162,11 @@ async function launchHeadless({ chromePath } = {}) {
  * @returns {Promise<{ browserId: string, mode: string }>}
  */
 async function launch(params = {}) {
-    const { chromePath, savePath, env, headless = false } = params;
+    const { chromePath, savePath, env, headless = false, walletExtensionPath, keepAlive = false } = params;
 
     // Mode 1: fingerprint env
     if (env && env.id && chromePath && savePath) {
-        const id = await launchWithFingerprint({ chromePath, savePath, env, headless });
+        const id = await launchWithFingerprint({ chromePath, savePath, env, headless, walletExtensionPath, keepAlive });
         return { browserId: id, mode: 'fingerprint' };
     }
 
@@ -260,8 +261,34 @@ async function closeAll() {
  */
 function listBrowsers() {
     return Array.from(_browsers.entries()).map(([id, e]) => ({
-        id, mode: e.mode, createdAt: e.createdAt, lastUsed: e.lastUsed
+        id, mode: e.mode, createdAt: e.createdAt, lastUsed: e.lastUsed, keepAlive: !!e.keepAlive
     }));
+}
+
+/**
+ * Set keepAlive on an existing browser entry.
+ * @param {string} browserId
+ * @param {boolean} keepAlive
+ */
+function setKeepAlive(browserId, keepAlive) {
+    const entry = _browsers.get(browserId);
+    if (entry) entry.keepAlive = !!keepAlive;
+}
+
+/**
+ * Register a callback for when the browser disconnects.
+ * Automatically removes the browser from the pool on disconnect.
+ * @param {string} browserId
+ * @param {function} [callback] - optional callback (browserId) => void
+ */
+function onDisconnected(browserId, callback) {
+    const entry = _browsers.get(browserId);
+    if (!entry) return;
+    entry.browser.on('disconnected', () => {
+        console.log(`[browserPool] Browser ${browserId} disconnected`);
+        _browsers.delete(browserId);
+        if (callback) callback(browserId);
+    });
 }
 
 /**
@@ -304,6 +331,7 @@ function _ensureCleanup() {
     _cleanupInterval = setInterval(() => {
         const now = Date.now();
         for (const [id, entry] of _browsers) {
+            if (entry.keepAlive) continue; // skip keep-alive browsers
             if (now - entry.lastUsed > _idleTimeoutMs) {
                 console.log(`[browserPool] Closing idle browser ${id} (mode=${entry.mode})`);
                 entry.browser.close().catch(() => {});
@@ -329,6 +357,8 @@ module.exports = {
     closeAll,
     listBrowsers,
     size,
+    setKeepAlive,
+    onDisconnected,
     // Exposed for testing / reuse
     buildChromeArgs,
     ensureUserDataDir

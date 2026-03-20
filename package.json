@@ -1,7 +1,7 @@
 {
   "name": "web3toolbox",
   "author": "Aming",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "private": true,
   "main": "electron.js",
   "license": "MIT",
@@ -64,6 +64,9 @@
           "!savePath.json",
           "!chromePath.json",
           "!/scripts/extensionInfo.json",
+          "!scripts/node_modules/**",
+          "!scripts/package-lock.json",
+          "!scripts/yarn.lock",
           "!**/agents/*/data/*.json",
           "!**/agents/*/data/**",
           "!**/agents/*/workspace/**",

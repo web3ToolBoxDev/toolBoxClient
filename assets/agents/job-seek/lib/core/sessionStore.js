@@ -1,5 +1,15 @@
 'use strict';
 
+/**
+ * DEPRECATED: Being replaced by StateService. Use stateClient for new code.
+ *
+ * This module is kept for backward compatibility during the transition period.
+ * New state persistence should go through StateClient (assets/shared/stateClient.js)
+ * which syncs to the server-side StateService (server/services/stateService.js).
+ *
+ * Removal planned for a future release once all consumers are migrated.
+ */
+
 const fs = require('fs');
 const path = require('path');
 
@@ -40,7 +50,8 @@ const PERSIST_KEYS = [
     'activeUserId',
     'resumeHashes',
     'searchHistory',
-    'jobCards'
+    'jobCards',
+    'platformStatus'
 ];
 
 /**
