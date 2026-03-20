@@ -1,0 +1,18 @@
+{
+  "login_expired.title": "Login Expired — {{platform}}",
+  "login_expired.body": "{{platform}} session expired during search. Re-login needed.",
+  "captcha.title": "CAPTCHA — {{source}}",
+  "captcha.body": "{{source}} triggered a CAPTCHA. Auto-solve failed. Please solve manually.",
+  "build_failed.title": "Build Failed — {{platform}}",
+  "build_failed.body": "{{platform}} search script failed {{attempts}} times. Manual intervention needed.",
+  "apply_confirm.title": "Apply Confirmation",
+  "apply_confirm.body": "{{jobCount}} jobs ready to apply. Confirm?",
+  "ai_unavailable.title": "AI Unavailable",
+  "ai_unavailable.body": "AI provider unavailable after {{attempts}} attempts.",
+  "browser_disconnected.title": "Browser Disconnected — {{platform}}",
+  "browser_disconnected.body": "{{platform}} browser disconnected. Task paused.",
+  "task_paused.title": "Task Paused",
+  "task_paused.body": "Task paused after service restart. Resume when ready.",
+  "connected.title": "Notification Service Connected",
+  "connected.body": "✅ Channel configured successfully."
+}

@@ -1,0 +1,14 @@
+{
+  "channels": [
+    {
+      "id": "ch_1774009124663_zoiv",
+      "type": "telegram",
+      "enabled": false,
+      "config": {
+        "botToken": "x",
+        "chatId": "1"
+      },
+      "configuredAt": "2026-03-20T12:18:44.663Z"
+    }
+  ]
+}

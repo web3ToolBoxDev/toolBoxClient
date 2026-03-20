@@ -1,0 +1,17 @@
+{
+  "name": "notify-service",
+  "version": "1.0.0",
+  "description": "Reusable notification microservice — Telegram, Feishu, with bidirectional callback support",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "start": "node index.js",
+    "test": "jest --no-coverage"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}

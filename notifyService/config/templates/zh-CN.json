@@ -1,0 +1,18 @@
+{
+  "login_expired.title": "登录过期 — {{platform}}",
+  "login_expired.body": "{{platform}} 登录已过期，需要重新登录。",
+  "captcha.title": "人机验证 — {{source}}",
+  "captcha.body": "{{source}} 触发了人机验证，自动解决失败。请手动完成。",
+  "build_failed.title": "脚本构建失败 — {{platform}}",
+  "build_failed.body": "{{platform}} 搜索脚本连续失败 {{attempts}} 次，需要人工介入。",
+  "apply_confirm.title": "投递确认",
+  "apply_confirm.body": "{{jobCount}} 个职位已准备好投递，确认？",
+  "ai_unavailable.title": "AI 服务不可用",
+  "ai_unavailable.body": "AI 服务连续 {{attempts}} 次不可用。",
+  "browser_disconnected.title": "浏览器断开 — {{platform}}",
+  "browser_disconnected.body": "{{platform}} 浏览器连接断开，任务已暂停。",
+  "task_paused.title": "任务已暂停",
+  "task_paused.body": "服务重启后任务已暂停，准备好后可恢复。",
+  "connected.title": "通知服务已连接",
+  "connected.body": "✅ 渠道配置成功。"
+}
