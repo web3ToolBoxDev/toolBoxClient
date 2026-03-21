@@ -1383,6 +1383,7 @@ async function healScript(sessionId, platformId, toolType, errorContext, options
 
 The following script for ${platform.name} (${platform.url}) failed with this error:
 ${errorContext.error}
+${errorContext.searchQuery || errorContext.searchLocation ? `\nUser search target: "${errorContext.searchQuery || ''}" in "${errorContext.searchLocation || ''}"\nIf the screenshot shows a different location than what the user intended, the script must explicitly set the location field.` : ''}
 ${fixRulesBlock}
 Current script:
 \`\`\`javascript
@@ -1445,6 +1446,7 @@ async function analyzeFailure(platformName, platformUrl, toolType, errorContext,
     const prompt = `You are a Puppeteer automation expert analyzing a script failure.
 
 Platform: ${platformName} (${platformUrl})
+${errorContext.searchQuery || errorContext.searchLocation ? `User search target: "${errorContext.searchQuery || ''}" in "${errorContext.searchLocation || ''}"` : ''}
 Error: ${errorContext.error}
 
 Failed script (first 800 chars):

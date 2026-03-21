@@ -272,7 +272,7 @@ async function _selfHealAndRetry(sessionId, platformTool, query, config, errorMs
         // Step 1: Analyze failure → generate fix rule
         const analysis = await getScriptBuilder().analyzeFailure(
             platformTool.name, platformTool.url, 'search',
-            { error: errorMsg, script: currentScript, screenshot, promptRules: '' },
+            { error: errorMsg, script: currentScript, screenshot, promptRules: '', searchQuery: query.query, searchLocation: query.location },
             { aiInvoke: config.aiInvoke }
         );
         if (analysis.rule) {
@@ -303,7 +303,7 @@ async function _selfHealAndRetry(sessionId, platformTool, query, config, errorMs
             // Step 2b: Heal the script using AI (incremental fix)
             const healResult = await getScriptBuilder().healScript(
                 sessionId, platformTool.id, 'search',
-                { error: errorMsg, screenshot, currentScript },
+                { error: errorMsg, screenshot, currentScript, searchQuery: query.query, searchLocation: query.location },
                 { aiInvoke: config.aiInvoke }
             );
             if (!healResult.success) {
