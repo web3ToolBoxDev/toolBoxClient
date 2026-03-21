@@ -7,6 +7,7 @@ import WebSocketManager from '../../utils/webSocket';
 import AITaskPanel from '../../components/taskOffcanvas/AITaskPanel';
 import { resolveTaskDisplayName } from '../../utils/taskI18n';
 import { PROVIDER_MODEL_MAP, getModelsForProvider, getSubProviders } from '../../config/providerModels';
+import usePathStore from '../../store/pathStore';
 import './index.scss';
 
 function AgentWorkspace() {
@@ -356,6 +357,18 @@ function AgentWorkspace() {
             wsRef.current.removeCloseListener(closeListener);
         };
     }, [i18n?.language, initialRuntimeContext, processIncomingMessages, sendAgent, t, taskName]);
+
+    // Re-fetch session list when savePath changes (e.g., user switches save directory in Chrome Manager)
+    const storeSavePath = usePathStore((s) => s.savePath);
+    const prevSavePathRef = useRef(storeSavePath);
+    useEffect(() => {
+        // Skip the initial render — only react to actual changes
+        if (prevSavePathRef.current === storeSavePath) return;
+        prevSavePathRef.current = storeSavePath;
+        if (!storeSavePath || !isTaskRunning) return;
+        setDataSavePath(storeSavePath);
+        sendAgent('agent_update_save_path', { savePath: storeSavePath });
+    }, [storeSavePath, isTaskRunning, sendAgent]);
 
     const activeSession = useMemo(
         () => sessions.find((item) => item.id === activeSessionId) || null,

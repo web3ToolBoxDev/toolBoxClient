@@ -36,6 +36,24 @@ const mockApi = {
     })
 };
 
+// Mock pathStore — must be before api mock since pathStore.js imports api.js
+jest.mock('../../store/pathStore', () => {
+    const { create } = require('zustand');
+    const store = create((set) => ({
+        savePath: '',
+        chromePath: '',
+        walletScriptDirectory: '',
+        setSavePath: (path) => set({ savePath: path }),
+        setChromePath: (path) => set({ chromePath: path }),
+        setWalletScriptDirectory: (dir) => set({ walletScriptDirectory: dir }),
+        fetchSavePath: jest.fn(),
+        fetchChromePath: jest.fn(),
+        fetchWalletScriptDirectory: jest.fn(),
+        fetchPaths: jest.fn(),
+    }));
+    return { __esModule: true, default: store };
+});
+
 jest.mock('../../utils/api', () => ({
     __esModule: true,
     default: {
@@ -1066,5 +1084,52 @@ describe('AgentWorkspace protocol regression', () => {
 
         expect(window.confirm).toHaveBeenCalled();
         expectSent((msg) => msg.type === 'agent_reset_memory');
+    });
+
+    it('sends agent_update_save_path when pathStore savePath changes', async () => {
+        const usePathStore = require('../../store/pathStore').default;
+
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+        await waitFor(() => expect(mockApi.execTask).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '\u6c42\u804cAI\u52a9\u624b',
+                data: {
+                    sessions: [{ id: 's1', name: 'Old Dir Session', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {}
+                }
+            });
+        });
+
+        mockWsManager.sendMessage.mockClear();
+
+        // Simulate savePath change in pathStore (user switched directory in Chrome Manager)
+        act(() => {
+            usePathStore.setState({ savePath: 'C:\\NewSaveDir' });
+        });
+
+        await waitFor(() => {
+            expectSent((msg) => (
+                msg.type === 'agent_update_save_path'
+                && msg.taskName === '\u6c42\u804cAI\u52a9\u624b'
+                && msg.payload?.savePath === 'C:\\NewSaveDir'
+            ));
+        });
     });
 });
