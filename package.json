@@ -1,7 +1,7 @@
 {
   "name": "web3toolbox",
   "author": "Aming",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "private": true,
   "main": "electron.js",
   "license": "MIT",
@@ -17,7 +17,9 @@
       {
         "from": "client/build",
         "to": "client/build",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       "node_modules/**/*",
       "!node_modules/electron/**",
