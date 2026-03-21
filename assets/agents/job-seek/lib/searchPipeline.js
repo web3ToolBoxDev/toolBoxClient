@@ -57,47 +57,80 @@ function _setBrowserKeepAlive(sessionId, platformIds, keepAlive) {
 }
 
 // ─── Cloudflare Detection ───
-const _CLOUDFLARE_SIGNATURES = [
-    'cloudflare', 'just a moment', 'checking your browser',
-    'cf-browser-verification', 'attention required',
-    'ray id', 'blocked by anti-bot'
-];
 
 /**
  * Check if an error message indicates a Cloudflare challenge/block.
+ * Requires strong evidence — a single generic phrase like "just a moment" is not enough.
  * @param {string} errorMsg - Error message from script execution
  * @returns {boolean}
  */
 function _isCloudflareError(errorMsg) {
     if (!errorMsg) return false;
     const lower = errorMsg.toLowerCase();
-    return _CLOUDFLARE_SIGNATURES.some(sig => lower.includes(sig));
+
+    // Strong identifiers — any one of these is sufficient
+    const strongSignals = [
+        'cf-browser-verification', 'ray id', 'blocked by anti-bot',
+        'challenges.cloudflare.com', 'cf-challenge-running', 'cf_chl_opt'
+    ];
+    if (strongSignals.some(sig => lower.includes(sig))) return true;
+
+    // Combination required: "cloudflare" + a challenge phrase
+    const hasCloudflare = lower.includes('cloudflare');
+    const challengePhrases = [
+        'just a moment', 'checking your browser', 'attention required',
+        'verify you are human', 'challenge'
+    ];
+    if (hasCloudflare && challengePhrases.some(p => lower.includes(p))) return true;
+
+    return false;
 }
 
 /**
  * Check if page content (HTML/text) matches known Cloudflare challenge patterns.
- * Use this to detect Cloudflare blocks from raw page content returned by search scripts.
+ * Requires at least 2 strong markers, or 1 strong marker + CF title/weak signal,
+ * to avoid false positives on normal pages that reference CDN resources.
  * @param {string} pageContent - Raw HTML or text content from a page
  * @returns {boolean}
  */
 function _isCloudflareChallenge(pageContent) {
     if (!pageContent || typeof pageContent !== 'string') return false;
     const lower = pageContent.toLowerCase();
-    // Check for Cloudflare-specific markers
-    const cfMarkers = [
+
+    // Strong markers — specific to Cloudflare challenge pages
+    const strongMarkers = [
         'cf-browser-verification',
         'cf-challenge-running',
         'cf_chl_opt',
-        'challenges.cloudflare.com',
+        'challenges.cloudflare.com'
+    ];
+    // Weak markers — can appear on normal pages using Cloudflare CDN
+    const weakMarkers = [
         'cdn-cgi/challenge-platform',
         'checking if the site connection is secure'
     ];
+
+    const strongCount = strongMarkers.filter(m => lower.includes(m)).length;
+
+    // 2+ strong markers → definite Cloudflare challenge
+    if (strongCount >= 2) return true;
+
+    // Title check for CF challenge titles
     const titleMarkers = ['just a moment', 'attention required'];
-    // Title check: look for <title>Just a moment...</title>
     const titleMatch = lower.match(/<title[^>]*>(.*?)<\/title>/);
-    if (titleMatch && titleMarkers.some(m => titleMatch[1].includes(m))) return true;
-    // Body marker check
-    return cfMarkers.some(m => lower.includes(m));
+    const hasCfTitle = titleMatch && titleMarkers.some(m => titleMatch[1].includes(m));
+
+    // 1 strong marker + CF title → Cloudflare challenge
+    if (strongCount >= 1 && hasCfTitle) return true;
+
+    // 1 strong marker + weak marker → Cloudflare challenge
+    const weakCount = weakMarkers.filter(m => lower.includes(m)).length;
+    if (strongCount >= 1 && weakCount >= 1) return true;
+
+    // CF title alone with a weak marker → Cloudflare challenge
+    if (hasCfTitle && weakCount >= 1) return true;
+
+    return false;
 }
 
 // Track Cloudflare-blocked platforms per pipeline run
@@ -1298,6 +1331,20 @@ async function _runPipeline(sessionId) {
                         }));
                         _log(`[${q.source}] Platform tool returned ${listings.length} results`);
 
+                        // ── Capture screenshot immediately after search execution ──
+                        let searchScreenshot = null;
+                        try {
+                            const toolClient = require('./core/toolServiceClient');
+                            const _ssPlatform = getPlatformStore().getPlatform(sessionId, platformTool.id);
+                            if (_ssPlatform?._browserId) {
+                                const ssResult = await toolClient.executeTool('page_screenshot', {
+                                    browserId: _ssPlatform._browserId, pageIndex: _ssPlatform._pageIndex || 0
+                                });
+                                searchScreenshot = ssResult?.result?.screenshot || ssResult?.screenshot || null;
+                                if (searchScreenshot) _log(`  📸 Search result screenshot captured`);
+                            }
+                        } catch (_) { /* screenshot optional */ }
+
                         // ── Low/zero result anomaly: attempt self-heal or mark for rebuild ──
                         const LOW_RESULT_THRESHOLD = 3;
                         if (listings.length < LOW_RESULT_THRESHOLD) {
@@ -1386,19 +1433,9 @@ async function _runPipeline(sessionId) {
                                         pipeline._selfHealAttempts[q.source] = (pipeline._selfHealAttempts[q.source] || 0) + 1;
                                         _log(`🔧 [${q.source}] Low-result self-heal attempt ${pipeline._selfHealAttempts[q.source]}/2...`);
 
-                                        // Capture screenshot so AI can see the actual page state
-                                        let screenshot = null;
-                                        try {
-                                            const toolClient = require('./core/toolServiceClient');
-                                            const ssResult = await toolClient.executeTool('page_screenshot', {
-                                                browserId: _healPlatform._browserId, pageIndex: _healPlatform._pageIndex || 0
-                                            });
-                                            screenshot = ssResult?.screenshot || ssResult?.result || null;
-                                        } catch (_) { /* screenshot is optional */ }
-
                                         const anomalyMsg = `Search returned only ${listings.length} result(s) — possible broken selector or page layout change`;
                                         const healedListings = await _selfHealAndRetry(
-                                            sessionId, platformTool, q, config, anomalyMsg, screenshot, _log
+                                            sessionId, platformTool, q, config, anomalyMsg, searchScreenshot, _log
                                         );
                                         if (healedListings && healedListings.length > listings.length) {
                                             _log(`✓ [${q.source}] Self-heal improved results: ${listings.length} → ${healedListings.length}`);
@@ -1536,7 +1573,7 @@ async function _runPipeline(sessionId) {
                                             const ssResult = await toolClient.executeTool('page_screenshot', {
                                                 browserId: platform._browserId, pageIndex: platform._pageIndex || 0
                                             });
-                                            screenshot = ssResult?.screenshot || ssResult?.result || null;
+                                            screenshot = ssResult?.result?.screenshot || ssResult?.screenshot || null;
                                         }
                                     } catch (_) { /* screenshot is optional */ }
 

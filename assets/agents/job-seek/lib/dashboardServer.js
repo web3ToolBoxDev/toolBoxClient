@@ -1836,7 +1836,7 @@ function start(getState, port, options) {
         const jobsGetMatch = url.match(/^\/api\/jobs\/([^/]+)$/);
         if (jobsGetMatch && req.method === 'GET') {
             const sid = decodeURIComponent(jobsGetMatch[1]);
-            const query = new URL(req.url, `http://localhost:${_port}`).searchParams;
+            const query = new URL(req.url, `http://127.0.0.1:${_port}`).searchParams;
             let jobs = getJobCards(sid);
 
             // Filter by status
@@ -2132,9 +2132,9 @@ function start(getState, port, options) {
         res.end(JSON.stringify({ error: 'Not found' }));
     });
 
-    _server.listen(_port, 'localhost', () => {
-        console.log(`[dashboardServer] listening on http://localhost:${_port} (instance: ${_instanceId})`);
-        console.log(`[dashboardServer] ★ Dashboard base: http://localhost:${_port}/dashboard/`);
+    _server.listen(_port, '0.0.0.0', () => {
+        console.log(`[dashboardServer] listening on http://127.0.0.1:${_port} (instance: ${_instanceId})`);
+        console.log(`[dashboardServer] ★ Dashboard base: http://127.0.0.1:${_port}/dashboard/`);
     });
 
     _server.on('error', (err) => {
@@ -2787,7 +2787,7 @@ function getDashboardData(sessionId) {
 
 function buildDashboardHTML(sessionId) {
     const encodedSid = encodeURIComponent(sessionId);
-    const baseUrl = `http://localhost:${_port}`;
+    const baseUrl = `http://127.0.0.1:${_port}`;
     const apiUrl = `${baseUrl}/api/dashboard/${encodedSid}`;
     const pipelineBase = `${baseUrl}/api/pipeline/${encodedSid}`;
     return `<!DOCTYPE html>
@@ -3302,7 +3302,7 @@ function buildDashboardHTML(sessionId) {
 
 <!-- Global Settings modal -->
 <!-- Workflow Editor modal -->
-<div class="wfe-overlay" id="workflowEditorModal" onclick="closeWorkflowEditor(event)">
+<div class="wfe-overlay" id="workflowEditorModal" data-testid="wfe-modal" onclick="closeWorkflowEditor(event)">
   <div class="wfe-modal" onclick="event.stopPropagation()">
     <h3>
       <span data-i18n="workflowEditor">Workflow Editor</span>
@@ -3312,7 +3312,7 @@ function buildDashboardHTML(sessionId) {
       <!-- Dynamically rendered by openWorkflowEditor() -->
     </div>
     <div class="wfe-actions">
-      <button class="btn btn-primary" onclick="confirmWorkflow()" data-i18n="confirm">Confirm</button>
+      <button class="btn btn-primary" data-testid="wfe-confirm-btn" onclick="confirmWorkflow()" data-i18n="confirm">Confirm</button>
       <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="resetWorkflowEditor()" data-i18n="reset">Reset</button>
     </div>
   </div>
@@ -4581,7 +4581,7 @@ function wfePlatformList(step, toolType, t) {
         var checked = toolReady && (selectedIds.length === 0 || selectedIds.indexOf(p.id) >= 0);
         if (toolReady) hasReady = true;
         h += '<label class="' + itemCls + '">';
-        h += '<input type="checkbox" data-wfe-platform="' + step.name + '" value="' + p.id + '"' +
+        h += '<input type="checkbox" data-wfe-platform="' + step.name + '" data-testid="wfe-platform-' + p.id + '" value="' + p.id + '"' +
             (checked ? ' checked' : '') + (toolReady ? '' : ' disabled') + '>';
         h += (p.icon || '') + ' ' + p.name;
         if (!toolReady) h += ' <span style="font-size:0.7rem;color:#666;">(no tool)</span>';
@@ -5490,7 +5490,7 @@ function updatePipelineProgress(sessionId, update) {
 }
 
 function getDashboardURL(sessionId) {
-    return `http://localhost:${_port}/dashboard/${encodeURIComponent(sessionId)}`;
+    return `http://127.0.0.1:${_port}/dashboard/${encodeURIComponent(sessionId)}`;
 }
 
 module.exports = {

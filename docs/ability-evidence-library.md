@@ -297,6 +297,46 @@ Capability signals:
 Resume-ready phrasing:
 - Modeled agent runtime events and communication contracts for snapshots, subtask updates, execution state, logs, completion, and error handling.
 
+### 18. Multi-Agent Workflow Governance and Gatekeeper Design
+
+Evidence:
+- Discovered role collapse failure in production: Coordinator accumulated 6+ rounds of debugging context, drifted from original user instruction ("verify all green before release"), and released with 6 unverified acceptance nodes
+- Analyzed root causes: no enforcement mechanism for phase transitions, cognitive fatigue from iterative debugging, implicit scope creep from "just one more fix"
+- Designed a Gatekeeper role with memory isolation: receives only acceptance graph + task log + user instruction, immune to sunk cost bias that affected Coordinator after long execution
+- Defined 5 mandatory GATE trigger points (G1-G5) in the workflow lifecycle, with Strict mode for release gates
+- Established iteration threshold (max 2 direct code changes by Coordinator before mandatory Dev agent delegation) to prevent role boundary erosion
+- Designed structured audit output format covering acceptance graph scan, user instruction alignment, role behavior audit, and process management audit
+
+Capability signals:
+- Multi-agent governance design
+- Role separation enforcement
+- Cognitive bias mitigation in AI agent systems
+- Workflow phase-gate architecture
+- Memory isolation as a design tool for objectivity
+- Post-incident analysis and systemic fix design
+
+Resume-ready phrasing:
+- Designed a Gatekeeper governance role for multi-agent workflows, using memory isolation to prevent cognitive drift during long-running tasks. Introduced mandatory phase gates, iteration thresholds, and structured audit protocols after identifying role collapse as the root cause of a premature release.
+
+### 19. Stateless Agent Lifecycle Design for Audit Integrity
+
+Evidence:
+- Identified that reusing a Gatekeeper agent instance across multiple GATE checks would accumulate context and defeat the purpose of memory isolation — the same cognitive drift problem it was designed to prevent
+- Designed an ephemeral lifecycle: each GATE check spawns a fresh agent with only acceptance graph + task log + user instruction, outputs PASS/FAIL, then immediately releases — no retained or resumed state
+- Explicitly prohibited SendMessage-based continuation, background execution (which allows Coordinator to skip waiting), and reusing a FAIL'd instance for re-audit after fixes
+- Defined FAIL-then-reaudit as a new spawn (not resume), ensuring the re-audit agent has zero knowledge of the previous failure's context and judges purely on current state
+- Documented lifecycle rules in both the Gatekeeper spec (why) and the Coordinator spec (how to dispatch), ensuring both sides of the contract are explicit
+
+Capability signals:
+- Stateless audit agent design
+- Ephemeral process lifecycle management
+- Separation of concerns between auditor and dispatcher
+- Contract-based multi-agent coordination
+- Preventing second-order bias in governance systems
+
+Resume-ready phrasing:
+- Designed a stateless, ephemeral lifecycle for audit agents in multi-agent workflows, ensuring each governance check runs with zero accumulated context. Prohibited instance reuse, background execution, and FAIL-instance resumption to maintain audit objectivity across long-running task chains.
+
 ### 18. Chromium Fingerprint Consistency and Anti-Bot Debugging
 
 Evidence:
@@ -690,6 +730,182 @@ Resume-ready phrasing:
 - **Capability**: Designed tree-structured E2E verification framework where test nodes have explicit parent dependencies, enabling coverage gap detection and preventing skipped steps. Enhanced with 4 dimensions: (1) blocking vs observation gate classification so parent failures either SKIP children or emit warnings; (2) per-node evidence requirements (screenshot, dom_state, api_response, ws_event, file_output, browser_verify, log_check) defining what proof is needed for PASS; (3) failure category tagging (environment, build, data_propagation, extraction, verification, ux_state_sync) for faster root-cause triage; (4) retry/re-entry paths with auto_retry flags and manual_step instructions for systematic recovery
 - **Evidence**: 15/15 E2E tests passing after tree-driven redesign; previously 6/7 with core search untested. 30 nodes classified across 16 blocking gates and 14 observation nodes, with 3 test tiers (smoke/critical_path/full_acceptance)
 - **Skills**: Test Architecture, Quality Engineering, Dependency Graph Design, CI/CD Pipeline Design, Failure Taxonomy Design, Evidence-Based Verification
+
+### 38. Ghost Process Root Cause Analysis Beyond Code
+
+Evidence:
+- Discovered that repeated "ENOENT fix -> rebuild -> test failure" cycles were all caused by a stale dev process from 24 hours prior still occupying port 30001, not by any code defect
+- Diagnosed the root cause by observing that killing the ghost process and restarting immediately resolved all failures, proving the bug was environmental rather than code-level
+- Recognized that multiple rounds of code-level "fixes" were wasted effort because the real problem existed outside the codebase entirely
+
+Capability signals:
+- System-level debugging beyond source code
+- Root cause analysis across environment and process layers
+- Ghost process and port conflict diagnosis
+- Wasted-effort pattern recognition
+
+Resume-ready phrasing:
+- Diagnosed a persistent build-test failure loop caused by a stale background process occupying the service port, ending multiple rounds of unnecessary code-level debugging by identifying the root cause as environmental rather than code-level.
+
+### 39. Data Storage Architecture and Service-Layer Migration
+
+Evidence:
+- Identified that `sessions.json` was being stored in the project installation directory, creating portability and upgrade-safety issues
+- Proposed relocating persistent data to the user-configured `savePath` to survive reinstalls and updates
+- Further pushed the design from direct file read/write to StateService-managed persistence, enforcing proper separation of concerns and enabling future storage backend changes without caller-side rewrites
+
+Capability signals:
+- Data architecture design
+- Separation of concerns enforcement
+- Upgrade and migration safety thinking
+- Service-layer abstraction over raw I/O
+
+Resume-ready phrasing:
+- Redesigned session data persistence from in-place file writes to a StateService-managed architecture with user-configurable storage paths, improving upgrade safety and enforcing separation of concerns.
+
+### 40. Port Conflict Self-Healing System Design
+
+Evidence:
+- Rejected a "pre-build port cleanup" script as a band-aid and required a runtime self-healing solution at the code level
+- Designed a full-chain dynamic port resolution: `server.js` detects port conflicts and selects an available port, `electron.js` reads the actual bound port, and the frontend receives the correct backend URL
+- Ensured the solution worked transparently without user intervention, covering both dev and production environments
+
+Capability signals:
+- Self-healing system design
+- Full-stack port resolution architecture
+- User experience prioritization over manual workarounds
+- Root-cause elimination over symptom patching
+
+Resume-ready phrasing:
+- Designed a self-healing port resolution system spanning server startup, Electron main process, and React frontend, automatically detecting and resolving port conflicts instead of relying on manual cleanup scripts.
+
+### 41. Multi-Agent Role Separation and Non-Blocking Coordination Refactor
+
+Evidence:
+- Diagnosed that the Coordinator agent was stalling because it combined requirement analysis, task dispatch, and code implementation into a single context window, causing context overflow
+- Proposed extracting PM as an independent role responsible for requirement analysis and acceptance criteria, leaving the Coordinator as a pure dispatcher
+- Designed non-blocking agent dispatch where sub-agents run in background with callback notifications instead of blocking the Coordinator's context with synchronous execution
+- Added a conversation-mode design where the Coordinator presents options to the user rather than making autonomous decisions, reducing error accumulation from wrong assumptions
+
+Capability signals:
+- Multi-agent architecture refactoring
+- Responsibility separation and context budget management
+- Non-blocking async coordination design
+- Human-in-the-loop interaction modeling
+- System bottleneck diagnosis
+
+Resume-ready phrasing:
+- Refactored a multi-agent coordination system by extracting PM as an independent role and converting synchronous agent dispatch to non-blocking callbacks, resolving context overflow that caused coordinator stalls.
+
+### 42. Build Quality Gate Automation
+
+Evidence:
+- After encountering repeated post-build failures from memory leaks, missing dependencies, and ghost processes, identified that manual pre-release checks were insufficient and error-prone
+- Drove the creation of automated pre-dist detection scripts that verify port availability, dependency integrity, and process cleanliness before allowing a build to proceed
+- Transformed a pattern of "build first, debug later" into "gate first, build only when clean"
+
+Capability signals:
+- Quality gate engineering
+- CI/CD pipeline thinking
+- Build process reliability
+- Shift-left quality assurance
+- Process automation over manual checklists
+
+Resume-ready phrasing:
+- Established automated pre-distribution quality gates that verify port availability, dependency integrity, and process cleanliness, converting repeated post-build debugging cycles into a fail-fast pre-build validation pipeline.
+
+### 43. Project-Level Acceptance Tree Governance and Traceability Design
+
+Evidence:
+- Detected a governance gap after asking whether a completed fix had been added back into the acceptance tree, revealing that only generic standards (`acceptance-standards.md`), one-off QA reports, and code-level pre-dist checks existed, but no continuously maintained project-level acceptance tree
+- Distinguished between universal QA rules and project-specific acceptance nodes, clarifying that the framework defined verification rules while the project lacked a persistent tree tracking concrete feature nodes and current status
+- Required future development to flow through the acceptance tree: PM documents must declare where new nodes are added, test must derive test cases and E2E coverage from those nodes, and QA must verify newly added leaf nodes are bug-free
+- Extended the current implementation path by adding concrete regression checks to `pre-dist.js` and `wf-qa.md`, while pushing for a durable tree structure to become the single source of truth for project acceptance
+
+Capability signals:
+- Requirements-to-testing traceability design
+- Project-level acceptance governance
+- QA process architecture
+- Single-source-of-truth thinking for verification
+- Structured development workflow enforcement
+
+Resume-ready phrasing:
+- Defined a project-level acceptance tree model that links PM requirements, test-case generation, E2E coverage, and QA signoff, turning scattered verification artifacts into a traceable acceptance workflow for ongoing development.
+
+### 44. Dependency-Driven Acceptance Topology and Minimal Verification Path Design
+
+Evidence:
+- Challenged a flat acceptance grouping model by identifying that top-level modules were not truly parallel in verification cost, because they contained hidden dependency layers such as `Core Infrastructure -> Data Management -> AI Agent / Browser -> UI`
+- Proposed rebuilding the acceptance tree as a dependency topology rather than a feature bucket list, so validation could move bottom-up and automatically skip higher layers when a lower dependency fails
+- Defined the idea of a "minimal verification path": when a change touches one node, verification should traverse only the affected dependency chain instead of running full regression
+- Applied the concept to a concrete change (`dbservice restart`) and showed how the system could derive the shortest affected validation route rather than retesting unrelated areas
+- Framed the redesign as an architectural optimization that reduces validation cost and makes PM-driven acceptance planning more precise
+
+Capability signals:
+- Dependency graph modeling for verification
+- Minimal-path regression design
+- Acceptance architecture optimization
+- Cost-aware validation strategy
+- System-structure reasoning beyond feature lists
+
+Resume-ready phrasing:
+- Redesigned acceptance planning around dependency topology and minimal verification paths, allowing regression scope to be derived from affected dependency chains instead of full feature-by-feature retesting.
+
+### 45. File-to-Acceptance-Node Indexing and Reverse Traceability Design
+
+Evidence:
+- Proposed enriching acceptance-tree nodes with explicit `files: []` mappings so code changes could be traced directly to affected verification nodes without maintaining a separate parallel "development tree"
+- Defined two-way traceability: `git diff` could automatically derive the impacted acceptance scope, while a failing acceptance node could point engineers back to the most likely source files
+- Suggested generating a reverse file-to-node index from the acceptance graph, turning path changes such as `server/services/taskService.js` into immediate validation targets and turning node failures such as `knowledge.db isolation` into targeted file inspection
+- Positioned the design as a way to accelerate both regression planning and bug localization, reducing the cost of broad manual investigation
+
+Capability signals:
+- Bidirectional traceability design
+- Change-impact analysis architecture
+- File-to-test mapping strategy
+- Faster bug localization through structured metadata
+- Verification graph operationalization
+
+Resume-ready phrasing:
+- Designed bidirectional file-to-acceptance-node traceability so code diffs could automatically derive validation scope and failing verification nodes could immediately map back to likely source files.
+
+### 46. Gatekeeper Role Design for Phase-Gated Workflow Validation
+
+Evidence:
+- Evaluated adding a dedicated Gatekeeper role that validates workflow progress before each phase transition, instead of relying on a long-lived Coordinator whose judgment drifts after accumulating too much debugging context
+- Defined the Gatekeeper's narrow responsibility as checking only current task state and the acceptance graph, explicitly avoiding inheritance of other agents' long-term memory so phase validation stays unbiased
+- Compared lifecycle strategies and concluded the Gatekeeper must be spawned as a fresh agent per validation session to preserve memory isolation, rejecting reuse patterns that would reintroduce coordinator-style context contamination
+- Formalized the role as a PASS/FAIL gate that inspects acceptance-graph state, unresolved child tasks, recent task logs, and instruction consistency before allowing the next workflow phase to proceed
+- Required lifecycle and invocation responsibilities to be documented separately in both the Gatekeeper spec and Coordinator spec, clarifying ownership of spawning, scope, and teardown
+
+Capability signals:
+- Role-based workflow validation design
+- Memory-isolation architecture for agents
+- Phase-gated orchestration and approval control
+- Context-contamination risk analysis
+- Lifecycle ownership modeling across agents
+
+Resume-ready phrasing:
+- Designed a dedicated Gatekeeper validation role for phase-gated workflows, using per-session agent spawning and memory isolation to keep acceptance checks unbiased before each orchestration step.
+
+### 47. E2E Timing Optimization and Layered Validation Strategy
+
+Evidence:
+- Analyzed a v1.4.4 acceptance cycle and found that roughly 35 minutes of E2E time were consumed across 7 reruns, while 6 of the 7 rounds were caused by test infrastructure or environment issues rather than actual product defects
+- Identified the core inefficiency that the workflow was running full E2E validation twice (`Dev -> Tester E2E -> merge -> QA E2E`), and even trivial configuration changes triggered complete end-to-end reruns
+- Framed the problem as a validation-timing issue: E2E was being used too early and too often, spending most of its time debugging the test harness instead of verifying product behavior
+- Pushed toward a layered validation strategy in which lower-cost checks catch infrastructure and configuration issues earlier, reserving full E2E runs for accumulated acceptance points and higher-confidence release checkpoints
+- Repositioned E2E as a late-stage product-behavior gate rather than the default debugging tool for every small iteration
+
+Capability signals:
+- Test timing and cost analysis
+- Layered validation strategy design
+- Shift-left verification thinking
+- E2E scope optimization
+- Distinguishing test-infrastructure failures from product defects
+
+Resume-ready phrasing:
+- Analyzed repeated E2E rerun cost and redesigned validation timing around a layered strategy, shifting infrastructure and configuration checks earlier so full end-to-end testing could focus on product behavior at higher-confidence checkpoints.
 
 ## Suggested Top 6 for Resume
 

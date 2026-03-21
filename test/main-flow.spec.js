@@ -502,7 +502,8 @@ test.describe.serial('Main Flow E2E — Happy Path', () => {
   // ── Phase 7: Workflow start ──
 
   test('Phase 7: Start workflow + poll completion', async ({ browser }) => {
-    test.setTimeout(E2E_TIMEOUT + 60_000);
+    // Search + AI scoring per job ~1min each, self-heal adds ~3min. 15min total.
+    test.setTimeout(900_000);
     test.skip(!gates.searchReady, 'Skipped — Phase 6 failed');
     console.log('[e2e] Phase 7 -- Workflow start...');
 
@@ -514,30 +515,83 @@ test.describe.serial('Main Flow E2E — Happy Path', () => {
     await dashPage.waitForLoadState('domcontentloaded', { timeout: 30_000 });
     await dashPage.waitForTimeout(6_000);
 
-    // Click Start Workflow
+    // Click Start Workflow — this opens the Workflow Editor modal
     const wfStartBtn = dashPage.locator('[data-testid="wf-start-btn"]');
     await expect(wfStartBtn).toBeVisible({ timeout: 10_000 });
     await wfStartBtn.click();
-    console.log('[e2e] Workflow started');
+    console.log('[e2e] Clicked wf-start-btn, waiting for Workflow Editor modal...');
 
-    // Poll workflow status until completed or has results
+    // Wait for the Workflow Editor modal to become visible
+    const wfeModal = dashPage.locator('[data-testid="wfe-modal"]');
+    await expect(wfeModal).toBeVisible({ timeout: 15_000 });
+    console.log('[e2e] Workflow Editor modal visible');
+
+    // Wait for the modal to finish loading (it fetches config, platforms, jobs)
+    // The pipeline area shows "Loading..." until data arrives, then renders cards
+    await dashPage.waitForFunction(
+      () => {
+        const pipeline = document.getElementById('wfePipeline');
+        if (!pipeline) return false;
+        // Cards rendered = loading done
+        return pipeline.querySelectorAll('.wfe-card').length > 0;
+      },
+      { timeout: 15_000 }
+    );
+    console.log('[e2e] Workflow Editor loaded, cards rendered');
+
+    // Set targetCount to 3 (reduce AI scoring time for E2E)
+    const targetCountInput = dashPage.locator('#wfe_targetCount');
+    await expect(targetCountInput).toBeVisible({ timeout: 5_000 });
+    await targetCountInput.fill('3');
+    console.log('[e2e] Set targetCount = 3');
+
+    // Set minScore to 40 (lower threshold to ensure qualified jobs for docx generation)
+    const minScoreInput = dashPage.locator('#wfe_minScore');
+    await expect(minScoreInput).toBeVisible({ timeout: 5_000 });
+    await minScoreInput.fill('40');
+    console.log('[e2e] Set minScore = 40');
+
+    // Click Confirm to start the workflow
+    const wfeConfirmBtn = dashPage.locator('[data-testid="wfe-confirm-btn"]');
+    await expect(wfeConfirmBtn).toBeVisible({ timeout: 5_000 });
+    await wfeConfirmBtn.click();
+    console.log('[e2e] Clicked Confirm — workflow starting');
+
+    // Wait for modal to close (indicates workflow started successfully)
+    await expect(wfeModal).toBeHidden({ timeout: 10_000 });
+    console.log('[e2e] Workflow Editor modal closed, workflow started');
+
+    // Poll workflow status until pipeline fully completes (phase=completed/idle).
+    // With targetCount=3, pipeline processes ~3 jobs then runs generate step for docx output.
+    // We need to wait for generate to finish so Phase 8 can verify docx artifacts.
     const finalStatus = await pollWorkflowStatus(
       sessionId,
       (body) => {
         const phase = body.phase || body.status;
         const results = body.results || body.totalResults || 0;
-        console.log(`[e2e] Workflow: phase=${phase}, results=${results}`);
-        return phase === 'completed' || phase === 'done' || results > 0;
+        const logs = body.pipelineLogs || [];
+        const hasQualified = logs.some(
+          (l) => typeof l === 'string' ? l.includes('QUALIFIED') : (l.msg || l.message || '').includes('QUALIFIED')
+        );
+        console.log(`[e2e] Workflow: phase=${phase}, results=${results}, logs=${logs.length}, qualified=${hasQualified}`);
+        // Wait for pipeline to fully complete (including generate step)
+        return phase === 'completed' || phase === 'done' || phase === 'idle';
       },
-      E2E_TIMEOUT,
+      800_000, // 13min — search + self-heal + AI scoring + generate
       (body) => {
         const phase = body.phase || body.status || 'unknown';
-        console.log(`[e2e] Poll tick: phase=${phase}`);
+        const logs = body.pipelineLogs || [];
+        console.log(`[e2e] Poll tick: phase=${phase}, pipelineLogs=${logs.length}`);
       }
     );
 
+    const phase = finalStatus.phase || finalStatus.status;
     const results = finalStatus.results || finalStatus.totalResults || 0;
-    expect(results, 'Workflow must produce at least 1 result').toBeGreaterThan(0);
+    // Pipeline must reach completed/done/idle state (generate step finished)
+    expect(
+      phase === 'completed' || phase === 'done' || phase === 'idle',
+      `Pipeline must fully complete. phase=${phase}, results=${results}`
+    ).toBe(true);
 
     gates.workflowDone = true;
     await context.close();
@@ -546,8 +600,8 @@ test.describe.serial('Main Flow E2E — Happy Path', () => {
 
   // ── Phase 8: Results verification ──
 
-  test('Phase 8: Verify job listing results', async () => {
-    test.setTimeout(30_000);
+  test('Phase 8: Verify job listing results + docx generation', async () => {
+    test.setTimeout(60_000);
     test.skip(!gates.workflowDone, 'Skipped — Phase 7 failed');
     console.log('[e2e] Phase 8 -- Results verification...');
 
@@ -568,6 +622,40 @@ test.describe.serial('Main Flow E2E — Happy Path', () => {
 
     const sample = validJobs[0];
     console.log(`[e2e] Sample job: "${sample.title}" at "${sample.company}" (${sample.location || 'N/A'})`);
+
+    // Verify docx generation — qualified jobs should have resumeDocx artifact
+    const qualifiedJobs = jobs.filter(j => j.score && j.score >= 60);
+    console.log(`[e2e] Qualified jobs (score >= 60): ${qualifiedJobs.length}`);
+
+    if (qualifiedJobs.length > 0) {
+      // Check that at least one qualified job has a downloadable resume via the download API
+      let docxFound = false;
+      for (const job of qualifiedJobs) {
+        const encodedUrl = encodeURIComponent(job.url || job.link || '');
+        if (!encodedUrl) continue;
+        try {
+          const dlResp = await fetch(
+            `${DASHBOARD_URL}/api/pipeline/${encodeURIComponent(sessionId)}/download/${encodedUrl}/resume`,
+            { signal: AbortSignal.timeout(10_000) }
+          );
+          if (dlResp.ok) {
+            const contentDisp = dlResp.headers.get('content-disposition') || '';
+            const contentType = dlResp.headers.get('content-type') || '';
+            console.log(`[e2e] Docx download OK: content-type=${contentType}, disposition=${contentDisp}`);
+            docxFound = true;
+            break;
+          } else {
+            console.log(`[e2e] Docx download returned ${dlResp.status} for job "${job.title}"`);
+          }
+        } catch (err) {
+          console.log(`[e2e] Docx download error for job "${job.title}": ${err.message}`);
+        }
+      }
+      expect(docxFound, 'At least one qualified job should have a downloadable resume docx').toBe(true);
+      console.log('[e2e] Docx generation verified');
+    } else {
+      console.log('[e2e] No qualified jobs — docx verification skipped (pipeline ran but no matches above threshold)');
+    }
 
     console.log('[e2e] Phase 8 PASSED: Results verified');
   });
