@@ -119,7 +119,7 @@ const Layout = ({ Child }) => {
             <Navbar.Collapse id="sidebar-menu">
               <Nav className="flex-md-column">
                 {menuItems.map((item, idx) => (
-                  <Nav.Link key={idx} href={item.link} className="nav-link-my" title={t(item.name)}>
+                  <Nav.Link key={idx} href={item.link} className="nav-link-my" title={t(item.name)} data-testid={`nav-${item.name}`}>
                     <span className="nav-icon" aria-hidden="true">{item.icon}</span>
                     {!isSidebarEffectivelyCollapsed ? <span className="nav-label">{t(item.name)}</span> : null}
                   </Nav.Link>

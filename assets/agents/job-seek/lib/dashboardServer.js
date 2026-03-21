@@ -1836,7 +1836,7 @@ function start(getState, port, options) {
         const jobsGetMatch = url.match(/^\/api\/jobs\/([^/]+)$/);
         if (jobsGetMatch && req.method === 'GET') {
             const sid = decodeURIComponent(jobsGetMatch[1]);
-            const query = new URL(req.url, `http://127.0.0.1:${_port}`).searchParams;
+            const query = new URL(req.url, `http://localhost:${_port}`).searchParams;
             let jobs = getJobCards(sid);
 
             // Filter by status
@@ -2097,13 +2097,44 @@ function start(getState, port, options) {
             return res.end(buildDashboardHTML(sessionId));
         }
 
+        // GET /api/debug/browsers — expose active browser IDs (dev/QA only)
+        if (url === '/api/debug/browsers' && req.method === 'GET') {
+            const envBrowsers = {};
+            try {
+                const ps = getPlatformService();
+                if (ps && ps._envBrowsers) {
+                    for (const [envId, browserId] of ps._envBrowsers) {
+                        envBrowsers[envId || '(no-env)'] = browserId;
+                    }
+                }
+            } catch (_) {}
+            const platformBrowsers = {};
+            try {
+                const pStore = getPlatformStore();
+                for (const [sid, platforms] of pStore._platforms) {
+                    for (const p of platforms) {
+                        if (p._browserId) {
+                            platformBrowsers[p.id] = {
+                                browserId: p._browserId,
+                                pageIndex: p._pageIndex,
+                                name: p.name,
+                                sessionId: sid
+                            };
+                        }
+                    }
+                }
+            } catch (_) {}
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ envBrowsers, platformBrowsers }));
+        }
+
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Not found' }));
     });
 
-    _server.listen(_port, '127.0.0.1', () => {
-        console.log(`[dashboardServer] listening on http://127.0.0.1:${_port} (instance: ${_instanceId})`);
-        console.log(`[dashboardServer] ★ Dashboard base: http://127.0.0.1:${_port}/dashboard/`);
+    _server.listen(_port, 'localhost', () => {
+        console.log(`[dashboardServer] listening on http://localhost:${_port} (instance: ${_instanceId})`);
+        console.log(`[dashboardServer] ★ Dashboard base: http://localhost:${_port}/dashboard/`);
     });
 
     _server.on('error', (err) => {
@@ -2756,7 +2787,7 @@ function getDashboardData(sessionId) {
 
 function buildDashboardHTML(sessionId) {
     const encodedSid = encodeURIComponent(sessionId);
-    const baseUrl = `http://127.0.0.1:${_port}`;
+    const baseUrl = `http://localhost:${_port}`;
     const apiUrl = `${baseUrl}/api/dashboard/${encodedSid}`;
     const pipelineBase = `${baseUrl}/api/pipeline/${encodedSid}`;
     return `<!DOCTYPE html>
@@ -3122,14 +3153,14 @@ function buildDashboardHTML(sessionId) {
 
 <!-- Control Bar -->
 <div class="controlBar" id="controlBar">
-  <button class="btn btn-success" id="wfBtnStart" onclick="wfStart()" data-i18n="startWorkflow">Start Workflow</button>
-  <button class="btn btn-danger" id="wfBtnStop" onclick="wfStop()" style="display:none;" data-i18n="stop">Stop</button>
+  <button class="btn btn-success" id="wfBtnStart" data-testid="wf-start-btn" onclick="wfStart()" data-i18n="startWorkflow">Start Workflow</button>
+  <button class="btn btn-danger" id="wfBtnStop" data-testid="wf-stop-btn" onclick="wfStop()" style="display:none;" data-i18n="stop">Stop</button>
   <span id="wfStatusLabel" style="font-size:0.85rem;color:#9da0c3;">Idle</span>
-  <button class="btn btn-sm" style="margin-left:auto;background:#3d3f5a;color:#dfe3ff;" onclick="openGlobalSettings()" data-i18n="settings">Settings</button>
-  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" id="btnWorkflowProgress" onclick="toggleProgressOffcanvas()" data-i18n="workflowProgress">Workflow Progress</button>
-  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openAlertSettings()" data-i18n="alerts">Alerts</button>
-  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" onclick="openAddWebsite()" data-i18n="addWebsite">+ Add Website</button>
-  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" id="langToggle" onclick="switchLang(_lang === 'en' ? 'zh-CN' : 'en'); this.textContent = _lang === 'en' ? '中文' : 'EN';">中文</button>
+  <button class="btn btn-sm" style="margin-left:auto;background:#3d3f5a;color:#dfe3ff;" data-testid="settings-btn" onclick="openGlobalSettings()" data-i18n="settings">Settings</button>
+  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" id="btnWorkflowProgress" data-testid="workflow-progress-btn" onclick="toggleProgressOffcanvas()" data-i18n="workflowProgress">Workflow Progress</button>
+  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" data-testid="alerts-btn" onclick="openAlertSettings()" data-i18n="alerts">Alerts</button>
+  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" data-testid="add-website-btn" onclick="openAddWebsite()" data-i18n="addWebsite">+ Add Website</button>
+  <button class="btn btn-sm" style="background:#3d3f5a;color:#dfe3ff;" id="langToggle" data-testid="lang-toggle" onclick="switchLang(_lang === 'en' ? 'zh-CN' : 'en'); this.textContent = _lang === 'en' ? '中文' : 'EN';">中文</button>
 </div>
 
 <div id="envBanner"></div>
@@ -3405,7 +3436,7 @@ function buildDashboardHTML(sessionId) {
 
 <!-- Workflow Progress Offcanvas -->
 <div class="offcanvas-backdrop" id="progressBackdrop" onclick="closeProgressOffcanvas()"></div>
-<div class="offcanvas" id="progressOffcanvas">
+<div class="offcanvas" id="progressOffcanvas" data-testid="workflow-progress-panel">
   <div class="offcanvas-header">
     <h3 data-i18n="workflowProgress">Workflow Progress</h3>
     <button class="offcanvas-close" onclick="closeProgressOffcanvas()">&times;</button>
@@ -4280,12 +4311,12 @@ function renderWfCell(cellType, info) {
     var label = cellType.charAt(0).toUpperCase() + cellType.slice(1);
     var vis = info.visual || 'idle';
     var icon = CELL_ICONS[vis] || '○';
-    var html = '<div class="wf-cell wf-cell--' + vis + '">';
+    var html = '<div class="wf-cell wf-cell--' + vis + '" data-testid="wf-cell-' + cellType + '">';
     html += '<div class="wf-cell__label">' + label + '</div>';
     html += '<div class="wf-cell__status">' + icon + ' ' + esc(info.tip.split('.')[0] || vis) + '</div>';
     html += '<div class="wf-cell__tip">' + esc(info.tip) + '</div>';
     if (info.action) {
-        html += '<button class="wf-cell__action" data-cell="' + cellType + '" data-action="' + info.action + '">' + (ACTION_LABELS[info.action] || info.action) + '</button>';
+        html += '<button class="wf-cell__action" data-cell="' + cellType + '" data-action="' + info.action + '" data-testid="wf-cell-action-' + cellType + '">' + (ACTION_LABELS[info.action] || info.action) + '</button>';
     }
     html += '</div>';
     return html;
@@ -4293,7 +4324,7 @@ function renderWfCell(cellType, info) {
 
 function renderWfPlatform(p) {
     var loginVis = (p.cells && p.cells.login) ? p.cells.login.visual : 'idle';
-    var html = '<div class="wf-platform" data-pid="' + esc(p.id) + '">';
+    var html = '<div class="wf-platform" data-pid="' + esc(p.id) + '" data-testid="platform-card-' + esc(p.id) + '">';
     html += '<div class="wf-platform__header">' + esc(p.icon) + ' ' + esc(p.name);
     html += '<button class="wf-platform__delete" onclick="deletePlatform(\\'' + esc(p.id) + '\\',\\'' + esc(p.name) + '\\')" title="Remove">&times;</button>';
     html += '</div>';
@@ -4306,15 +4337,15 @@ function renderWfPlatform(p) {
     } else if (loginVis === 'verifying') {
         // Browser opened, waiting for user to log in — Login locked, Confirm enabled
         html += '<button class="btn btn-sm wf-btn-loading" disabled><span class="wf-spinner"></span> ' + t('launching') + '</button>';
-        html += '<button class="btn btn-sm btn-confirm-active" data-confirm="'+esc(p.id)+'" onclick="confirmLogin(\\''+esc(p.id)+'\\')">✓ '+t('confirm')+'</button>';
+        html += '<button class="btn btn-sm btn-confirm-active" data-confirm="'+esc(p.id)+'" data-testid="platform-confirm-active-'+esc(p.id)+'" onclick="confirmLogin(\\''+esc(p.id)+'\\')">✓ '+t('confirm')+'</button>';
     } else if (loginVis === 'ready') {
         // Logged in — show Re-login option
-        html += '<button class="btn btn-sm" onclick="platformLogin(\\''+esc(p.id)+'\\')">'+t('relogin')+'</button>';
+        html += '<button class="btn btn-sm" data-testid="platform-relogin-'+esc(p.id)+'" onclick="platformLogin(\\''+esc(p.id)+'\\')">'+t('relogin')+'</button>';
         html += '<button class="btn btn-sm" disabled>'+t('confirm')+'</button>';
     } else {
         // idle / error / warning — normal Login + Confirm
-        html += '<button class="btn btn-sm" onclick="platformLogin(\\''+esc(p.id)+'\\')">'+t('login')+'</button>';
-        html += '<button class="btn btn-sm" data-confirm="'+esc(p.id)+'" onclick="confirmLogin(\\''+esc(p.id)+'\\')">'+t('confirm')+'</button>';
+        html += '<button class="btn btn-sm" data-testid="platform-login-'+esc(p.id)+'" onclick="platformLogin(\\''+esc(p.id)+'\\')">'+t('login')+'</button>';
+        html += '<button class="btn btn-sm" data-confirm="'+esc(p.id)+'" data-testid="platform-confirm-'+esc(p.id)+'" onclick="confirmLogin(\\''+esc(p.id)+'\\')">'+t('confirm')+'</button>';
     }
     html += '</div>';
     html += '<div class="wf-platform__cells">';
@@ -5459,7 +5490,7 @@ function updatePipelineProgress(sessionId, update) {
 }
 
 function getDashboardURL(sessionId) {
-    return `http://127.0.0.1:${_port}/dashboard/${encodeURIComponent(sessionId)}`;
+    return `http://localhost:${_port}/dashboard/${encodeURIComponent(sessionId)}`;
 }
 
 module.exports = {

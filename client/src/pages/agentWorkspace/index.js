@@ -647,19 +647,21 @@ function AgentWorkspace() {
                             placeholder={t('agentWorkspace.newSessionPlaceholder', 'New Session (Optional)')}
                             size="sm"
                             disabled={!isTaskRunning}
+                            data-testid="session-name-input"
                         />
-                        <Button size="sm" onClick={handleCreateSession} disabled={!isTaskRunning}>
+                        <Button size="sm" onClick={handleCreateSession} disabled={!isTaskRunning} data-testid="new-session-btn">
                             {t('agentWorkspace.newSession', '+ New')}
                         </Button>
                     </div>
                     <div className="agent-session-list">
                         {sessions.map((session) => (
-                            <div className={`agent-session-item ${activeSessionId === session.id ? 'active' : ''}`} key={session.id} data-session-id={session.id}>
+                            <div className={`agent-session-item ${activeSessionId === session.id ? 'active' : ''}`} key={session.id} data-session-id={session.id} data-testid="session-item">
                                 <button
                                     type="button"
                                     className="agent-session-select"
                                     onClick={() => handleSwitchSession(session.id)}
                                     disabled={!isTaskRunning}
+                                    data-testid="session-select-btn"
                                 >
                                     <div className="name">{session.name || 'Session'}</div>
                                     <small>{new Date(session.updatedAt || Date.now()).toLocaleString()}</small>
@@ -669,6 +671,7 @@ function AgentWorkspace() {
                                     variant="outline-danger"
                                     onClick={() => handleDeleteSession(session.id)}
                                     disabled={!isTaskRunning}
+                                    data-testid="session-delete-btn"
                                 >
                                     {t('agentWorkspace.delete', 'Del')}
                                 </Button>
@@ -689,6 +692,7 @@ function AgentWorkspace() {
                                 variant={runtimeExpanded ? 'outline-light' : 'primary'}
                                 onClick={() => setRuntimeExpanded((prev) => !prev)}
                                 aria-label="toggle-runtime-settings"
+                                data-testid="runtime-settings-toggle"
                             >
                                 {runtimeExpanded
                                     ? t('agentWorkspace.hideRuntimeSettings', 'Hide Settings')
@@ -704,6 +708,7 @@ function AgentWorkspace() {
                                         onChange={(e) => setBindMode(e.target.value)}
                                         aria-label="session-bind-mode"
                                         disabled={!isTaskRunning}
+                                        data-testid="session-bind-mode"
                                     >
                                         <option value="env">{t('agentWorkspace.bindEnv', 'Environment')}</option>
                                         <option value="wallet">{t('agentWorkspace.bindWallet', 'Wallet')}</option>
@@ -715,6 +720,7 @@ function AgentWorkspace() {
                                             onChange={(e) => setSelectedEnvId(e.target.value)}
                                             aria-label="session-bind-env"
                                             disabled={!isTaskRunning}
+                                            data-testid="session-bind-env"
                                         >
                                             <option value="">{t('agentWorkspace.selectEnv', 'Select Environment')}</option>
                                             {envList.map((env) => {
@@ -742,7 +748,7 @@ function AgentWorkspace() {
                                             ))}
                                         </Form.Select>
                                     )}
-                                    <Button size="sm" onClick={handleBindSessionContext} disabled={!isTaskRunning}>
+                                    <Button size="sm" onClick={handleBindSessionContext} disabled={!isTaskRunning} data-testid="session-bind-btn">
                                         {t('agentWorkspace.bindToSession', 'Bind To Current Session')}
                                     </Button>
                                 </div>
@@ -761,6 +767,7 @@ function AgentWorkspace() {
                                         }}
                                         aria-label="session-provider"
                                         disabled={!isTaskRunning}
+                                        data-testid="session-provider"
                                     >
                                         <option value="">{t('agentWorkspace.selectProvider', 'Select Provider')}</option>
                                         {providerOptions.map((opt) => (
@@ -807,6 +814,7 @@ function AgentWorkspace() {
                                         onChange={(e) => setSelectedModel(e.target.value)}
                                         aria-label="session-model"
                                         disabled={!isTaskRunning || !filteredModels.length || (PROVIDER_MODEL_MAP[selectedProvider]?.requiresApiKey && !apiKeyConfigured && !runtimeApiKey)}
+                                        data-testid="session-model"
                                     >
                                         {filteredModels.length ? filteredModels.map((model) => (
                                             <option key={model.value} value={model.value}>
@@ -821,6 +829,7 @@ function AgentWorkspace() {
                                         variant="outline-light"
                                         onClick={handleApplyModel}
                                         disabled={!isTaskRunning || !activeSessionId || !selectedModel || !selectedProvider}
+                                        data-testid="apply-model-btn"
                                     >
                                         {t('agentWorkspace.applyModel', 'Apply Model')}
                                     </Button>

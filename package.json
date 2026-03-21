@@ -1,7 +1,7 @@
 {
   "name": "web3toolbox",
   "author": "Aming",
-  "version": "1.4.2",
+  "version": "1.4.4",
   "private": true,
   "main": "electron.js",
   "license": "MIT",
@@ -14,14 +14,26 @@
       "output": "dist"
     },
     "files": [
-      "client/build/**/*",
+      {
+        "from": "client/build",
+        "to": "client/build",
+        "filter": ["**/*"]
+      },
+      "node_modules/**/*",
+      "!node_modules/electron/**",
+      "!node_modules/electron-builder/**",
+      "!node_modules/app-builder-bin/**",
+      "!node_modules/app-builder-lib/**",
+      "!node_modules/7zip-bin/**",
+      "!node_modules/@playwright/**",
+      "!node_modules/playwright/**",
+      "!node_modules/playwright-core/**",
       "client/public/**/*",
       "electron.js",
       "preload.js",
       "server/**/*",
       "resources/**/*",
       "package.json",
-      "package-lock.json",
       "config.js",
       "!assets/savePath.json",
       "!assets/chromePath.json",
@@ -157,7 +169,8 @@
   },
   "scripts": {
     "dev": "cross-env IS_BUILD=false electron .",
-    "dist": "electron-builder",
+    "pre-dist": "node scripts/pre-dist.js",
+    "dist": "npm run pre-dist && electron-builder",
     "start": "react-app-rewired start",
     "build": "react-app-rewired build --port 30001",
     "test": "react-app-rewired test",

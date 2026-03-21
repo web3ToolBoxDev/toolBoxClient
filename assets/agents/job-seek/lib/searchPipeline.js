@@ -1325,18 +1325,89 @@ async function _runPipeline(sessionId) {
                                         stepName: 'search',
                                         meta: { selfHealBlocked: true, reason: 'browser_closed' }
                                     });
-                                } else if (!(pipeline._selfHealAttempts?.[q.source] >= 2)) {
-                                pipeline._selfHealAttempts = pipeline._selfHealAttempts || {};
-                                pipeline._selfHealAttempts[q.source] = (pipeline._selfHealAttempts[q.source] || 0) + 1;
-                                const anomalyMsg = `Search returned only ${listings.length} result(s) — possible Cloudflare block or broken selector`;
-                                const healedListings = await _selfHealAndRetry(
-                                    sessionId, platformTool, q, config, anomalyMsg, null, _log
-                                );
-                                if (healedListings && healedListings.length > listings.length) {
-                                    _log(`✓ [${q.source}] Self-heal improved results: ${listings.length} → ${healedListings.length}`);
-                                    listings = healedListings;
+                                } else {
+                                    // ── Pre-check: detect Cloudflare challenge on page before generic self-heal ──
+                                    let cfDetected = false;
+                                    try {
+                                        const toolClient = require('./core/toolServiceClient');
+                                        const pageContent = await toolClient.executeTool('page_evaluate', {
+                                            browserId: _healPlatform._browserId,
+                                            pageIndex: _healPlatform._pageIndex || 0,
+                                            expression: 'document.documentElement.outerHTML.slice(0, 5000)'
+                                        });
+                                        const htmlSnippet = pageContent?.result || pageContent || '';
+                                        if (_isCloudflareChallenge(htmlSnippet)) {
+                                            cfDetected = true;
+                                            _log(`🛡 [${q.source}] Cloudflare challenge detected (0 results) — attempting auto-resolve`);
+                                            let cfResolved = false;
+                                            try {
+                                                cfResolved = await _handleCloudflareChallenge(
+                                                    sessionId, platformTool, _healPlatform._browserId, _healPlatform._pageIndex || 0, _log
+                                                );
+                                            } catch (cfErr) {
+                                                _log(`✗ [${q.source}] Cloudflare auto-resolve failed: ${cfErr.message}`);
+                                            }
+                                            if (cfResolved) {
+                                                _log(`✓ [${q.source}] Cloudflare resolved — retrying search`);
+                                                const remaining = config.maxResults - (_sourceResultCount[q.source] || 0);
+                                                const retryResult = await getScriptBuilder().executeSearchScript(
+                                                    sessionId, platformTool.id,
+                                                    { keywords: q.query, location: q.location, pageOffset: q.pageOffset || 0 },
+                                                    { envId: q.envId || config.envId, maxResults: Math.min(remaining, config.maxResults) }
+                                                );
+                                                if (retryResult.success && retryResult.jobs) {
+                                                    const retryListings = retryResult.jobs.map(j => ({
+                                                        title: j.title || '', company: j.company || '',
+                                                        location: j.location || q.location || '',
+                                                        url: normalizeJobUrl(j.url || j.link || ''),
+                                                        salary: j.salary || '', jobType: j.jobType || '',
+                                                        source: q.source, fullText: j.fullText || ''
+                                                    }));
+                                                    if (retryListings.length > listings.length) {
+                                                        _log(`✓ [${q.source}] Retry after CF resolve: ${retryListings.length} results`);
+                                                        listings = retryListings;
+                                                    }
+                                                }
+                                            } else {
+                                                if (!_cloudflareBlocked.has(sessionId)) _cloudflareBlocked.set(sessionId, new Set());
+                                                _cloudflareBlocked.get(sessionId).add(q.source);
+                                                _failedSources.add(q.source);
+                                                dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                                                    cell: 'search', status: 'error',
+                                                    message: `Cloudflare challenge — please open ${platformTool.name} manually and solve the challenge`
+                                                });
+                                            }
+                                        }
+                                    } catch (_) { /* page_evaluate may fail — fall through to generic self-heal */ }
+
+                                    // ── Generic self-heal (non-Cloudflare) ──
+                                    if (!cfDetected && !(pipeline._selfHealAttempts?.[q.source] >= 2)) {
+                                        pipeline._selfHealAttempts = pipeline._selfHealAttempts || {};
+                                        pipeline._selfHealAttempts[q.source] = (pipeline._selfHealAttempts[q.source] || 0) + 1;
+                                        _log(`🔧 [${q.source}] Low-result self-heal attempt ${pipeline._selfHealAttempts[q.source]}/2...`);
+
+                                        // Capture screenshot so AI can see the actual page state
+                                        let screenshot = null;
+                                        try {
+                                            const toolClient = require('./core/toolServiceClient');
+                                            const ssResult = await toolClient.executeTool('page_screenshot', {
+                                                browserId: _healPlatform._browserId, pageIndex: _healPlatform._pageIndex || 0
+                                            });
+                                            screenshot = ssResult?.screenshot || ssResult?.result || null;
+                                        } catch (_) { /* screenshot is optional */ }
+
+                                        const anomalyMsg = `Search returned only ${listings.length} result(s) — possible broken selector or page layout change`;
+                                        const healedListings = await _selfHealAndRetry(
+                                            sessionId, platformTool, q, config, anomalyMsg, screenshot, _log
+                                        );
+                                        if (healedListings && healedListings.length > listings.length) {
+                                            _log(`✓ [${q.source}] Self-heal improved results: ${listings.length} → ${healedListings.length}`);
+                                            listings = healedListings;
+                                        }
+                                    } else if (!cfDetected) {
+                                        _log(`⚠ [${q.source}] Self-heal attempts exhausted (2/2) — skipping`);
+                                    }
                                 }
-                            }
                             }
 
                             // Still low after heal attempt — mark for manual rebuild
@@ -1453,33 +1524,35 @@ async function _runPipeline(sessionId) {
                                         meta: { selfHealBlocked: true, reason: 'browser_closed' }
                                     });
                                 } else if (!(pipeline._selfHealAttempts?.[q.source] >= 2)) {
-                                pipeline._selfHealAttempts = pipeline._selfHealAttempts || {};
-                                pipeline._selfHealAttempts[q.source] = (pipeline._selfHealAttempts[q.source] || 0) + 1;
-                                _log(`🔧 [${q.source}] Self-heal attempt ${pipeline._selfHealAttempts[q.source]}/2...`);
+                                    pipeline._selfHealAttempts = pipeline._selfHealAttempts || {};
+                                    pipeline._selfHealAttempts[q.source] = (pipeline._selfHealAttempts[q.source] || 0) + 1;
+                                    _log(`🔧 [${q.source}] Self-heal attempt ${pipeline._selfHealAttempts[q.source]}/2...`);
 
-                                let screenshot = null;
-                                try {
-                                    const platform = getPlatformStore().getPlatform(sessionId, platformTool.id);
-                                    if (platform?._browserId) {
-                                        const toolClient = require('./core/toolServiceClient');
-                                        const ssResult = await toolClient.executeTool('page_screenshot', {
-                                            browserId: platform._browserId, pageIndex: platform._pageIndex || 0
-                                        });
-                                        screenshot = ssResult?.screenshot || ssResult?.result || null;
+                                    let screenshot = null;
+                                    try {
+                                        const platform = getPlatformStore().getPlatform(sessionId, platformTool.id);
+                                        if (platform?._browserId) {
+                                            const toolClient = require('./core/toolServiceClient');
+                                            const ssResult = await toolClient.executeTool('page_screenshot', {
+                                                browserId: platform._browserId, pageIndex: platform._pageIndex || 0
+                                            });
+                                            screenshot = ssResult?.screenshot || ssResult?.result || null;
+                                        }
+                                    } catch (_) { /* screenshot is optional */ }
+
+                                    const healedListings = await _selfHealAndRetry(
+                                        sessionId, platformTool, q, config, errMsg, screenshot, _log
+                                    );
+                                    if (healedListings && healedListings.length > 0) {
+                                        healed = true;
+                                        listings = healedListings;
+                                        _log(`✓ [${q.source}] Self-heal succeeded: ${healedListings.length} results after repair`);
+                                    } else {
+                                        _log(`✗ [${q.source}] Self-heal failed — marking source as failed`);
                                     }
-                                } catch (_) { /* screenshot is optional */ }
-
-                                const healedListings = await _selfHealAndRetry(
-                                    sessionId, platformTool, q, config, errMsg, screenshot, _log
-                                );
-                                if (healedListings && healedListings.length > 0) {
-                                    healed = true;
-                                    listings = healedListings;
-                                    _log(`✓ [${q.source}] Self-heal succeeded: ${healedListings.length} results after repair`);
                                 } else {
-                                    _log(`✗ [${q.source}] Self-heal failed — marking source as failed`);
+                                    _log(`⚠ [${q.source}] Self-heal attempts exhausted (2/2) — skipping`);
                                 }
-                            }
                             } // end else (browser alive + AI available)
 
                             if (!healed) {

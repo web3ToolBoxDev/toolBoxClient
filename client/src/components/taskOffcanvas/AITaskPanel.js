@@ -476,6 +476,7 @@ function AITaskPanel({
                                                     variant="outline-light"
                                                     className="ai-option-btn"
                                                     disabled={interactionDisabled}
+                                                    data-testid="chat-upload-btn"
                                                     onClick={() => triggerInlineUpload(msg)}
                                                 >
                                                     {msg?.buttonLabel || (msg?.uploadMode === 'paste'
@@ -586,6 +587,7 @@ function AITaskPanel({
                             className={`ai-preset-trigger${presetHighlight ? ' ai-preset-trigger--highlight' : ''}`}
                             disabled={interactionDisabled || !promptOptionCount}
                             onClick={() => { setPresetHighlight(false); setShowPresetModal(true); }}
+                            data-testid="preset-trigger-btn"
                         >
                             {`${t('taskLog.ai.chooseOption', 'Choose an option')} (${promptOptionCount})`}
                         </Button>
@@ -596,6 +598,7 @@ function AITaskPanel({
                             onChange={(e) => setPendingMessage(e.target.value)}
                             placeholder={t('taskLog.ai.inputPlaceholder')}
                             disabled={interactionDisabled || isAiProcessing}
+                            data-testid="chat-input"
                             onPaste={async (e) => {
                                 const clipboard = e.clipboardData;
                                 if (!clipboard) return;
@@ -634,12 +637,14 @@ function AITaskPanel({
                             onClick={() => fileInputRef.current?.click()}
                             disabled={interactionDisabled}
                             title={t('taskLog.ai.attach')}
+                            data-testid="chat-attach-btn"
                         >
                             {t('taskLog.ai.attach')}
                         </Button>
                         <Button
                             onClick={handleSend}
                             disabled={interactionDisabled || isAiProcessing || (!pendingMessage.trim() && !pendingAttachments.length && !pendingRejectedAttachments.length)}
+                            data-testid="chat-send-btn"
                         >
                             {t('taskLog.ai.send')}
                         </Button>
@@ -648,6 +653,7 @@ function AITaskPanel({
                             type="file"
                             multiple
                             hidden
+                            data-testid="chat-file-input"
                             onChange={async (e) => {
                                 const list = Array.from(e.target.files || []);
                                 await sendFiles(list, 'upload');
@@ -726,6 +732,7 @@ function AITaskPanel({
                                                 type="button"
                                                 className={`ai-subtask-card ai-subtask-card--${status}${isActive ? ' ai-subtask-card--active' : ''}`}
                                                 disabled={status === 'pending'}
+                                                data-testid={`subtask-card-${task.key}`}
                                                 onClick={() => {
                                                     if (status === 'pending') return;
                                                     setExpandedSubtask(isActive ? null : task.key);
@@ -747,6 +754,7 @@ function AITaskPanel({
                                                             variant="outline-success"
                                                             className="ai-subtask-action"
                                                             disabled={interactionDisabled}
+                                                            data-testid={`subtask-finish-${task.key}`}
                                                             onClick={() => confirmSubtaskAction(task.key, 'finish')}
                                                         >
                                                             {t('taskLog.ai.subtaskFinish', 'Finish')}
@@ -757,6 +765,7 @@ function AITaskPanel({
                                                         variant={status === 'running' ? 'outline-warning' : 'outline-info'}
                                                         className="ai-subtask-action"
                                                         disabled={interactionDisabled}
+                                                        data-testid={status === 'running' ? `subtask-restart-${task.key}` : `subtask-start-${task.key}`}
                                                         onClick={() => confirmSubtaskAction(task.key, status === 'running' ? 'restart' : 'start')}
                                                     >
                                                         {status === 'running'
@@ -782,6 +791,7 @@ function AITaskPanel({
                                     type="button"
                                     className="ai-artifact-card ai-artifact-card--button"
                                     key={item.id}
+                                    data-testid={`artifact-card-${item.id}`}
                                     onClick={() => onOpenArtifact && onOpenArtifact(item)}
                                 >
                                     <div>{item.title || item.type}</div>
