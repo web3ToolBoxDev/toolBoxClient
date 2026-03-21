@@ -2,6 +2,7 @@
 
 const browserPool = require('./browserPool');
 const toolRegistry = require('./toolRegistry');
+const { fetchEnvById } = require('./envHelper');
 
 /**
  * Built-in browser tools — registered at toolService startup.
@@ -24,10 +25,17 @@ function registerAll() {
             // Params can override env vars (e.g. when called from platformService with full env data)
             const chromePath = params.chromePath || process.env.TOOL_SERVICE_CHROME_PATH || '';
             const savePath = params.savePath || process.env.TOOL_SERVICE_SAVE_PATH || '';
+
+            // Auto-fetch env from envId if full env not provided
+            let env = params.env || undefined;
+            if (!env && params.envId) {
+                env = await fetchEnvById(params.envId);
+            }
+
             const { browserId, mode } = await browserPool.launch({
                 chromePath,
                 savePath,
-                env: params.env || undefined,
+                env,
                 headless: params.headless !== false
             });
             return { browserId, mode };

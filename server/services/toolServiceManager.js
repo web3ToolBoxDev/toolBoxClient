@@ -52,6 +52,21 @@ function startToolService() {
         } catch (_) {}
     }
 
+    // Fallback: read from %APPDATA%/web3toolbox/savePath.json (dev mode without APP_USER_DATA)
+    if (!chromePath || !savePath) {
+        try {
+            const appData = process.env.APPDATA || (process.platform === 'darwin'
+                ? path.join(require('os').homedir(), 'Library', 'Application Support')
+                : path.join(require('os').homedir(), '.config'));
+            const userDataJson = path.join(appData, 'web3toolbox', 'savePath.json');
+            if (fs.existsSync(userDataJson)) {
+                const data = JSON.parse(fs.readFileSync(userDataJson, 'utf-8'));
+                if (!chromePath) chromePath = data.chromePath || '';
+                if (!savePath) savePath = data.path || '';
+            }
+        } catch (_) {}
+    }
+
     const env = {
         ...process.env,
         TOOL_SERVICE_PORT: String(TOOL_SERVICE_PORT),
@@ -60,6 +75,7 @@ function startToolService() {
     };
 
     console.log(`[toolServiceManager] Spawning toolService: ${execPath} ${toolServicePath}`);
+    console.log(`[toolServiceManager] chromePath=${chromePath ? '(set)' : '(empty)'}, savePath=${savePath ? '(set)' : '(empty)'}`);
 
     toolProcess = spawn(execPath, [toolServicePath], {
         stdio: ['ignore', 'pipe', 'pipe'],

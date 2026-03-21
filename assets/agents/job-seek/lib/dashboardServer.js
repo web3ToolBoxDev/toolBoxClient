@@ -3302,8 +3302,8 @@ function buildDashboardHTML(sessionId) {
 
 <!-- Global Settings modal -->
 <!-- Workflow Editor modal -->
-<div class="wfe-overlay" id="workflowEditorModal" data-testid="wfe-modal" onclick="closeWorkflowEditor(event)">
-  <div class="wfe-modal" onclick="event.stopPropagation()">
+<div class="wfe-overlay" id="workflowEditorModal" onclick="closeWorkflowEditor(event)">
+  <div class="wfe-modal" data-testid="wfe-modal" onclick="event.stopPropagation()">
     <h3>
       <span data-i18n="workflowEditor">Workflow Editor</span>
       <button class="close-btn" onclick="closeWorkflowEditor()">&times;</button>
@@ -4581,7 +4581,7 @@ function wfePlatformList(step, toolType, t) {
         var checked = toolReady && (selectedIds.length === 0 || selectedIds.indexOf(p.id) >= 0);
         if (toolReady) hasReady = true;
         h += '<label class="' + itemCls + '">';
-        h += '<input type="checkbox" data-wfe-platform="' + step.name + '" data-testid="wfe-platform-' + p.id + '" value="' + p.id + '"' +
+        h += '<input type="checkbox" data-wfe-platform="' + step.name + '" value="' + p.id + '"' +
             (checked ? ' checked' : '') + (toolReady ? '' : ' disabled') + '>';
         h += (p.icon || '') + ' ' + p.name;
         if (!toolReady) h += ' <span style="font-size:0.7rem;color:#666;">(no tool)</span>';
