@@ -6,6 +6,7 @@ const proxyService = require('./services/proxyService');
 const fingerPrintService = require('./services/fingerPrintService');
 const router = express.Router();
 const config = require('../config').getInstance();
+const memoryService = require('./services/memoryService');
 
 // 定义路由
 // router.get('/openScript', async(req, res) => {
@@ -174,6 +175,14 @@ router.delete('/deleteTask', async(req, res) => {
 router.post('/setSavePath',async(req,res)=>{
   const path = req.body.path;
   const message = await config.setSavePath(path);
+  // Clear cached AI sessions so next access reads from new savePath
+  try { taskService.resetAiSessions(); } catch (e) {
+    console.error('[router] resetAiSessions after savePath change failed:', e.message);
+  }
+  // Restart dbservice so it picks up the new savePath
+  try { await memoryService.restartDbService(); } catch (e) {
+    console.error('[router] restartDbService after savePath change failed:', e.message);
+  }
   res.send(message);
 });
 // 重新加载保存路径下的 DB 数据（用于二次安装后的同步）
@@ -346,8 +355,6 @@ router.post('/resetSyncScriptDirectory', async (req, res) => {
   res.send(message);
 });
 
-
-const memoryService = require('./services/memoryService');
 
 router.get('/memory/health', memoryService.handleHealth);
 router.post('/memory/store', memoryService.handleStore);

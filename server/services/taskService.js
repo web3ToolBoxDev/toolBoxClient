@@ -208,6 +208,16 @@ class TaskService {
         return TaskService.instance;
     }
 
+    /**
+     * Clear cached aiSessions so next access re-reads from disk.
+     * Called when savePath changes.
+     */
+    resetAiSessions() {
+        console.log('[taskService] resetAiSessions: clearing cached sessions');
+        this.aiSessions = {};
+        this.savePath = require('../../config').getInstance().getSavePath().path;
+    }
+
     _getAiRuntimeTaskName(taskName, sessionId) {
         return `${taskName}__${sessionId}`;
     }
@@ -1299,14 +1309,60 @@ class TaskService {
         }
 
         if (!this.aiSessions[taskName]) {
-            this.aiSessions[taskName] = {
-                taskName,
-                activeSessionId: '',
-                sessions: {},
-                order: [],
-                createdAt: Date.now(),
-                updatedAt: Date.now()
-            };
+            // Try loading from disk (sessions.json in savePath)
+            let diskSessions = null;
+            try {
+                const savePath = this.savePath || require('../../config').getInstance().getSavePath().path;
+                if (savePath) {
+                    const sessFile = require('path').join(savePath, 'agents', taskName, 'data', 'sessions.json');
+                    if (require('fs').existsSync(sessFile)) {
+                        const raw = JSON.parse(require('fs').readFileSync(sessFile, 'utf8'));
+                        if (raw && Array.isArray(raw.sessions) && raw.sessions.length > 0) {
+                            diskSessions = raw;
+                            console.log(`[taskService] Loaded ${raw.sessions.length} sessions from disk: ${sessFile}`);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('[taskService] Failed to load sessions from disk:', e.message);
+            }
+
+            if (diskSessions) {
+                const sessionsMap = {};
+                const order = [];
+                for (const s of diskSessions.sessions) {
+                    const sid = s.id || s.sessionId;
+                    sessionsMap[sid] = {
+                        taskName,
+                        sessionId: sid,
+                        name: s.name || 'Session',
+                        createdAt: s.updatedAt || Date.now(),
+                        updatedAt: s.updatedAt || Date.now(),
+                        messages: [],
+                        subTasks: [],
+                        prompt: null,
+                        artifacts: [],
+                    };
+                    order.push(sid);
+                }
+                this.aiSessions[taskName] = {
+                    taskName,
+                    activeSessionId: diskSessions.activeSessionId || order[0] || '',
+                    sessions: sessionsMap,
+                    order,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now()
+                };
+            } else {
+                this.aiSessions[taskName] = {
+                    taskName,
+                    activeSessionId: '',
+                    sessions: {},
+                    order: [],
+                    createdAt: Date.now(),
+                    updatedAt: Date.now()
+                };
+            }
         }
 
         const workspace = this.aiSessions[taskName];
