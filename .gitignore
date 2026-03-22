@@ -11,7 +11,8 @@ client/coverage/
 .claude/
 *.db
 dbservice/node_modules/
-assets/agents/*/workspace/.git/
+assets/agents/*/workspace/
+test-results/
 assets/agents/*/data/
 tmp/
 docs/*
