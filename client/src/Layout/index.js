@@ -5,6 +5,7 @@ import TaskOffcanvas from '../components/taskOffcanvas';
 import { useTranslation } from 'react-i18next';
 import useFingerPrintStore from '../store/fingerPrintStore';
 import { eventEmitter } from '../utils/eventEmitter';
+import APIManager from '../utils/api';
 
 /** Routes where TaskOffcanvas should NOT auto-open (they have their own AI panel) */
 const SUPPRESS_OFFCANVAS_ROUTES = ['/agentWorkspace'];
@@ -45,6 +46,8 @@ const Layout = ({ Child }) => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('appLanguage', lang);
     }
+    // D3: sync language to stateService for dashboard
+    APIManager.getInstance().setStateLanguage(lang).catch(() => {});
     setShowLangOffcanvas(false);
   };
 

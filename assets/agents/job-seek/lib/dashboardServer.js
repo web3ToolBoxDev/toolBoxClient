@@ -3612,6 +3612,19 @@ var _i18n = {
     }
 };
 var _lang = (navigator.language || 'en').startsWith('zh') ? 'zh-CN' : 'en';
+// D3: fetch language from stateService on load
+(function() {
+    try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', 'http://localhost:30001/api/state/app/language', false);
+        xhr.timeout = 2000;
+        xhr.send();
+        if (xhr.status === 200) {
+            var resp = JSON.parse(xhr.responseText);
+            if (resp.language) _lang = resp.language;
+        }
+    } catch(e) { /* fallback to navigator.language */ }
+})();
 function t(key) { return (_i18n[_lang] && _i18n[_lang][key]) || (_i18n.en[key]) || key; }
 function switchLang(lang) {
     _lang = lang;

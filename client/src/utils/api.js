@@ -339,5 +339,22 @@ class APIManager {
         const res = await axios.get(`${this.baseUrl}/getProviderModels?${params.toString()}`);
         return res.data;
     }
+    // ── stateService HTTP API ──
+    async getStateSessions(agentId = 'jobSeekAgent') {
+        const res = await axios.get(`${this.baseUrl}/state/sessions/${agentId}`);
+        return res.data;
+    }
+    async setStateSavePath(savePath) {
+        const res = await axios.post(`${this.baseUrl}/state/app/set`, { path: 'savePath', value: savePath });
+        return res.data;
+    }
+    async getStateLanguage() {
+        const res = await axios.get(`${this.baseUrl}/state/app/language`);
+        return res.data;
+    }
+    async setStateLanguage(language) {
+        const res = await axios.post(`${this.baseUrl}/state/app/language`, { language });
+        return res.data;
+    }
 }
 export default APIManager;
