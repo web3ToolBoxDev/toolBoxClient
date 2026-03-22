@@ -394,13 +394,21 @@ function AgentWorkspace() {
         setDataSavePath(storeSavePath);
         sendAgent('agent_update_save_path', { savePath: storeSavePath });
 
-        // Also re-fetch envList and walletList since fingerprint DB changes with savePath
+        // BUG-004: Fetch sessions directly from new savePath (bypasses task.db dependency)
         (async () => {
             try {
-                const [walletsRes, envRes] = await Promise.all([
+                const [sessResult, walletsRes, envRes] = await Promise.all([
+                    Promise.resolve(apiRef.current?.getAgentSessions ? apiRef.current.getAgentSessions('job-seek') : { success: false }).catch(() => ({ success: false })),
                     Promise.resolve(apiRef.current?.getAllWallets ? apiRef.current.getAllWallets() : []).catch(() => []),
                     Promise.resolve(apiRef.current?.getFingerPrints ? apiRef.current.getFingerPrints() : { success: false, data: {} }).catch(() => ({ success: false, data: {} }))
                 ]);
+                // Update sessions from new savePath
+                if (sessResult?.success && Array.isArray(sessResult.sessions)) {
+                    setSessions(sessResult.sessions);
+                    if (sessResult.activeSessionId) {
+                        setActiveSessionId(sessResult.activeSessionId);
+                    }
+                }
                 setWalletList(Array.isArray(walletsRes) ? walletsRes : []);
                 const envsObj = (envRes && envRes.success && envRes.data && typeof envRes.data === 'object') ? envRes.data : {};
                 setEnvList(Object.values(envsObj));

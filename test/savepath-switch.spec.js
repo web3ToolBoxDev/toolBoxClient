@@ -89,11 +89,9 @@ test.describe.serial('SavePath Switch — BUG-004 regression', () => {
         await page.waitForTimeout(3000);
 
         // Check via API
-        const sessRes = await page.request.get(BASE + '/api/listAiSessions', {
-            params: { taskName: 'job-seek' }
-        });
+        const sessRes = await page.request.get(BASE + '/api/getAgentSessions/job-seek');
         const sessData = await sessRes.json();
-        const sessions = sessData.sessions || sessData.data?.sessions || [];
+        const sessions = sessData.sessions || [];
         const names = sessions.map(s => s.name);
         console.log('[savepath-test] pathA sessions:', names);
 
@@ -112,11 +110,9 @@ test.describe.serial('SavePath Switch — BUG-004 regression', () => {
         expect(switchRes.ok()).toBeTruthy();
         await page.waitForTimeout(3000);
 
-        const sessRes = await page.request.get(BASE + '/api/listAiSessions', {
-            params: { taskName: 'job-seek' }
-        });
+        const sessRes = await page.request.get(BASE + '/api/getAgentSessions/job-seek');
         const sessData = await sessRes.json();
-        const sessions = sessData.sessions || sessData.data?.sessions || [];
+        const sessions = sessData.sessions || [];
         const names = sessions.map(s => s.name);
         console.log('[savepath-test] pathB sessions:', names);
 
@@ -135,11 +131,9 @@ test.describe.serial('SavePath Switch — BUG-004 regression', () => {
         expect(switchRes.ok()).toBeTruthy();
         await page.waitForTimeout(3000);
 
-        const sessRes = await page.request.get(BASE + '/api/listAiSessions', {
-            params: { taskName: 'job-seek' }
-        });
+        const sessRes = await page.request.get(BASE + '/api/getAgentSessions/job-seek');
         const sessData = await sessRes.json();
-        const sessions = sessData.sessions || sessData.data?.sessions || [];
+        const sessions = sessData.sessions || [];
         const names = sessions.map(s => s.name);
         console.log('[savepath-test] pathA restored sessions:', names);
 

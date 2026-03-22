@@ -121,6 +121,36 @@ router.post('/setConfigInfo', async(req, res) => {
   const message = await taskService.setConfigInfo(taskName,config);
   res.send(message);
 });
+// BUG-004: Independent session endpoint that reads sessions.json directly from savePath,
+// bypassing taskService (which depends on task.db that may not exist in new savePath)
+router.get('/getAgentSessions/:agentName', async (req, res) => {
+    const agentName = req.params.agentName;
+    const savePath = config.getSavePath().path;
+    if (!savePath) {
+        return res.send({ success: false, message: 'No savePath configured' });
+    }
+    const sessFile = require('path').join(savePath, 'agents', agentName, 'data', 'sessions.json');
+    try {
+        if (!require('fs').existsSync(sessFile)) {
+            return res.send({ success: true, sessions: [], activeSessionId: '' });
+        }
+        const raw = JSON.parse(require('fs').readFileSync(sessFile, 'utf8'));
+        const sessions = Array.isArray(raw.sessions) ? raw.sessions : [];
+        return res.send({
+            success: true,
+            activeSessionId: raw.activeSessionId || '',
+            sessions: sessions.map(s => ({
+                id: s.id,
+                name: s.name || 'Session',
+                updatedAt: s.updatedAt || Date.now()
+            }))
+        });
+    } catch (e) {
+        console.error('[router] getAgentSessions error:', e.message);
+        return res.send({ success: true, sessions: [], activeSessionId: '' });
+    }
+});
+
 router.get('/getAiSession', async (req, res) => {
   const taskName = req.query.taskName;
   const sessionId = req.query.sessionId;

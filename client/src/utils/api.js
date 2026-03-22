@@ -187,6 +187,10 @@ class APIManager {
         const res = await axios.post(`${this.baseUrl}/setConfigInfo`, { taskName: taskName,config:config });
         return res.data;
     }
+    async getAgentSessions(agentName = 'job-seek') {
+        const res = await axios.get(`${this.baseUrl}/getAgentSessions/${agentName}`);
+        return res.data;
+    }
     async listAiSessions(taskName) {
         const res = await axios.get(`${this.baseUrl}/listAiSessions`, { params: { taskName } });
         return res.data;
