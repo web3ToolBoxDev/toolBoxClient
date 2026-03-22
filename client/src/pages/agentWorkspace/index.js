@@ -121,6 +121,7 @@ function AgentWorkspace() {
 
     const applySnapshot = useCallback((data = {}) => {
         const nextSessions = Array.isArray(data.sessions) ? data.sessions : [];
+        console.log('[sessions-update]', JSON.stringify({ source: 'snapshot', count: nextSessions.length, names: nextSessions.map(s => s.name), ts: Date.now() }));
         setSessions(nextSessions);
         const nextActiveId = data.activeSessionId || nextSessions[0]?.id || '';
         setActiveSessionId(nextActiveId);
@@ -166,6 +167,7 @@ function AgentWorkspace() {
                 break;
             case 'agent_session_list': {
                 const nextSessions = Array.isArray(info?.data?.sessions) ? info.data.sessions : [];
+                console.log('[sessions-update]', JSON.stringify({ source: 'agent_session_list', count: nextSessions.length, names: nextSessions.map(s => s.name), ts: Date.now() }));
                 setSessions(nextSessions);
                 setActiveSessionId(info?.data?.activeSessionId || nextSessions[0]?.id || '');
                 // Clear savePath switching state — session list confirms agent has switched
