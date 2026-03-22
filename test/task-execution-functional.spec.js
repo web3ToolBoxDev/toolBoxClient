@@ -220,7 +220,7 @@ ws.on('error', (err) => {
         scriptPath: './e2e_script.js',
         taskKey: `e2eExecTask_${Date.now()}`,
         defaultTask: false,
-        taskType: 'execByWallet',
+        taskType: 'execByOrder',
         taskSchema: {},
       },
     ];

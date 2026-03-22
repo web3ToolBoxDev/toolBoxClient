@@ -32,8 +32,8 @@ router.get('/getAllWallets', async(req, res) => {
   res.send(message);
 });
 router.put('/updateWallet', async(req, res) => {
-  const params = req.body;
-  const message = await walletService.updateWallet(params);
+  const { id, ...wallet } = req.body;
+  const message = await walletService.updateWallet(id, wallet);
   console.log('message:', message);
   res.send(message);
 });

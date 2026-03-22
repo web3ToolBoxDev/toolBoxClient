@@ -14,6 +14,17 @@ function setupDialogHandler(page, dialogMessages) {
 }
 
 /**
+ * Helper: wait for a dialog to appear and return its message.
+ * Accepts the dialog automatically. Timeout defaults to 5000ms.
+ */
+async function waitForDialog(page, timeout = 5000) {
+  const dialog = await page.waitForEvent('dialog', { timeout });
+  const message = dialog.message();
+  await dialog.accept();
+  return message;
+}
+
+/**
  * Helper: wait for a specific API response pattern and return JSON body.
  */
 async function waitForApi(page, urlPattern, options = {}) {
@@ -104,15 +115,15 @@ test.describe.serial('ChromeManager', () => {
     const generateBtn = modal.locator('button', { hasText: '生成' });
     await generateBtn.click();
 
-    // Wait for the API response
-    await page.waitForResponse(
-      (r) => r.url().includes('/generateFingerPrints') && r.status() === 200,
-      { timeout: 15000 }
-    );
-
-    // Wait for alert (generateSuccess)
-    await page.waitForTimeout(500);
-    expect(dialogMessages.some((m) => m.includes('生成成功'))).toBeTruthy();
+    // Wait for both the API response and the success dialog concurrently
+    const [, alertMessage] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/generateFingerPrints') && r.status() === 200,
+        { timeout: 15000 }
+      ),
+      waitForDialog(page, 8000),
+    ]);
+    expect(alertMessage).toContain('生成成功');
 
     // Modal should close
     await expect(modal).toBeHidden({ timeout: 5000 });
@@ -369,14 +380,15 @@ test.describe.serial('WalletManager', () => {
     // Click "保存"
     await modal.locator('button', { hasText: '保存' }).click();
 
-    // Wait for API
-    await page.waitForResponse(
-      (r) => r.url().includes('/updateWalletName') && r.status() === 200,
-      { timeout: 10000 }
-    );
-
-    await page.waitForTimeout(500);
-    expect(dialogMessages.some((m) => m.includes('成功'))).toBeTruthy();
+    // Wait for both the API response and the success dialog concurrently
+    const [, walletEditAlert] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/updateWalletName') && r.status() === 200,
+        { timeout: 10000 }
+      ),
+      waitForDialog(page, 8000),
+    ]);
+    expect(walletEditAlert).toContain('成功');
 
     // Verify name in list
     await expect(page.locator('.wallet-row').first().locator('.wallet-name')).toContainText(TEST_WALLET_NAME);
@@ -635,18 +647,22 @@ test.describe.serial('TaskManage', () => {
 
     if (taskCount === 0) {
       // No tasks to delete; click delete button and expect alert
-      await page.locator('.control-panel button', { hasText: '删除任务' }).click();
-      await page.waitForTimeout(500);
+      const [alertMsg0] = await Promise.all([
+        waitForDialog(page, 5000),
+        page.locator('.control-panel button', { hasText: '删除任务' }).click(),
+      ]);
       // Should alert "请选择要删除的任务"
-      expect(dialogMessages.some((m) => m.includes('请选择'))).toBeTruthy();
+      expect(alertMsg0).toContain('请选择');
       return;
     }
 
     // Don't actually delete real tasks - just verify the flow by clicking
     // delete without selecting, which should show an alert
-    await page.locator('.control-panel button', { hasText: '删除任务' }).click();
-    await page.waitForTimeout(500);
-    expect(dialogMessages.some((m) => m.includes('请选择要删除的任务'))).toBeTruthy();
+    const [alertMsg] = await Promise.all([
+      waitForDialog(page, 5000),
+      page.locator('.control-panel button', { hasText: '删除任务' }).click(),
+    ]);
+    expect(alertMsg).toContain('请选择要删除的任务');
   });
 });
 
