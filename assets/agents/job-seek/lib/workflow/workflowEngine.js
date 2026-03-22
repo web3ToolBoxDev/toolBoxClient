@@ -12,6 +12,13 @@
 const store = require('./workflowStore');
 const { validateConfig, getSourceMeta } = require('./workflowConfig');
 
+// Lazy-require searchPipeline to avoid circular deps
+let _searchPipeline = null;
+function getSearchPipeline() {
+    if (!_searchPipeline) _searchPipeline = require('../searchPipeline');
+    return _searchPipeline;
+}
+
 // Step handlers — lazy-loaded to avoid circular deps
 let _stepHandlers = null;
 function getStepHandlers() {
@@ -109,7 +116,7 @@ function stop(sessionId) {
 async function resume(sessionId, config, context) {
     const run = store.getRun(sessionId);
     if (!run) return { success: false, error: 'No active run' };
-    if (!['paused', 'blocked'].includes(run.status)) {
+    if (!['paused', 'blocked', 'stuck'].includes(run.status)) {
         return { success: false, error: `Cannot resume: status is ${run.status}` };
     }
 
@@ -237,8 +244,12 @@ async function _executePipeline(sessionId, config, context) {
                 step: config.steps.find(s => s.name === step.name)
             });
 
-            store.updateStepStatus(sessionId, step.name, 'done', { result });
-            _broadcastStatus(sessionId);
+            // Don't overwrite 'stuck' status — the step was aborted by stuck detection
+            const postStep = store.getRun(sessionId)?.steps?.find(s => s.name === step.name);
+            if (postStep?.status !== 'stuck') {
+                store.updateStepStatus(sessionId, step.name, 'done', { result });
+                _broadcastStatus(sessionId);
+            }
         } catch (err) {
             store.updateStepStatus(sessionId, step.name, 'error', {
                 error: err.message
@@ -284,7 +295,24 @@ function checkStuckSteps(sessionId) {
                 error: `Step timed out after ${Math.round(elapsed / 1000)}s`
             });
             stuckSteps.push(step.name);
+
+            // Abort the running pipeline for this step so it stops processing
+            // For 'search' step: stop the search pipeline (graceful — preserves results found so far)
+            if (step.name === 'search') {
+                try {
+                    getSearchPipeline().stopPipeline(sessionId);
+                    console.log(`[workflowEngine] Stopped search pipeline for stuck step (${sessionId})`);
+                } catch (err) {
+                    console.warn(`[workflowEngine] Failed to stop search pipeline: ${err.message}`);
+                }
+            }
         }
+    }
+
+    // If any step is stuck, mark the run as stuck so _executePipeline breaks its loop
+    if (stuckSteps.length > 0) {
+        store.updateRunStatus(sessionId, 'stuck');
+        _broadcastStatus(sessionId);
     }
 
     return { stuckSteps };

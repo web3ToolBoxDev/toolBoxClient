@@ -147,9 +147,35 @@ async function handleClear(req, res) {
     }
 }
 
+/**
+ * Restart dbservice with updated savePath.
+ * Called when user changes savePath in settings.
+ */
+async function restartDbService() {
+    console.log('[memoryService] Restarting dbservice (savePath changed)...');
+    stopDbService();
+    // Wait for process to fully exit
+    await new Promise(resolve => setTimeout(resolve, 500));
+    startDbService();
+    // Wait for dbservice to be ready
+    for (let i = 0; i < 10; i++) {
+        try {
+            const result = await proxyToDbService('GET', '/health');
+            if (result.statusCode === 200) {
+                console.log('[memoryService] dbservice restarted successfully');
+                return { success: true };
+            }
+        } catch { /* not ready yet */ }
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    console.error('[memoryService] dbservice did not become healthy after restart');
+    return { success: false, error: 'dbservice did not become healthy after restart' };
+}
+
 module.exports = {
     startDbService,
     stopDbService,
+    restartDbService,
     handleHealth,
     handleStore,
     handleSearch,

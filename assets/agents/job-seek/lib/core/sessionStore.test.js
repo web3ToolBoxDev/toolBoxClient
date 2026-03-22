@@ -18,58 +18,47 @@ describe('sessionStore', () => {
         expect(load(tmpDir)).toBeNull();
     });
 
-    it('saves and loads state correctly', () => {
+    it('save() is a deprecated no-op (does not write to disk)', () => {
         const state = {
             sessions: [{ id: 's1', name: 'Test', updatedAt: 1000 }],
             activeSessionId: 's1',
-            conversations: { s1: [{ id: 'm1', role: 'user', content: 'hello' }] },
-            subtasks: { s1: [] },
-            artifacts: { s1: [{ id: 'a1', name: 'resume.pdf' }] },
-            prompts: { s1: {} },
-            stages: { s1: 0 },
-            selectedAnswers: { s1: {} },
-            runtimeContexts: { s1: { mode: 'ai', provider: 'claude-code', model: 'sonnet' } },
-            attachmentKinds: { s1: ['pdf'] },
-            currentModel: 'sonnet',
-            currentProvider: 'claude-code',
-            currentSubProvider: '',
-            language: 'zh-CN',
-            envs: [{ id: 'env1', name: 'Test Env' }],
-            wallets: [{ id: 'w1', name: 'Wallet1', bindEnvId: 'env1' }],
-            envsData: { env1: { user_agent: 'Mozilla/5.0', audio: '0.123' } },
-            chromePath: 'C:/chrome.exe',
-            savePath: 'C:/save',
-            walletExtensionPath: 'C:/metamask',
-            // Transient keys that should NOT be persisted:
-            runtimeLogs: { s1: ['log1'] },
-            executionStates: { s1: { paused: false, canceled: false } },
-            runtimeApiKey: 'sk-secret',
-            apiKeyConfiguredHint: true
         };
 
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
         save(tmpDir, state);
+        warnSpy.mockRestore();
+
+        // save() is now a no-op — file should NOT be created
+        expect(fs.existsSync(path.join(tmpDir, 'sessions.json'))).toBe(false);
+    });
+
+    it('save() prints deprecation warning', () => {
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        save(tmpDir, { sessions: [] });
+        expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining('DEPRECATED')
+        );
+        warnSpy.mockRestore();
+    });
+
+    it('load() reads existing sessions.json for migration', () => {
+        // Simulate a legacy sessions.json that already exists on disk
+        const legacyData = {
+            sessions: [{ id: 's1', name: 'Legacy', updatedAt: 1000 }],
+            activeSessionId: 's1',
+            conversations: { s1: [] },
+            _savedAt: Date.now()
+        };
+        fs.writeFileSync(
+            path.join(tmpDir, 'sessions.json'),
+            JSON.stringify(legacyData, null, 2),
+            'utf-8'
+        );
 
         const loaded = load(tmpDir);
         expect(loaded).not.toBeNull();
-        expect(loaded.sessions).toEqual(state.sessions);
+        expect(loaded.sessions).toEqual(legacyData.sessions);
         expect(loaded.activeSessionId).toBe('s1');
-        expect(loaded.conversations.s1).toHaveLength(1);
-        expect(loaded.artifacts.s1).toHaveLength(1);
-        expect(loaded.runtimeContexts.s1.provider).toBe('claude-code');
-        expect(loaded.currentModel).toBe('sonnet');
-        expect(loaded.language).toBe('zh-CN');
-        expect(loaded.envs).toEqual([{ id: 'env1', name: 'Test Env' }]);
-        expect(loaded.wallets).toHaveLength(1);
-        expect(loaded.envsData.env1.user_agent).toBe('Mozilla/5.0');
-        expect(loaded.chromePath).toBe('C:/chrome.exe');
-        expect(loaded.savePath).toBe('C:/save');
-        expect(loaded.walletExtensionPath).toBe('C:/metamask');
-        // Transient keys should NOT be saved
-        expect(loaded.runtimeLogs).toBeUndefined();
-        expect(loaded.executionStates).toBeUndefined();
-        expect(loaded.runtimeApiKey).toBeUndefined();
-        expect(loaded.apiKeyConfiguredHint).toBeUndefined();
-        expect(loaded._savedAt).toBeDefined();
     });
 
     it('returns null for corrupted JSON', () => {
@@ -80,12 +69,6 @@ describe('sessionStore', () => {
     it('returns null for invalid structure (no sessions array)', () => {
         fs.writeFileSync(path.join(tmpDir, 'sessions.json'), '{"foo":"bar"}', 'utf-8');
         expect(load(tmpDir)).toBeNull();
-    });
-
-    it('creates data directory if it does not exist', () => {
-        const nested = path.join(tmpDir, 'a', 'b', 'c');
-        save(nested, { sessions: [], activeSessionId: '' });
-        expect(fs.existsSync(path.join(nested, 'sessions.json'))).toBe(true);
     });
 
     it('PERSIST_KEYS does not include transient keys', () => {
@@ -99,61 +82,11 @@ describe('sessionStore', () => {
         expect(PERSIST_KEYS).toContain('jobCards');
     });
 
-    it('saves and loads jobCards correctly', () => {
-        const state = {
-            sessions: [{ id: 's1', name: 'Test', updatedAt: 1000 }],
-            activeSessionId: 's1',
-            jobCards: {
-                s1: {
-                    'https://example.com/job1': {
-                        url: 'https://example.com/job1',
-                        title: 'Full Stack Developer',
-                        company: 'Acme Corp',
-                        matchScore: 75,
-                        status: 'matched',
-                        updatedAt: '2026-03-17T00:00:00.000Z'
-                    },
-                    'https://example.com/job2': {
-                        url: 'https://example.com/job2',
-                        title: 'Senior Engineer',
-                        company: 'BigCo',
-                        matchScore: 82,
-                        status: 'tailored',
-                        updatedAt: '2026-03-17T01:00:00.000Z'
-                    }
-                }
-            }
-        };
-
-        save(tmpDir, state);
-        const loaded = load(tmpDir);
-
-        expect(loaded.jobCards).toBeDefined();
-        expect(loaded.jobCards.s1).toBeDefined();
-        expect(Object.keys(loaded.jobCards.s1)).toHaveLength(2);
-        expect(loaded.jobCards.s1['https://example.com/job1'].title).toBe('Full Stack Developer');
-        expect(loaded.jobCards.s1['https://example.com/job2'].matchScore).toBe(82);
+    it('PERSIST_KEYS includes searchHistory', () => {
+        expect(PERSIST_KEYS).toContain('searchHistory');
     });
 
-    it('saves and loads searchHistory correctly', () => {
-        const state = {
-            sessions: [{ id: 's1', name: 'Test', updatedAt: 1000 }],
-            activeSessionId: 's1',
-            searchHistory: {
-                s1: {
-                    seenUrls: ['https://j.com/1', 'https://j.com/2'],
-                    pageOffsets: { 'indeed|Dev|Toronto': 2 },
-                    totalRuns: 3
-                }
-            }
-        };
-
-        save(tmpDir, state);
-        const loaded = load(tmpDir);
-
-        expect(loaded.searchHistory).toBeDefined();
-        expect(loaded.searchHistory.s1.seenUrls).toHaveLength(2);
-        expect(loaded.searchHistory.s1.pageOffsets['indeed|Dev|Toronto']).toBe(2);
-        expect(loaded.searchHistory.s1.totalRuns).toBe(3);
+    it('PERSIST_KEYS includes platformStatus', () => {
+        expect(PERSIST_KEYS).toContain('platformStatus');
     });
 });

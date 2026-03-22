@@ -44,9 +44,14 @@ class Config {
             // 初始化时加载所有路径到内存
             this._loadAllPathsFromJson();
 
+            // Apply default savePath if not configured
+            if (!this._paths.path) {
+                this._applyDefaultSavePath();
+            }
+
             let cacheInfo = this.getSavePath();
-			// getSavePath().then(el=>{
 			if (!cacheInfo.path) {
+				console.error('[Config] savePath still empty after default — DB not initialized');
 				return;
 			}
 			this.#walletDb = new Datastore({
@@ -64,6 +69,20 @@ class Config {
 			});
         }
         return Config.instance;
+    }
+    // Set default savePath when none configured
+    _applyDefaultSavePath() {
+        const home = process.env.USERPROFILE || process.env.HOME || require('os').homedir();
+        const defaultPath = path.join(home, 'Documents', 'Web3ToolBox');
+        try {
+            fs.mkdirSync(defaultPath, { recursive: true });
+            fs.mkdirSync(path.join(defaultPath, 'db'), { recursive: true });
+            this._paths.path = defaultPath;
+            this._saveAllPathsToJson();
+            console.log(`[Config] Default savePath set: ${defaultPath}`);
+        } catch (e) {
+            console.error(`[Config] Failed to create default savePath: ${e.message}`);
+        }
     }
     // 内存优先加载所有路径
 	getConfigDir() {

@@ -55,26 +55,15 @@ const PERSIST_KEYS = [
 ];
 
 /**
- * Save persistent state to disk.
+ * @deprecated Persistence is now handled by StateService via StateClient.
+ * This function is a no-op kept for backward compatibility during the transition.
+ * Use StateClient._syncStateToClient() instead.
+ *
  * @param {string} dataDir - Absolute path to the data directory (e.g., <agent>/data/)
  * @param {object} state - The full agent state object
  */
 function save(dataDir, state) {
-    try {
-        fs.mkdirSync(dataDir, { recursive: true });
-        const snapshot = {};
-        for (const key of PERSIST_KEYS) {
-            if (state[key] !== undefined) {
-                snapshot[key] = state[key];
-            }
-        }
-        snapshot._savedAt = Date.now();
-        const filePath = path.join(dataDir, STORE_FILE);
-        fs.writeFileSync(filePath, JSON.stringify(snapshot, null, 2), 'utf-8');
-        console.log(`[sessionStore] Saved ${Object.keys(snapshot).length} keys to ${filePath}`);
-    } catch (err) {
-        console.error('[sessionStore] Save failed:', err.message);
-    }
+    console.warn('[sessionStore] DEPRECATED: save() is a no-op. Persistence is now handled by StateService.');
 }
 
 /**

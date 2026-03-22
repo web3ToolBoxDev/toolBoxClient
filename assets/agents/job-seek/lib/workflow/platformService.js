@@ -367,6 +367,7 @@ async function verifyLogin(sessionId, platformId) {
  * @param {string} platformId
  * @param {object} [options]
  * @param {string} [options.sessionEnvId] - session-level fallback envId
+ * @param {boolean} [options.relogin] - skip auto-verify, force manual login flow
  * @returns {Promise<object>} { method: 'fingerprint'|'url', ... }
  */
 async function launchLogin(sessionId, platformId, options = {}) {
@@ -515,27 +516,34 @@ async function launchLogin(sessionId, platformId, options = {}) {
     platform._pageIndex = pageIndex;
 
     // Auto-verify: cookies from previous session may still be valid
-    _syncToDashboard(sessionId, platformId, {
-        cell: 'login', status: 'verifying',
-        name: platform.name, icon: platform.icon, url: platform.url,
-        message: 'Checking login status...'
-    });
+    // Skip auto-verify on explicit re-login — user wants to log in again
+    if (!options.relogin) {
+        _syncToDashboard(sessionId, platformId, {
+            cell: 'login', status: 'verifying',
+            name: platform.name, icon: platform.icon, url: platform.url,
+            message: 'Checking login status...'
+        });
 
-    try {
-        const verifyResult = await verifyLogin(sessionId, platformId);
-        if (verifyResult.status === 'logged_in') {
-            // Cookie still valid — auto-verified, no manual action needed
-            console.log(`[platformService] Auto-verified login on ${platform.name}: ${verifyResult.message}`);
-            return {
-                success: true,
-                method: 'fingerprint',
-                autoVerified: true,
-                envId, browserId, pageIndex, loginUrl,
-                message: verifyResult.message
-            };
+        try {
+            const verifyResult = await verifyLogin(sessionId, platformId);
+            if (verifyResult.status === 'logged_in') {
+                // Cookie still valid — auto-verified, no manual action needed
+                console.log(`[platformService] Auto-verified login on ${platform.name}: ${verifyResult.message}`);
+                return {
+                    success: true,
+                    method: 'fingerprint',
+                    autoVerified: true,
+                    envId, browserId, pageIndex, loginUrl,
+                    message: verifyResult.message
+                };
+            }
+        } catch (verifyErr) {
+            console.log(`[platformService] Auto-verify failed for ${platform.name}: ${verifyErr.message}`);
         }
-    } catch (verifyErr) {
-        console.log(`[platformService] Auto-verify failed for ${platform.name}: ${verifyErr.message}`);
+    } else {
+        console.log(`[platformService] Re-login requested for ${platform.name}, skipping auto-verify`);
+        // Reset connection status so platform shows as needing login
+        platformStore.updateConnectionStatus(sessionId, platformId, 'disconnected');
     }
 
     // Not auto-verified — user needs to log in manually then click Confirm

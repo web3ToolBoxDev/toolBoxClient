@@ -141,7 +141,7 @@ describe('ChromeManager', () => {
 
     it('shows chrome path and save path labels', () => {
         render(<ChromeManager />);
-        expect(screen.getByText(/currentChromePath/)).toBeInTheDocument();
+        expect(screen.getByText(/browserInstall\.chromePath/)).toBeInTheDocument();
         expect(screen.getByText(/currentSavePath/)).toBeInTheDocument();
     });
 
@@ -193,14 +193,10 @@ describe('ChromeManager', () => {
     });
 
     // --- setChromePathHandler ---
-    it('setChromePathHandler sets chrome path', async () => {
-        render(<ChromeManager />);
-        const changeBtns = screen.getAllByText('change');
-        await act(async () => {
-            fireEvent.click(changeBtns[0]); // chrome path change button
-        });
-        expect(window.electronAPI.openFile).toHaveBeenCalled();
-        expect(mockApi.setChromePath).toHaveBeenCalledWith('/path/to/chrome');
+    // The chrome path change button has been removed; the install section no longer
+    // exposes a manual path selector. This test is skipped.
+    it.skip('setChromePathHandler sets chrome path', async () => {
+        // Chrome path is now managed by the install flow, not a direct path button.
     });
 
     // --- setSavePathHandler ---
@@ -208,7 +204,7 @@ describe('ChromeManager', () => {
         render(<ChromeManager />);
         const changeBtns = screen.getAllByText('change');
         await act(async () => {
-            fireEvent.click(changeBtns[1]); // save path change button
+            fireEvent.click(changeBtns[0]); // save path change button (only one "change" button)
         });
         expect(window.electronAPI.chooseDirectory).toHaveBeenCalled();
         expect(mockApi.setSavePath).toHaveBeenCalledWith('/data/dir');

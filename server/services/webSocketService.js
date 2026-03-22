@@ -25,8 +25,9 @@ class WebSocketService {
     }
 
     // Initialize websocket with frontend
-    async initialize(expressApp) {
+    async initialize(expressApp, serverPort) {
         this.app = expressApp;
+        this.serverPort = serverPort || 30001;
         this.createFrontWebSocket();
         this._wireStateService();
         if ((!this.wsFrontServers || this.wsFrontServers.length === 0) && process.env.NODE_ENV !== 'production') {
@@ -60,7 +61,7 @@ class WebSocketService {
             return false;
         }
         if (this.frontRouteRegistered) {
-            return 'ws://localhost:30001/ws';
+            return `ws://localhost:${this.serverPort}/ws`;
         }
         console.log('Creating frontend WebSocket');
         this.app.ws('/ws', (ws, req) => {
@@ -174,7 +175,7 @@ class WebSocketService {
             });
         });
         this.frontRouteRegistered = true;
-        return 'ws://localhost:30001/ws'
+        return `ws://localhost:${this.serverPort}/ws`
     }
 
     enqueueFrontMessage(message, code = 0) {
@@ -266,7 +267,7 @@ class WebSocketService {
             this.wsTaskServer[taskName] = ws;
             this.flushTaskMessageQueue(taskName);
         });
-        return 'ws://localhost:30001' + taskUrl
+        return `ws://localhost:${this.serverPort}${taskUrl}`
     }
     closeTaskWebSocket(taskName) {
         const socket = this.getTaskSocket(taskName);

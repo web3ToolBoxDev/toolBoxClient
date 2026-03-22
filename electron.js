@@ -95,6 +95,10 @@ function createWindow() {
     : 'http://localhost:3000';
 
   mainWindow.loadURL(startURL);
+  // Inject backend port into renderer once DOM is ready
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.executeJavaScript(`window.__API_PORT__ = ${backendPort};`);
+  });
   // if (true){
   if (isBuild) {
     mainWindow.setMenuBarVisibility(false);
@@ -131,22 +135,49 @@ function createWindow() {
 }
 
 // 创建后台服务进程
-function createBackendProcess() {
-  backendProcess = utilityProcess.fork(path.join(__dirname, 
-    './server/server.js'));
-  // backendProcess.stdout.on('data', (data) => {
-  //   console.log(`Received chunk ${data}`)
-  // })
+let backendPort = 30001; // default, updated when server reports actual port
 
+function createBackendProcess() {
+  // Ensure full OS env (especially ComSpec/PATH) survives into the utility process
+  const serverEnv = { ...process.env };
+  if (process.platform === 'win32' && !serverEnv.ComSpec && !serverEnv.COMSPEC) {
+    serverEnv.ComSpec = `${process.env.SystemRoot || 'C:\\Windows'}\\system32\\cmd.exe`;
+  }
+  backendProcess = utilityProcess.fork(path.join(__dirname,
+    './server/server.js'), { env: serverEnv });
+
+  // Listen for actual port from server
+  backendProcess.on('message', (msg) => {
+    if (msg && msg.type === 'server-port') {
+      backendPort = msg.port;
+      console.log(`[Electron] Backend started on port ${backendPort}`);
+      // Inject port into renderer if window already exists
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.executeJavaScript(`window.__API_PORT__ = ${backendPort};`);
+      }
+      // Resolve the port promise
+      if (_portResolve) _portResolve(backendPort);
+    }
+  });
+}
+
+// Promise that resolves when backend port is known
+let _portResolve;
+function waitForBackendPort(timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    // If port already known (e.g. dev mode default)
+    if (backendPort !== 30001 || !isBuild) { resolve(backendPort); return; }
+    _portResolve = resolve;
+    setTimeout(() => reject(new Error('Backend port timeout')), timeoutMs);
+  });
 }
 
 // ─── First-launch dependency install ───
 function needsInstall() {
   if (!isBuild) return false;
   const resourcesDir = path.resolve(__dirname, '..');
-  // Check main app, toolService, dbservice
+  // Main app node_modules are in asar — only check child services
   const dirs = [
-    path.join(__dirname, 'node_modules', 'express'),
     path.join(resourcesDir, 'toolService', 'node_modules'),
     path.join(resourcesDir, 'dbservice', 'node_modules')
   ];
@@ -200,8 +231,8 @@ function _npmInstall(cwd, label) {
 
 async function runInstall() {
   const resourcesDir = path.resolve(__dirname, '..');
+  // Main app node_modules are in asar — only install child services
   const dirs = [
-    { cwd: __dirname, label: 'app' },
     { cwd: path.join(resourcesDir, 'toolService'), label: 'toolService' },
     { cwd: path.join(resourcesDir, 'dbservice'), label: 'dbservice' }
   ];
@@ -242,6 +273,11 @@ app.whenReady().then(async () => {
     event.returnValue = result === 0;
   })
 
+  // Expose backend port to renderer (sync IPC for immediate access)
+  ipcMain.on('get-backend-port', (event) => {
+    event.returnValue = backendPort;
+  })
+
   // First-launch: install dependencies if missing
   if (needsInstall()) {
     createWindow();
@@ -260,11 +296,20 @@ app.whenReady().then(async () => {
     }
   }
 
-  if (mainWindow === null) {
-    createWindow();
-  }
+  // Start backend first, wait for port, then create/update window
   if (backendProcess === null) {
     createBackendProcess();
+  }
+  if (isBuild) {
+    try {
+      const port = await waitForBackendPort(15000);
+      console.log(`[Electron] Backend ready on port ${port}`);
+    } catch (e) {
+      console.warn('[Electron] Backend port timeout, using default 30001');
+    }
+  }
+  if (mainWindow === null) {
+    createWindow();
   }
   app.on('activate', function () {
     if (mainWindow === null) {

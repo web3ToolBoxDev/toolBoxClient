@@ -39,6 +39,16 @@ jest.mock('react-bootstrap/Offcanvas', () => {
     return { __esModule: true, default: MockOffcanvas };
 });
 
+jest.mock('../utils/api', () => ({
+    __esModule: true,
+    default: {
+        getInstance: () => ({
+            getFingerPrintCount: jest.fn().mockResolvedValue({ success: true, message: 0 }),
+            setStateLanguage: jest.fn().mockResolvedValue({ success: true })
+        })
+    }
+}));
+
 import Layout from './index';
 import { eventEmitter } from '../utils/eventEmitter';
 

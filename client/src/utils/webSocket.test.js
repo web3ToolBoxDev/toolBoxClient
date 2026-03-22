@@ -315,6 +315,11 @@ describe('WebSocketManager', () => {
             global.WebSocket.OPEN = 1;
             global.WebSocket.CONNECTING = 0;
             global.WebSocket.CLOSED = 3;
+            // Mock _getPort for dynamic port support
+            const manager = WebSocketManager.getInstance();
+            if (manager.apiManager) {
+                manager.apiManager._getPort = jest.fn(() => 30001);
+            }
         });
 
         afterEach(() => {

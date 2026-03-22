@@ -343,18 +343,8 @@ describe('AgentWorkspace protocol regression', () => {
             ));
         });
 
-        fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
-        await waitFor(() => {
-            expectSent((msg) => (
-                msg.type === 'agent_execution_control'
-                && msg.taskName === '求职AI助手'
-                && msg.payload?.sessionId === 's1'
-                && msg.payload?.action === 'pause'
-                && msg.payload?.language === 'en'
-                && msg.payload?.apiKeyConfigured === true
-                && typeof msg.payload?.model === 'string'
-            ));
-        });
+        // Pause/Retry/Cancel buttons were removed from the UI.
+        // Execution control is now handled via subtask-level Start/Finish/Restart.
     });
 
     it('starts ai task with runtime context from route state', async () => {

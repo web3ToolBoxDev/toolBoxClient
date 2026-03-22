@@ -112,7 +112,7 @@ describe('AITaskPanel structured prompt regression', () => {
         fireEvent.click(screen.getByRole('button', { name: /Input/i }));
         const input = screen.getByPlaceholderText('e.g. 30');
         fireEvent.change(input, { target: { value: '30' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm All' }));
 
         expect(onSubmitAnswer).toHaveBeenCalledWith({
             questionId: 'q_salary',

@@ -76,7 +76,8 @@ class WebSocketManager {
         (window.__WS_CLIENT_TAG = `renderer-${Math.random().toString(16).slice(2)}`);
 
         console.log('[WS][CLIENT_TAG]', clientTag);
-        const wsUrl = `ws://localhost:30001/ws?clientTag=${encodeURIComponent(clientTag)}`;
+        const wsPort = this.apiManager._getPort();
+        const wsUrl = `ws://localhost:${wsPort}/ws?clientTag=${encodeURIComponent(clientTag)}`;
         console.log('WebSocket URL:', wsUrl);
         socket = new WebSocket(wsUrl);
       } catch (error) {
