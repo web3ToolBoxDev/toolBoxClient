@@ -2357,9 +2357,27 @@ function _getPlatformStatuses(sessionId) {
             }
         }
         if (platforms && platforms.length > 0) {
+            // BUG-001 fix: build URL→oldId index to detect duplicates with different IDs
+            const urlToOldId = new Map();
+            for (const [existingId, existingStatus] of map.entries()) {
+                if (existingStatus.url) {
+                    urlToOldId.set(existingStatus.url, existingId);
+                }
+            }
             let added = 0;
+            let migrated = 0;
             for (const plat of platforms) {
-                if (!map.has(plat.id)) {
+                if (map.has(plat.id)) continue;
+                // Check if same URL already exists under a different ID
+                const oldId = plat.url ? urlToOldId.get(plat.url) : null;
+                if (oldId && oldId !== plat.id) {
+                    // Migrate status data from old ID to new platform ID
+                    const oldStatus = map.get(oldId);
+                    map.set(plat.id, { ...oldStatus, name: plat.name || oldStatus.name });
+                    map.delete(oldId);
+                    urlToOldId.set(plat.url, plat.id);
+                    migrated++;
+                } else {
                     const searchStatus = (plat.tools && plat.tools.search && plat.tools.search.status === 'ready') ? 'ready' : 'idle';
                     map.set(plat.id, {
                         name: plat.name || plat.id,
@@ -2372,8 +2390,11 @@ function _getPlatformStatuses(sessionId) {
                     added++;
                 }
             }
-            if (added > 0) {
-                console.log(`[dashboard] Auto-synced ${added} missing platforms from store for session ${sessionId}`);
+            if (added > 0 || migrated > 0) {
+                console.log(`[dashboard] Auto-synced platforms for session ${sessionId}: ${added} added, ${migrated} migrated (URL dedup)`);
+            }
+            if (migrated > 0) {
+                _syncPlatformStatusToState(sessionId);
             }
         }
     } catch (e) {
