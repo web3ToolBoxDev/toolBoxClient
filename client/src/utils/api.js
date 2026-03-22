@@ -18,6 +18,19 @@ class APIManager {
         return APIManager.instance;
     }
 
+    /**
+     * Extract the port number from baseUrl (e.g. 'http://localhost:30001/api' -> 30001).
+     * Falls back to 30001 if parsing fails.
+     */
+    _getPort() {
+        try {
+            const url = new URL(this.baseUrl);
+            return parseInt(url.port, 10) || 30001;
+        } catch {
+            return 30001;
+        }
+    }
+
     _resolveCurrentLanguage() {
         if (typeof window === 'undefined') {
             return 'en';
