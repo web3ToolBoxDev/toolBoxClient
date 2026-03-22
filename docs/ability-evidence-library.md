@@ -935,3 +935,102 @@ Capability signals:
 
 Resume-ready phrasing:
 - One concise bullet that sounds credible on a resume
+
+## v1.4.6 Workflow Iteration Evidence
+
+### Gatekeeper 角色设计
+- **问题**: Coordinator 在长时间执行后认知偏移，跳过验收直接发布
+- **方案**: 独立审计角色，每次新 Agent 实例，只读验收图，不累积上下文
+- **关键洞察**: 记忆隔离是核心价值 — 审计者不应知道调试过程，只看结果
+- **生命周期分析**: 对比 3 种方案（新 Agent / resume / 主对话），选择新 Agent
+
+### 分层测试策略
+- **问题**: 每次任务都跑完整 E2E（5-15min），12+ 轮迭代浪费 ~35min
+- **方案**: T1-T4 分层，每任务 T1+T2（<3min），release 前才跑 T3 E2E
+- **效果**: 单任务验证从 5-15min 降到 1-3min
+
+### E2E 跳步 GATE 机制
+- **问题**: Phase 1-6 重复验证无新增价值
+- **方案**: 条件式跳步 — 验收图 verify:pass + 改动范围 + 时间窗口三重约束
+- **关键设计**: Gatekeeper 审批跳步，Coordinator 不能自行决定
+
+### Self-heal Location Context
+- **问题**: AI self-heal 截图但不知道用户目标位置，无法识别 "Sudbury ≠ Ontario"
+- **方案**: prompt 加入 `User search target: "..." in "..."` 对比信息
+- **洞察**: AI 需要"期望值"才能判断"实际值"是否正确
+
+### 进程生命周期管理
+- **问题**: Electron 孤儿进程反复出现（3 次）
+- **根因**: npm→cross-env→electron 三层嵌套，bash $! 拿不到实际 PID
+- **方案**: hook 化管理而非自律，启动前 kill + 结束后扫描
+
+### Workflow 迭代闭环
+- **模式**: 执行 → 发现问题 → 分析根因 → 写入规范 → 下轮验证
+- **证据**: v1.4.4 角色坍塌 → v1.4.5 加 Gatekeeper → v1.4.6 角色 0 次越权
+
+---
+
+## v1.5.0 stateService 重构 + 治理服务设计 Evidence
+
+### stateService 架构重构（HTTP CRUD + SSE 广播）
+- **问题**: session 状态住在 agent 子进程内存里，stateService 被绕过。savePath 切换需要双路径（WS + HTTP），3 轮 Dev 才修好
+- **根因分析**: Phase 2 标记 COMPLETED 但 AgentBridge 是 stub，后续所有 Phase 绕过 stateService
+- **方案**: stateService 加 HTTP CRUD `/api/state/*` + SSE `/api/state/subscribe` 广播，agent 通过 HTTP 读写 + SSE 订阅
+- **设计决策**: 用户提出 SSE 替代 WS 广播方案 — stateService 不关心订阅者身份，纯 pub/sub 模式，比原方案（AgentBridge + StateClient）耦合度低、扩展性强
+- **实施**: 5 个 Phase（A: HTTP CRUD → B: SSE → C: Agent 迁移 → D: Frontend 迁移 → E: 清理），162/162 测试通过
+
+### Bug 深层分析方法论
+- **savePath bug 链**: isTaskRunning guard → agent 无 handler → session 不刷新
+- **分析深度**: 表层（guard 条件）→ 中层（为什么 session 依赖 agent）→ 深层（stateService 被绕过）→ 根因（Phase 2 假完成）
+- **方法**: 不止修 bug，追溯到架构决策失误，从而发现系统性问题并驱动重构
+- **证据**: 一个 savePath bug → 暴露 stateService 架构缺陷 → 驱动完整 HTTP+SSE 重构
+
+### AI Agent 可靠性工程
+- **Dev Agent 文件写入失败**: 5 次尝试修改 agent.js 均未生效（报告"已修改"但磁盘无变化）
+- **应对**: 建立 grep 验证 checklist，Dev 交付必须包含机器可验证的证据
+- **跨边界 Bug 验证协议**: 涉及 WS/IPC/EventEmitter 的修复，单元测试 mock 了边界 → 无法发现真实问题 → 必须 integration/E2E + 后端日志交叉验证
+- **洞察**: 单元测试 pass ≠ 功能正常（mock 掩盖了边界交互 bug）
+
+### Worktree Sync 可靠性问题
+- **问题**: `cp` 命令在 Git worktree 路径下静默失败（文件大小不变），导致 3 次"修了但没生效"
+- **解决**: 改用 `cat source > target` 管道 + `grep -c` 验证关键方法存在
+- **工程教训**: 基础工具链的假设不可靠时，必须加验证步骤
+
+### 治理服务架构设计（Workflow Governance Service）
+- **核心洞察**: "规则写在文档里靠 AI 自律" 反复失败 → 必须 "规则写在代码里由 API 强制执行"
+- **状态与文档分离**: acceptance-state.json 是唯一真相，acceptance-graph.md 是自动生成的只读视图。AI 直接编辑 md 文件 = 无效操作
+- **角色鉴权系统**: Agent 注册获取 token → API 校验角色 + scope → 越权请求被拒绝。解决"任何 Agent 都能改任何文件"的问题
+- **证据驱动状态转换**: pending → T2-pass 需要 test output；T2-pass → pass 需要 E2E report。禁止跳步（pending → pass 被拒绝）
+- **技术选型**: NetworkX + JSON（89 节点规模无需 Neo4j）、stdlib http.server（零新框架依赖）、乐观锁 + 文件锁（并发保护）
+
+### 决策升级倒置分析
+- **发现**: Coordinator 把"验证 savePath"反复让用户手动操作（低价值），却把"stateService 架构缺陷"自行处理不上报（高价值）
+- **根因**: 没有定义"什么事该升级给人、什么事该自动化"
+- **方案**: 架构决策/Phase 完成必须升级给用户审批；功能验证交 QA Agent 自动化
+
+### Dev Agent 结构性缺陷分析
+- **不读同级代码**: Dev 改 agent.js 时不看同级的 stateService.js、taskService.js → 不知道 stateService 存在
+- **模仿现有错误模式**: 看到其他代码用 WebSocket → 照抄 → 错误模式被复制传播
+- **优化"通过测试"而非"设计正确"**: mock 掩盖问题，Dev 目标是让测试 pass 而非架构合理
+- **方案**: Dev 接任务后必读同级模块 + CLAUDE.md；发现架构 gap 上报不造轮子
+
+### 开发记忆库设计
+- **问题**: 每个 Dev Agent 是新实例，不知道前任踩过什么坑、模块用什么模式
+- **方案**: 独立 Memory Service（SQLite），Dev 完成后写入模块记忆（pattern/pitfall/decision），下个 Dev 通过验收图关联查询
+- **与验收图联动**: `GET /api/mem/related?node=L5.3` → 返回 stateService 的所有记忆
+- **独立服务**: 不放在业务项目仓库里，AI Agent 无法篡改
+
+### 多项目治理隔离
+- **设计**: 每个项目独立目录（acceptance-state.json + memories.json + audit log）
+- **会话绑定项目**: Agent 注册时指定 project_id，后续请求自动路由
+- **自治理**: governance 服务自身也注册为一个项目，走验收流程（避免"鞋匠没鞋穿"）
+
+### 离线降级策略
+- **分级设计**: 状态变更（verify-update/release-gate）严格模式阻塞等待；记忆写入宽松模式本地缓存 + 恢复后补推
+- **GovernanceClient**: 内置离线队列 + flush 机制，服务恢复后自动补推
+
+### 最小验证路径算法
+- **输入**: git diff → changed_files
+- **输出**: 按拓扑排序的分层验证计划（T1/T2/T3/T4 + 测试文件 + 预估时间）
+- **裁剪规则**: 已 pass 且非直接命中 → 跳过；gate 未满足 → SKIP；propagation:smoke_ui → 仅 UI smoke
+- **价值**: 从"每次跑全量"优化为"只跑受影响的最小集"
