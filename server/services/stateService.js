@@ -429,6 +429,14 @@ class StateService {
         if (StateService.instance) {
             StateService.instance.persistence.cancelAll();
             StateService.instance.eventBus.removeAllListeners();
+            // Clean up SSE state
+            if (StateService.instance._sseDebounceTimer) {
+                clearTimeout(StateService.instance._sseDebounceTimer);
+            }
+            if (StateService.instance._sseConnections) {
+                StateService.instance._sseConnections.clear();
+            }
+            StateService.instance._sseBroadcastInitialized = false;
         }
         StateService.instance = null;
     }
@@ -471,6 +479,253 @@ class StateService {
 
     restore(agentId, data) {
         return this.store.restore(agentId, data);
+    }
+
+    // ── Session CRUD (Phase A3) ──
+
+    /**
+     * List all sessions for an agent.
+     * @param {string} agentId
+     * @returns {{ sessions: Array, activeSessionId: string|null }}
+     */
+    listSessions(agentId) {
+        this._ensureLoaded(agentId);
+        const sessions = this.store.get(`${agentId}.sessions`) || [];
+        const activeSessionId = this.store.get(`${agentId}.activeSessionId`) || null;
+        return { sessions, activeSessionId };
+    }
+
+    /**
+     * Get a single session by ID, including its conversations.
+     * @param {string} agentId
+     * @param {string} sessionId
+     * @returns {Object|null}
+     */
+    getSession(agentId, sessionId) {
+        this._ensureLoaded(agentId);
+        const sessions = this.store.get(`${agentId}.sessions`) || [];
+        const session = sessions.find(s => s.id === sessionId);
+        if (!session) return null;
+        const conversations = this.store.get(`${agentId}.conversations.${sessionId}`) || [];
+        return { ...session, conversations };
+    }
+
+    /**
+     * Create a new session. Idempotent on name.
+     * @param {string} agentId
+     * @param {string} [name]
+     * @returns {Object} the created (or existing) session
+     */
+    createSession(agentId, name) {
+        this._ensureLoaded(agentId);
+        const sessions = this.store.get(`${agentId}.sessions`) || [];
+        const sessionName = name || `Session ${sessions.length + 1}`;
+
+        // Idempotent: return existing session with same name
+        const existing = sessions.find(s => s.name === sessionName);
+        if (existing) return existing;
+
+        const newSession = {
+            id: `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            name: sessionName,
+            createdAt: new Date().toISOString()
+        };
+        sessions.push(newSession);
+        this.set(`${agentId}.sessions`, sessions);
+        if (!this.store.get(`${agentId}.activeSessionId`)) {
+            this.set(`${agentId}.activeSessionId`, newSession.id);
+        }
+        // Initialize empty conversations array for this session
+        this.set(`${agentId}.conversations.${newSession.id}`, []);
+        return newSession;
+    }
+
+    /**
+     * Delete a session by ID.
+     * @param {string} agentId
+     * @param {string} sessionId
+     * @returns {boolean}
+     */
+    deleteSession(agentId, sessionId) {
+        this._ensureLoaded(agentId);
+        const sessions = this.store.get(`${agentId}.sessions`) || [];
+        const idx = sessions.findIndex(s => s.id === sessionId);
+        if (idx === -1) return false;
+
+        sessions.splice(idx, 1);
+        this.set(`${agentId}.sessions`, sessions);
+        // Clean up conversations
+        this.delete(`${agentId}.conversations.${sessionId}`);
+
+        // If deleted session was active, switch to another or null
+        const activeId = this.store.get(`${agentId}.activeSessionId`);
+        if (activeId === sessionId) {
+            const newActiveId = sessions.length > 0 ? sessions[0].id : null;
+            this.set(`${agentId}.activeSessionId`, newActiveId);
+        }
+        return true;
+    }
+
+    /**
+     * Switch the active session.
+     * @param {string} agentId
+     * @param {string} sessionId
+     * @returns {boolean}
+     */
+    switchSession(agentId, sessionId) {
+        this._ensureLoaded(agentId);
+        const sessions = this.store.get(`${agentId}.sessions`) || [];
+        const exists = sessions.some(s => s.id === sessionId);
+        if (!exists) return false;
+        this.set(`${agentId}.activeSessionId`, sessionId);
+        return true;
+    }
+
+    // ── Language preference (Phase A4) ──
+
+    /**
+     * Get the app language preference.
+     * @returns {string} 'en' or 'zh-CN'
+     */
+    getLanguage() {
+        const lang = this.store.get('app.language');
+        return lang || 'zh-CN';
+    }
+
+    /**
+     * Set the app language preference.
+     * @param {string} language - 'en' or 'zh-CN'
+     * @returns {boolean} true if valid language
+     */
+    setLanguage(language) {
+        const valid = ['en', 'zh-CN'];
+        if (!valid.includes(language)) return false;
+        this.set('app.language', language);
+        return true;
+    }
+
+    // ── SSE Broadcast (Phase B) ──
+
+    /**
+     * Add an SSE connection to the tracked set.
+     * @param {Object} connection - { res, topics: Set<string> }
+     */
+    addSSEConnection(connection) {
+        if (!this._sseConnections) this._sseConnections = new Set();
+        this._sseConnections.add(connection);
+        console.log(`[stateService:sse] Client connected (topics: ${[...connection.topics].join(',')}). Total: ${this._sseConnections.size}`);
+    }
+
+    /**
+     * Remove an SSE connection from the tracked set.
+     * @param {Object} connection
+     */
+    removeSSEConnection(connection) {
+        if (!this._sseConnections) return;
+        this._sseConnections.delete(connection);
+        console.log(`[stateService:sse] Client disconnected. Total: ${this._sseConnections.size}`);
+    }
+
+    /**
+     * Get the number of active SSE connections.
+     * @returns {number}
+     */
+    getSSEConnectionCount() {
+        return this._sseConnections ? this._sseConnections.size : 0;
+    }
+
+    /**
+     * Determine the SSE topic from a state change path.
+     * First path segment, or 'app' for app.* paths.
+     * @param {string} changePath
+     * @returns {string}
+     */
+    _getTopicFromPath(changePath) {
+        const firstSegment = changePath.split('.')[0];
+        return firstSegment;
+    }
+
+    /**
+     * Broadcast a state change event to all matching SSE connections.
+     * Called internally by the debounced broadcaster.
+     * @param {Object} changeEvent - { path, value, oldValue }
+     */
+    _broadcastSSE(changeEvent) {
+        if (!this._sseConnections || this._sseConnections.size === 0) return;
+
+        const topic = this._getTopicFromPath(changeEvent.path);
+        const op = changeEvent.value === undefined ? 'delete' : (changeEvent.oldValue === undefined ? 'create' : 'set');
+
+        const sseData = JSON.stringify({
+            topic,
+            path: changeEvent.path,
+            value: changeEvent.value,
+            op,
+            timestamp: Date.now()
+        });
+
+        const message = `event: state_change\ndata: ${sseData}\n\n`;
+
+        let sentCount = 0;
+        for (const conn of this._sseConnections) {
+            // Topic filtering: if connection specifies topics, only send if matching
+            if (conn.topics.size > 0 && !conn.topics.has(topic)) {
+                continue;
+            }
+            try {
+                conn.res.write(message);
+                sentCount++;
+            } catch (err) {
+                console.error(`[stateService:sse] Write error, removing connection:`, err.message);
+                this._sseConnections.delete(conn);
+            }
+        }
+        if (sentCount > 0) {
+            console.log(`[stateService:sse] Broadcast topic="${topic}" op="${op}" to ${sentCount} client(s)`);
+        }
+    }
+
+    /**
+     * Initialize SSE broadcast wiring — listen to state.changed events
+     * and debounce broadcasts to SSE connections.
+     * Called once when the SSE route is first set up.
+     */
+    initSSEBroadcast() {
+        if (this._sseBroadcastInitialized) return;
+        this._sseBroadcastInitialized = true;
+        this._sseConnections = this._sseConnections || new Set();
+        this._ssePendingChanges = [];
+        this._sseDebounceTimer = null;
+
+        this.eventBus.on('state.changed', (changeEvent) => {
+            this._ssePendingChanges.push(changeEvent);
+            if (!this._sseDebounceTimer) {
+                this._sseDebounceTimer = setTimeout(() => {
+                    this._flushSSEChanges();
+                    this._sseDebounceTimer = null;
+                }, 100); // 100ms debounce
+            }
+        });
+
+        console.log('[stateService:sse] SSE broadcast wiring initialized');
+    }
+
+    /**
+     * Flush all pending SSE changes, deduplicating by path (latest wins).
+     */
+    _flushSSEChanges() {
+        if (!this._ssePendingChanges || this._ssePendingChanges.length === 0) return;
+
+        // Deduplicate: latest change per path wins
+        const byPath = new Map();
+        for (const change of this._ssePendingChanges) {
+            byPath.set(change.path, change);
+        }
+        this._ssePendingChanges = [];
+
+        for (const change of byPath.values()) {
+            this._broadcastSSE(change);
+        }
     }
 
     // ── AgentBridge stubs (Phase 2) ──
