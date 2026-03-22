@@ -25,6 +25,7 @@ const userStore = require('./lib/core/userStore');
 const masterProfileClient = require('./lib/core/masterProfileClient');
 const tailorProfile = require('./lib/tools/tailorProfile');
 const { StateClient } = require('../shared/stateClient');
+const stateApi = require('./lib/stateApi');
 
 // Register domain pack at startup (before any upsert can happen).
 // Retries on failure since dbservice may not be ready yet.
@@ -467,6 +468,8 @@ function createSession(name = '') {
     emitSessionList();
     sendSnapshot();
     scheduleSave();
+    // C2: write-through to stateService
+    stateApi.createSession(session.name).catch(e => console.warn('[agent:stateApi] write-through:', e.message));
 }
 
 /**
@@ -642,6 +645,8 @@ function deleteSession(sessionId) {
     emitSessionList();
     sendSnapshot();
     scheduleSave();
+    // C2: write-through to stateService
+    stateApi.deleteSession(id).catch(e => console.warn('[agent:stateApi] write-through:', e.message));
 }
 
 /**
@@ -798,6 +803,8 @@ function switchSession(sessionId) {
     state.activeSessionId = id;
     emitSessionList();
     sendSnapshot();
+    // C2: write-through to stateService
+    stateApi.switchSession(id).catch(e => console.warn('[agent:stateApi] write-through:', e.message));
 }
 
 function emitSessionList() {
@@ -2942,6 +2949,29 @@ function initWebSocket() {
         }
         // Request any server-side state that may have been persisted
         stateClient.syncFromServer();
+
+        // C1: Load sessions from stateService HTTP (async, non-blocking)
+        (async () => {
+            try {
+                const available = await stateApi.isAvailable();
+                if (!available) { console.log('[agent:stateApi] stateService not available, using sessionStore'); return; }
+                const data = await stateApi.fetchSessions();
+                if (data && data.sessions && data.sessions.length > 0) {
+                    state.sessions = data.sessions;
+                    if (data.activeSessionId) state.activeSessionId = data.activeSessionId;
+                    console.log('[agent:stateApi] Loaded', data.sessions.length, 'sessions from stateService');
+                    emitSessionList();
+                } else {
+                    await stateApi.pushFullState(state).catch(() => {});
+                    console.log('[agent:stateApi] Migrated state to stateService');
+                }
+                // C3: SSE subscription for real-time updates
+                stateApi.subscribeSSE((event) => {
+                    console.log('[agent:stateApi] SSE:', event.topic, event.op, event.path);
+                    if (event.path === 'app.savePath' && event.value) updateDataDir(event.value);
+                }).catch(e => console.log('[agent:stateApi] SSE subscribe failed:', e.message));
+            } catch (e) { console.log('[agent:stateApi] HTTP restore failed:', e.message); }
+        })();
     });
 
     ws.on('message', (raw) => {
