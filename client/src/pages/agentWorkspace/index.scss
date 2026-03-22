@@ -34,6 +34,44 @@
   gap: 16px;
   height: calc(100% - 64px);
   min-height: 0;
+  position: relative;
+}
+
+.save-path-switch-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: rgba(11, 13, 34, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+}
+
+.save-path-switch-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: #c7d2ff;
+  font-size: 15px;
+}
+
+.save-path-switch-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(115, 166, 255, 0.25);
+  border-top-color: #73a6ff;
+  border-radius: 50%;
+  animation: sp-spin 0.8s linear infinite;
+}
+
+@keyframes sp-spin {
+  to { transform: rotate(360deg); }
+}
+
+.save-path-switch-error {
+  color: #ffdf8d;
 }
 
 .agent-session-panel {

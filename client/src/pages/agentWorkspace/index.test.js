@@ -1132,4 +1132,132 @@ describe('AgentWorkspace protocol regression', () => {
             ));
         });
     });
+
+    it('shows loading overlay during savePath switch and clears on snapshot', async () => {
+        const usePathStore = require('../../store/pathStore').default;
+
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+        await waitFor(() => expect(mockApi.execTask).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        // Initial snapshot so task is running
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '\u6c42\u804cAI\u52a9\u624b',
+                data: {
+                    sessions: [{ id: 's1', name: 'Old Session', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {}
+                }
+            });
+        });
+
+        // No overlay initially
+        expect(screen.queryByTestId('save-path-switch-overlay')).not.toBeInTheDocument();
+
+        // Simulate savePath change
+        act(() => {
+            usePathStore.setState({ savePath: 'C:\\SwitchedDir' });
+        });
+
+        // Loading overlay should appear
+        await waitFor(() => {
+            expect(screen.getByTestId('save-path-switch-overlay')).toBeInTheDocument();
+            expect(screen.getByTestId('save-path-switch-loading')).toBeInTheDocument();
+        });
+
+        // Simulate agent responding with updated snapshot
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '\u6c42\u804cAI\u52a9\u624b',
+                data: {
+                    sessions: [{ id: 's2', name: 'New Dir Session', updatedAt: Date.now() }],
+                    activeSessionId: 's2',
+                    conversations: { s2: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {}
+                }
+            });
+        });
+
+        // Overlay should be gone, new session should be visible
+        await waitFor(() => {
+            expect(screen.queryByTestId('save-path-switch-overlay')).not.toBeInTheDocument();
+        });
+        expect(screen.getAllByText('New Dir Session').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('shows error state when savePath switch times out', async () => {
+        jest.useFakeTimers();
+        const usePathStore = require('../../store/pathStore').default;
+
+        render(
+            <MemoryRouter initialEntries={['/agentWorkspace/%E6%B1%82%E8%81%8CAI%E5%8A%A9%E6%89%8B']}>
+                <Routes>
+                    <Route path="/agentWorkspace/:taskName" element={<AgentWorkspace />} />
+                    <Route path="/taskManage" element={<div data-testid="task-manage-page">task-manage</div>} />
+                </Routes>
+            </MemoryRouter>
+        );
+
+        await waitFor(() => expect(mockWsManager.connect).toHaveBeenCalled());
+        await waitFor(() => expect(mockApi.execTask).toHaveBeenCalled());
+
+        const listener = mockWsManager.addMessageListener.mock.calls[0][0];
+        act(() => {
+            listener({
+                type: 'agent_state_snapshot',
+                taskName: '\u6c42\u804cAI\u52a9\u624b',
+                data: {
+                    sessions: [{ id: 's1', name: 'Old Session', updatedAt: Date.now() }],
+                    activeSessionId: 's1',
+                    conversations: { s1: [] },
+                    subtasks: {},
+                    artifacts: {},
+                    prompts: {}
+                }
+            });
+        });
+
+        // Trigger savePath switch
+        act(() => {
+            usePathStore.setState({ savePath: 'C:\\TimedOutDir' });
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId('save-path-switch-loading')).toBeInTheDocument();
+        });
+
+        // Advance past the 5s timeout
+        act(() => {
+            jest.advanceTimersByTime(5500);
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId('save-path-switch-error')).toBeInTheDocument();
+        });
+
+        // Dismiss the error
+        fireEvent.click(screen.getByTestId('save-path-switch-dismiss'));
+        await waitFor(() => {
+            expect(screen.queryByTestId('save-path-switch-overlay')).not.toBeInTheDocument();
+        });
+
+        jest.useRealTimers();
+    });
 });

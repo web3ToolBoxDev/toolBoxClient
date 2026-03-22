@@ -46,6 +46,8 @@ function AgentWorkspace() {
     const [selectedSubProvider, setSelectedSubProvider] = useState('');
     const [runtimeApiKey, setRuntimeApiKey] = useState('');
     const [runtimeExpanded, setRuntimeExpanded] = useState(false);
+    const [savePathSwitching, setSavePathSwitching] = useState(null); // null | 'loading' | 'error'
+    const savePathSwitchTimerRef = useRef(null);
     const [taskMeta, setTaskMeta] = useState(() => ({
         taskName,
         taskKey: location?.state?.taskKey || '',
@@ -140,6 +142,14 @@ function AgentWorkspace() {
         if (data.autoOpenPresetSessionId) {
             setAutoOpenPresetSession(data.autoOpenPresetSessionId);
         }
+        // Clear savePath switching state — snapshot confirms agent has switched
+        setSavePathSwitching((prev) => {
+            if (prev === 'loading') {
+                clearTimeout(savePathSwitchTimerRef.current);
+                savePathSwitchTimerRef.current = null;
+            }
+            return null;
+        });
     }, []);
 
     const handleTaskStopped = useCallback((reason = 'AI task stopped') => {
@@ -158,6 +168,14 @@ function AgentWorkspace() {
                 const nextSessions = Array.isArray(info?.data?.sessions) ? info.data.sessions : [];
                 setSessions(nextSessions);
                 setActiveSessionId(info?.data?.activeSessionId || nextSessions[0]?.id || '');
+                // Clear savePath switching state — session list confirms agent has switched
+                setSavePathSwitching((prev) => {
+                    if (prev === 'loading') {
+                        clearTimeout(savePathSwitchTimerRef.current);
+                        savePathSwitchTimerRef.current = null;
+                    }
+                    return null;
+                });
                 break;
             }
             case 'agent_conversation_update': {
@@ -363,12 +381,45 @@ function AgentWorkspace() {
     const prevSavePathRef = useRef(storeSavePath);
     useEffect(() => {
         // Skip the initial render — only react to actual changes
-        if (prevSavePathRef.current === storeSavePath) return;
+        const oldPath = prevSavePathRef.current;
+        if (oldPath === storeSavePath) return;
         prevSavePathRef.current = storeSavePath;
+        console.log('[savePath-switch]', { oldPath, newPath: storeSavePath, isTaskRunning, timestamp: Date.now() });
         if (!storeSavePath || !isTaskRunning) return;
+
+        // Enter loading state while agent switches data directory
+        setSavePathSwitching('loading');
         setDataSavePath(storeSavePath);
         sendAgent('agent_update_save_path', { savePath: storeSavePath });
+
+        // Also re-fetch envList and walletList since fingerprint DB changes with savePath
+        (async () => {
+            try {
+                const [walletsRes, envRes] = await Promise.all([
+                    Promise.resolve(apiRef.current?.getAllWallets ? apiRef.current.getAllWallets() : []).catch(() => []),
+                    Promise.resolve(apiRef.current?.getFingerPrints ? apiRef.current.getFingerPrints() : { success: false, data: {} }).catch(() => ({ success: false, data: {} }))
+                ]);
+                setWalletList(Array.isArray(walletsRes) ? walletsRes : []);
+                const envsObj = (envRes && envRes.success && envRes.data && typeof envRes.data === 'object') ? envRes.data : {};
+                setEnvList(Object.values(envsObj));
+            } catch { /* best-effort refresh */ }
+        })();
+
+        // Timeout: if agent doesn't respond within 5s, show error state
+        clearTimeout(savePathSwitchTimerRef.current);
+        savePathSwitchTimerRef.current = setTimeout(() => {
+            setSavePathSwitching((prev) => (prev === 'loading' ? 'error' : prev));
+        }, 5000);
+
+        return () => {
+            clearTimeout(savePathSwitchTimerRef.current);
+        };
     }, [storeSavePath, isTaskRunning, sendAgent]);
+
+    // Cleanup timer on unmount
+    useEffect(() => {
+        return () => clearTimeout(savePathSwitchTimerRef.current);
+    }, []);
 
     const activeSession = useMemo(
         () => sessions.find((item) => item.id === activeSessionId) || null,
@@ -652,6 +703,23 @@ function AgentWorkspace() {
                 <h3>{workspaceTitle}</h3>
             </div>
             <div className="agent-workspace-main">
+                {savePathSwitching && (
+                    <div className="save-path-switch-overlay" data-testid="save-path-switch-overlay">
+                        {savePathSwitching === 'loading' ? (
+                            <div className="save-path-switch-content" data-testid="save-path-switch-loading">
+                                <div className="save-path-switch-spinner" />
+                                <span>{t('agentWorkspace.switchingDirectory', 'Switching data directory...')}</span>
+                            </div>
+                        ) : (
+                            <div className="save-path-switch-content save-path-switch-error" data-testid="save-path-switch-error">
+                                <span>{t('agentWorkspace.switchDirectoryFailed', 'Directory switch timed out. Sessions may not have refreshed.')}</span>
+                                <Button size="sm" variant="outline-light" onClick={() => setSavePathSwitching(null)} data-testid="save-path-switch-dismiss">
+                                    {t('agentWorkspace.dismiss', 'Dismiss')}
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+                )}
                 <aside className="agent-session-panel">
                     <div className="agent-session-toolbar">
                         <Form.Control

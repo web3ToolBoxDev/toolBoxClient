@@ -57,62 +57,35 @@ async function ensurePack() {
     return false;
 }
 
-// Persistent data directory — ALWAYS use savePath, never write to app resources
+// Persistent data directory — prefer user's savePath over app resources
+// This ensures user data survives app upgrades
 let _dataDir = (function() {
     const savePath = process.env.AGENT_SAVE_PATH;
-    if (!savePath) {
-        console.error('[agent] AGENT_SAVE_PATH not set! User must configure save path first.');
-        // Fallback to temp dir, not app resources (app resources should be read-only)
-        const tmp = path.join(require('os').tmpdir(), 'web3toolbox', 'agents', 'job-seek', 'data');
-        fs.mkdirSync(tmp, { recursive: true });
-        return tmp;
-    }
-    const userDataDir = path.join(savePath, 'agents', 'job-seek', 'data');
-    fs.mkdirSync(userDataDir, { recursive: true });
-    return userDataDir;
-})();
-console.log('[agent] Data dir:', _dataDir);
-
-/**
- * Update data directory when savePath changes at runtime.
- * Saves current state to old dir, switches to new dir, and reloads sessions.
- */
-function updateDataDir(newSavePath) {
-    if (!newSavePath) return false;
-    const newDataDir = path.join(newSavePath, 'agents', 'job-seek', 'data');
-    if (newDataDir === _dataDir) return false;
-    // Save current state to old directory before switching
-    saveState();
-    fs.mkdirSync(newDataDir, { recursive: true });
-    console.log('[agent] Data dir changed:', _dataDir, '->', newDataDir);
-    _dataDir = newDataDir;
-    // Load state from new directory (if any sessions exist there)
-    const saved = sessionStore.load(_dataDir);
-    if (saved) {
-        for (const key of sessionStore.PERSIST_KEYS) {
-            if (saved[key] !== undefined) {
-                state[key] = saved[key];
+    if (savePath) {
+        const userDataDir = path.join(savePath, 'agents', 'job-seek', 'data');
+        fs.mkdirSync(userDataDir, { recursive: true });
+        // Auto-migrate: if old data exists in __dirname/data but not in new location, copy it
+        const oldDir = path.join(__dirname, 'data');
+        const oldSessions = path.join(oldDir, 'sessions.json');
+        const newSessions = path.join(userDataDir, 'sessions.json');
+        if (fs.existsSync(oldSessions) && !fs.existsSync(newSessions)) {
+            console.log('[agent] Migrating data from app resources to savePath...');
+            for (const f of ['sessions.json', 'users.json', 'state.json']) {
+                const src = path.join(oldDir, f);
+                const dst = path.join(userDataDir, f);
+                if (fs.existsSync(src)) {
+                    try { fs.copyFileSync(src, dst); console.log(`[agent] Migrated ${f}`); } catch (e) { console.warn(`[agent] Migration failed for ${f}:`, e.message); }
+                }
             }
         }
-        console.log(`[agent] Restored ${state.sessions.length} sessions from new data dir`);
-    } else {
-        // Reset session state for fresh directory
-        state.sessions = [];
-        state.activeSessionId = '';
-        state.conversations = {};
-        state.subtasks = {};
-        state.subtaskLogs = {};
-        state.artifacts = {};
-        state.runtimeLogs = {};
-        state.prompts = {};
-        state.executionStates = {};
-        state.stages = {};
-        state.selectedAnswers = {};
-        state.runtimeContexts = {};
-        console.log('[agent] No saved state in new data dir, reset sessions');
+        return userDataDir;
     }
-    return true;
-}
+    // Fallback for dev mode or when savePath not set
+    const fallback = path.join(__dirname, 'data');
+    fs.mkdirSync(fallback, { recursive: true });
+    return fallback;
+})();
+console.log('[agent] Data dir:', _dataDir);
 
 // Ensure workspace dir has git init (required by Codex CLI)
 const _workspaceDir = path.join(__dirname, 'workspace');
@@ -222,8 +195,6 @@ const _activeBrowsers = {};
 // --------------- persistence (core) ---------------
 
 function restoreState() {
-    // sessionStore.load() is kept as a one-time migration fallback.
-    // Primary persistence is now via StateService (loaded when WS connects via syncFromServer).
     const saved = sessionStore.load(_dataDir);
     if (!saved) return false;
     for (const key of sessionStore.PERSIST_KEYS) {
@@ -231,33 +202,7 @@ function restoreState() {
             state[key] = saved[key];
         }
     }
-    _postRestoreFixup();
-    console.log(`[agent] Restored ${state.sessions.length} sessions (from sessionStore migration fallback)`);
-    return state.sessions.length > 0;
-}
-
-/**
- * Apply server-side state from StateService response to the agent state object.
- * Called when state_sync_response arrives over WS — this is the primary restore path.
- * @param {Object} serverData - the state snapshot from StateService
- * @returns {boolean} true if state was applied
- */
-function _applyServerState(serverData) {
-    if (!serverData || typeof serverData !== 'object') return false;
-    const keys = Object.keys(serverData);
-    if (keys.length === 0) return false;
-    for (const key of sessionStore.PERSIST_KEYS) {
-        if (serverData[key] !== undefined) {
-            state[key] = serverData[key];
-        }
-    }
-    _postRestoreFixup();
-    console.log(`[agent] Restored ${state.sessions.length} sessions (from StateService)`);
-    return true;
-}
-
-/** Common fixup logic after restoring state from any source. */
-function _postRestoreFixup() {
+    // Reset transient per-session state
     for (const sid of Object.keys(state.conversations)) {
         if (!state.runtimeLogs[sid]) state.runtimeLogs[sid] = [];
         if (!state.executionStates[sid]) state.executionStates[sid] = { paused: false, canceled: false };
@@ -287,12 +232,81 @@ function _postRestoreFixup() {
             }
         }
     }
+    console.log(`[agent] Restored ${state.sessions.length} sessions`);
+    return state.sessions.length > 0;
 }
 
 function saveState() {
-    // Persistence is now handled by StateService via _syncStateToClient().
-    // sessionStore.save() is deprecated and is a no-op.
-    _syncStateToClient();
+    sessionStore.save(_dataDir, state);
+}
+
+/**
+ * Switch the persistent data directory at runtime (e.g., when user changes savePath).
+ * Saves current state to old dir, computes new dir, loads state from new dir,
+ * and emits updated session list + snapshot to the frontend.
+ */
+function updateDataDir(newSavePath) {
+    if (!newSavePath || typeof newSavePath !== 'string') {
+        console.warn('[savePath-switch] updateDataDir called with invalid path, ignoring');
+        return;
+    }
+    const newDir = path.join(newSavePath, 'agents', 'job-seek', 'data');
+    const oldDir = _dataDir;
+    if (newDir === oldDir) {
+        console.log('[savePath-switch] updateDataDir: same dir, skipping', { dir: newDir });
+        // Still emit session list so frontend clears its loading overlay
+        emitSessionList();
+        return;
+    }
+    console.log('[savePath-switch] updateDataDir:', { from: oldDir, to: newDir });
+
+    // 1. Save current state to OLD directory
+    saveState();
+
+    // 2. Switch to new directory
+    fs.mkdirSync(newDir, { recursive: true });
+    _dataDir = newDir;
+
+    // 3. Load state from new directory (replaces all session data)
+    const loaded = restoreState();
+    if (!loaded) {
+        // New directory with no saved state — start fresh
+        state.sessions = [];
+        state.activeSessionId = '';
+        state.conversations = {};
+        state.subtasks = {};
+        state.subtaskLogs = {};
+        state.artifacts = {};
+        state.runtimeLogs = {};
+        state.prompts = {};
+        state.executionStates = {};
+        state.runtimeContexts = {};
+        state.stages = {};
+        state.selectedAnswers = {};
+        state.attachmentKinds = {};
+        createSession('');
+        console.log('[savePath-switch] No saved state in new dir, created fresh session');
+    } else {
+        console.log('[savePath-switch] Loaded state from new dir:', {
+            sessionsFound: state.sessions.length,
+            activeSessionId: state.activeSessionId
+        });
+    }
+
+    // 4. Re-initialize user store for the new directory
+    try {
+        const { users, activeUserId } = userStore.init(_dataDir);
+        if (activeUserId) {
+            state.activeUserId = activeUserId;
+        }
+    } catch (err) {
+        console.warn('[savePath-switch] userStore.init failed:', err.message);
+    }
+
+    // 5. Emit updated data to frontend
+    emitSessionList();
+    sendSnapshot();
+    scheduleSave();
 }
 
 // Restore on startup
@@ -333,13 +347,19 @@ function scheduleSave() {
     _saveTimer = setTimeout(() => {
         _saveTimer = null;
         saveState();
+        // Sync key state paths to StateClient (additive — does not replace existing persistence)
+        _syncStateToClient();
     }, 2000);
 }
 
-/** Sync all persistent state keys to StateClient for server-side persistence. */
+/** Sync selected state keys to StateClient for server-side persistence. */
 function _syncStateToClient() {
     if (!stateClient) return;
-    const keysToSync = sessionStore.PERSIST_KEYS;
+    const keysToSync = [
+        'selectedAnswers', 'profileSections', 'masterProfile',
+        'runtimeContexts', 'envs', 'sessions', 'activeSessionId',
+        'conversations', 'subtasks', 'artifacts'
+    ];
     try {
         stateClient.batch(() => {
             for (const key of keysToSync) {
@@ -3037,6 +3057,10 @@ function initWebSocket() {
                 updateLanguage(data?.payload?.language);
                 handleSubtaskAction(data?.payload || {});
                 break;
+            case 'agent_update_save_path':
+                updateLanguage(data?.payload?.language);
+                updateDataDir(data?.payload?.savePath);
+                break;
             case 'agent_launch_browser':
                 handleLaunchBrowser(data?.payload || {});
                 break;
@@ -3045,30 +3069,6 @@ function initWebSocket() {
                 break;
             // ── StateClient: server→agent state messages ──
             case 'state_sync_response':
-                if (stateClient) {
-                    stateClient.handleServerMessage(data);
-                    // Apply server state to agent state (primary restore path)
-                    if (data.data && typeof data.data === 'object' && Object.keys(data.data).length > 0) {
-                        _applyServerState(data.data);
-                        // Re-emit session list and snapshot so UI reflects restored state
-                        emitSessionList();
-                        sendSnapshot();
-                    }
-                }
-                break;
-            case 'agent_update_save_path': {
-                const newSavePath = data?.payload?.savePath;
-                if (newSavePath && updateDataDir(newSavePath)) {
-                    state.savePath = newSavePath;
-                    if (!state.sessions.length) {
-                        createSession('');
-                    } else {
-                        emitSessionList();
-                        sendSnapshot();
-                    }
-                }
-                break;
-            }
             case 'agent_state_patch':
                 if (stateClient) {
                     stateClient.handleServerMessage(data);
