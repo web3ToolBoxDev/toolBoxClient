@@ -238,7 +238,8 @@ function restoreState() {
 }
 
 function saveState() {
-    sessionStore.save(_dataDir, state);
+    // sessionStore.save() is a deprecated no-op — skip it entirely.
+    // Persistence is handled by StateClient via _syncStateToClient().
 }
 
 /**
@@ -2932,7 +2933,20 @@ function startHeartBeat() {
     }, 5000);
 }
 
+let _sseHandle = null; // track SSE subscription to avoid duplicates on reconnect
+
 function initWebSocket() {
+    // Clean up previous WebSocket instance to prevent listener accumulation
+    if (ws) {
+        try { ws.removeAllListeners(); ws.close(); } catch (_) {}
+        ws = null;
+    }
+    // Close previous SSE subscription before re-subscribing
+    if (_sseHandle) {
+        try { _sseHandle.close(); } catch (_) {}
+        _sseHandle = null;
+    }
+
     ws = new WebSocket(url);
     ws.on('open', () => {
         startHeartBeat();
@@ -2965,11 +2979,15 @@ function initWebSocket() {
                     await stateApi.pushFullState(state).catch(() => {});
                     console.log('[agent:stateApi] Migrated state to stateService');
                 }
-                // C3: SSE subscription for real-time updates
-                stateApi.subscribeSSE((event) => {
-                    console.log('[agent:stateApi] SSE:', event.topic, event.op, event.path);
-                    if (event.path === 'app.savePath' && event.value) updateDataDir(event.value);
-                }).catch(e => console.log('[agent:stateApi] SSE subscribe failed:', e.message));
+                // C3: SSE subscription for real-time updates (handle stored for cleanup on reconnect)
+                try {
+                    _sseHandle = stateApi.subscribeSSE({
+                        onEvent(event) {
+                            console.log('[agent:stateApi] SSE:', event.topic, event.op, event.path);
+                            if (event.path === 'app.savePath' && event.value) updateDataDir(event.value);
+                        }
+                    });
+                } catch (e) { console.log('[agent:stateApi] SSE subscribe failed:', e.message); }
             } catch (e) { console.log('[agent:stateApi] HTTP restore failed:', e.message); }
         })();
     });
