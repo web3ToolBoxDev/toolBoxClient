@@ -1001,8 +1001,15 @@ class TaskService {
             // 收集 stderr 信息，并标记是否发生错误；不要在此处直接 finishTask，等待 child close 后统一判断
             let childHadError = false;
             let stderrBuffer = '';
+            // 已知的良性 stderr 模式（deprecation 警告、Node.js 内部警告等），不计入错误
+            const BENIGN_STDERR_RE = /\bDEPRECATED\b|DeprecationWarning|ExperimentalWarning/i;
             childProcess.stderr.on('data', (data) => {
                 const str = String(data);
+                // 过滤已知良性警告：仅记录到服务端日志，不标记为错误，不推送到前端
+                if (BENIGN_STDERR_RE.test(str)) {
+                    console.log(`stderr (benign, filtered): ${str.trim()}`);
+                    return;
+                }
                 console.error(`stderr: ${str}`);
                 childHadError = true;
                 stderrBuffer += str;

@@ -57,6 +57,15 @@ app.use('/api/dashboard', (req, res) => {
 
 app.listen(port, '127.0.0.1', async () => {
   console.log(`服务器已启动，监听端口 ${port}`);
+
+  // Report actual port to Electron main process (utilityProcess IPC)
+  try {
+    if (process.parentPort) {
+      process.parentPort.postMessage({ type: 'server-port', port });
+    }
+  } catch (e) {
+    // Not running inside Electron utilityProcess — ignore
+  }
   webService.initialize(app);
 
   // Start the memory dbservice process

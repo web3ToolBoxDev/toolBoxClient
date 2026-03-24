@@ -63,7 +63,7 @@ const PERSIST_KEYS = [
  * @param {object} state - The full agent state object
  */
 function save(dataDir, state) {
-    console.warn('[sessionStore] DEPRECATED: save() is a no-op. Persistence is now handled by StateService.');
+    // no-op: persistence is now handled by StateService
 }
 
 /**

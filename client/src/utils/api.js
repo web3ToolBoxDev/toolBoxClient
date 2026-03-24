@@ -5,11 +5,34 @@ class APIManager {
     static instance = null;
     constructor() {
         if (!APIManager.instance) {
-            this.baseUrl = 'http://localhost:30001/api';
+            const port = APIManager._resolvePort();
+            this.baseUrl = `http://localhost:${port}/api`;
             this._lastRunningAlertAt = 0;
             APIManager.instance = this;
         }
         return APIManager.instance;
+    }
+
+    /**
+     * Resolve backend port: Electron IPC > window.__API_PORT__ > default 30001.
+     */
+    static _resolvePort() {
+        try {
+            if (typeof window !== 'undefined') {
+                // Prefer synchronous IPC (available when running inside Electron)
+                if (window.electronAPI && typeof window.electronAPI.getBackendPort === 'function') {
+                    const ipcPort = window.electronAPI.getBackendPort();
+                    if (ipcPort && Number.isFinite(ipcPort)) return ipcPort;
+                }
+                // Fallback: Electron injects this via executeJavaScript
+                if (window.__API_PORT__ && Number.isFinite(window.__API_PORT__)) {
+                    return window.__API_PORT__;
+                }
+            }
+        } catch (e) {
+            // ignore — not in Electron context
+        }
+        return 30001;
     }
     static getInstance() {
         if (!APIManager.instance) {

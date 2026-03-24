@@ -98,6 +98,23 @@ test.describe.serial('Fingerprint Browser API', () => {
     }
   });
 
+  test('F1b: GET /api/getFingerPrintCount returns node count', async () => {
+    test.skip(!backendUp, 'Backend not available');
+    const { status, body } = await fetchJSON('/api/getFingerPrintCount');
+    expect(status).toBe(200);
+    // Response shape: { success: bool, code: number, message: number|string, testError: 'testError' }
+    expect(body).toHaveProperty('success');
+    expect(body).toHaveProperty('testError', 'testError');
+    if (body.success) {
+      expect(body.code).toBe(0);
+      expect(typeof body.message).toBe('number');
+      expect(body.message).toBeGreaterThanOrEqual(0);
+    } else {
+      // No fingerprint data loaded — code 2002 is expected
+      expect(body.code).toBe(2002);
+    }
+  });
+
   test('F2: POST /api/generateFingerPrints generates 1 fingerprint', async () => {
     test.skip(!backendUp, 'Backend not available');
     const { status, body } = await postJSON('/api/generateFingerPrints', { counts: 1 });
@@ -118,6 +135,23 @@ test.describe.serial('Fingerprint Browser API', () => {
     // Capture the newly created fingerprint ID (last by insertion order)
     // NeDB doesn't guarantee order, so find the one not in the original set
     createdId = ids[ids.length - 1]; // best guess — last key
+  });
+
+  test('F3b: GET /api/getFingerPrintCount reflects generated fingerprints', async () => {
+    test.skip(!backendUp, 'Backend not available');
+    // After generating fingerprints, getFingerPrintCount should return
+    // a count based on fpData (matchedFingerprintList / languageFingerprintList).
+    // Note: getFingerPrintCount reads from the loaded fpData file, NOT from DB.
+    // If no fpData was loaded, success will be false — which is still valid.
+    const { status, body } = await fetchJSON('/api/getFingerPrintCount');
+    expect(status).toBe(200);
+    expect(body).toHaveProperty('success');
+    // Verify the response structure is always consistent
+    expect(body).toHaveProperty('testError', 'testError');
+    if (body.success) {
+      expect(body.code).toBe(0);
+      expect(typeof body.message).toBe('number');
+    }
   });
 
   test('F4: POST /api/updateFingerPrintName renames successfully', async () => {

@@ -2,6 +2,12 @@
 
 > A desktop platform that provides browser execution, persistent memory, and shared tool capabilities for AI agents. Agents connect via a standard WebSocket protocol and operate real fingerprint browsers to automate complex web workflows.
 
+## Video Demo
+
+[![Watch the demo](https://img.youtube.com/vi/1hM0i_aTNdM/maxresdefault.jpg)](https://youtu.be/1hM0i_aTNdM)
+
+> Click the image above to watch the full usage walkthrough on YouTube.
+
 ## Platform Architecture
 
 ```

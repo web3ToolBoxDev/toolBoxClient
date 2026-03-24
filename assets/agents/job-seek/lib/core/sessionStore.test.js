@@ -32,12 +32,10 @@ describe('sessionStore', () => {
         expect(fs.existsSync(path.join(tmpDir, 'sessions.json'))).toBe(false);
     });
 
-    it('save() prints deprecation warning', () => {
+    it('save() is silent (no console output)', () => {
         const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
         save(tmpDir, { sessions: [] });
-        expect(warnSpy).toHaveBeenCalledWith(
-            expect.stringContaining('DEPRECATED')
-        );
+        expect(warnSpy).not.toHaveBeenCalled();
         warnSpy.mockRestore();
     });
 
