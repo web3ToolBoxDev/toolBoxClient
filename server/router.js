@@ -209,6 +209,13 @@ router.post('/setSavePath',async(req,res)=>{
   try { taskService.resetAiSessions(); } catch (e) {
     console.error('[router] resetAiSessions after savePath change failed:', e.message);
   }
+  // Switch StateService persistence to new savePath so it reads/writes correct data
+  try {
+    const { StateService } = require('./services/stateService');
+    StateService.getInstance().onSavePathChanged(path);
+  } catch (e) {
+    console.error('[router] stateService.onSavePathChanged failed:', e.message);
+  }
   // Restart dbservice so it picks up the new savePath
   try { await memoryService.restartDbService(); } catch (e) {
     console.error('[router] restartDbService after savePath change failed:', e.message);

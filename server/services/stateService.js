@@ -385,6 +385,22 @@ class Persistence {
     isLoaded(agentName) {
         return !!this._loaded[agentName];
     }
+
+    /**
+     * Switch the base path for agent data (called when savePath changes).
+     * Flushes pending writes, resets loaded flags so next access reloads from new path.
+     * @param {string} newBasePath - new agents directory (e.g. savePath/agents)
+     */
+    switchBasePath(newBasePath) {
+        // Flush all pending writes to OLD basePath
+        for (const agentName of Object.keys(this._timers)) {
+            clearTimeout(this._timers[agentName]);
+            delete this._timers[agentName];
+        }
+        this._basePath = newBasePath;
+        // Reset loaded flags so _ensureLoaded will re-read from new path
+        this._loaded = {};
+    }
 }
 
 // ─── StateService (Singleton) ──────────────────────────────
@@ -818,6 +834,31 @@ class StateService {
         } catch (err) {
             console.error(`[StateService] broadcastToFrontend failed for agent "${agentId}":`, err.message);
         }
+    }
+
+    // ── SavePath switching ──
+
+    /**
+     * Called when the user switches savePath. Persists current state to old path,
+     * switches Persistence base path, clears in-memory state so next access
+     * reloads from the new savePath directory.
+     * @param {string} newSavePath - absolute path to new save directory
+     */
+    onSavePathChanged(newSavePath) {
+        const newBasePath = path.join(newSavePath, 'agents');
+        // 1. Flush current state to OLD basePath
+        for (const agentId of Object.keys(this.store._state)) {
+            const agentName = this._agentIdToName(agentId);
+            const data = this.store.snapshot(agentId);
+            if (data && Object.keys(data).length > 0) {
+                this.persistence.saveNow(agentName, data);
+            }
+        }
+        // 2. Switch persistence to new path
+        this.persistence.switchBasePath(newBasePath);
+        // 3. Clear in-memory state (will reload from new path on next access)
+        this.store._state = {};
+        console.log(`[StateService] Switched persistence to ${newBasePath}`);
     }
 
     // ── Internal ──
