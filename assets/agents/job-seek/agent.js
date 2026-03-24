@@ -305,10 +305,14 @@ function updateDataDir(newSavePath) {
         console.warn('[savePath-switch] userStore.init failed:', err.message);
     }
 
-    // 5. Emit updated data to frontend
+    // 5. Immediately sync new state to StateService so it doesn't serve stale data
+    //    from the previous savePath (must happen BEFORE emitSessionList to win any
+    //    concurrent fetchSessions race).
+    _syncStateToClient();
+
+    // 6. Emit updated data to frontend
     emitSessionList();
     sendSnapshot();
-    scheduleSave();
 }
 
 // Restore on startup
@@ -2964,20 +2968,35 @@ function initWebSocket() {
         // Request any server-side state that may have been persisted
         stateClient.syncFromServer();
 
-        // C1: Load sessions from stateService HTTP (async, non-blocking)
+        // C1: Sync sessions with stateService HTTP (async, non-blocking)
+        //     On first connect: pull from stateService (it may have newer data).
+        //     On reconnect after savePath switch: push local state instead
+        //     (agent already loaded correct data from new directory).
         (async () => {
             try {
                 const available = await stateApi.isAvailable();
                 if (!available) { console.log('[agent:stateApi] stateService not available, using sessionStore'); return; }
-                const data = await stateApi.fetchSessions();
-                if (data && data.sessions && data.sessions.length > 0) {
-                    state.sessions = data.sessions;
-                    if (data.activeSessionId) state.activeSessionId = data.activeSessionId;
-                    console.log('[agent:stateApi] Loaded', data.sessions.length, 'sessions from stateService');
+                if (state.sessions.length > 0) {
+                    // Agent already has sessions (from restoreState or savePath switch)
+                    // → push to stateService so it stays in sync
+                    await stateApi.pushFullState(state, [
+                        'sessions', 'activeSessionId', 'conversations',
+                        'subtasks', 'artifacts', 'selectedAnswers',
+                        'profileSections', 'masterProfile', 'runtimeContexts', 'envs'
+                    ]).catch(() => {});
+                    console.log('[agent:stateApi] Pushed', state.sessions.length, 'sessions to stateService');
                     emitSessionList();
                 } else {
-                    await stateApi.pushFullState(state).catch(() => {});
-                    console.log('[agent:stateApi] Migrated state to stateService');
+                    // No local sessions — try to pull from stateService
+                    const data = await stateApi.fetchSessions();
+                    if (data && data.sessions && data.sessions.length > 0) {
+                        state.sessions = data.sessions;
+                        if (data.activeSessionId) state.activeSessionId = data.activeSessionId;
+                        console.log('[agent:stateApi] Loaded', data.sessions.length, 'sessions from stateService');
+                        emitSessionList();
+                    } else {
+                        console.log('[agent:stateApi] No sessions anywhere, fresh state');
+                    }
                 }
                 // C3: SSE subscription for real-time updates (handle stored for cleanup on reconnect)
                 try {
