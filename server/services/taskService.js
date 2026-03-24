@@ -1002,13 +1002,32 @@ class TaskService {
             let childHadError = false;
             let stderrBuffer = '';
             // 已知的良性 stderr 模式（deprecation 警告、Node.js 内部警告等），不计入错误
-            const BENIGN_STDERR_RE = /\bDEPRECATED\b|DeprecationWarning|ExperimentalWarning/i;
+            const BENIGN_STDERR_RE = /\bDEPRECATED\b|DeprecationWarning|ExperimentalWarning|sessionStore/i;
+            // BUG-005: Deduplicate repeated stderr messages within a short window
+            // to prevent the same warning from flooding the frontend (e.g., listener accumulation)
+            const recentStderr = new Map(); // message → timestamp
+            const STDERR_DEDUP_WINDOW_MS = 5000;
             childProcess.stderr.on('data', (data) => {
                 const str = String(data);
                 // 过滤已知良性警告：仅记录到服务端日志，不标记为错误，不推送到前端
                 if (BENIGN_STDERR_RE.test(str)) {
                     console.log(`stderr (benign, filtered): ${str.trim()}`);
                     return;
+                }
+                // Deduplicate: skip identical messages within the dedup window
+                const trimmed = str.trim();
+                const now = Date.now();
+                const lastSeen = recentStderr.get(trimmed);
+                if (lastSeen && (now - lastSeen) < STDERR_DEDUP_WINDOW_MS) {
+                    console.log(`stderr (dedup, skipped): ${trimmed}`);
+                    return;
+                }
+                recentStderr.set(trimmed, now);
+                // Prune old entries to prevent memory growth
+                if (recentStderr.size > 50) {
+                    for (const [key, ts] of recentStderr) {
+                        if (now - ts > STDERR_DEDUP_WINDOW_MS) recentStderr.delete(key);
+                    }
                 }
                 console.error(`stderr: ${str}`);
                 childHadError = true;

@@ -246,7 +246,11 @@ function saveState() {
  * Switch the persistent data directory at runtime (e.g., when user changes savePath).
  * Saves current state to old dir, computes new dir, loads state from new dir,
  * and emits updated session list + snapshot to the frontend.
+ *
+ * BUG-005 fix: updateDataDir can be triggered twice per savePath switch (once via
+ * WebSocket message, once via SSE event). Use _updateDataDirInFlight to deduplicate.
  */
+let _updateDataDirInFlight = null; // tracks the dir currently being switched to
 function updateDataDir(newSavePath) {
     if (!newSavePath || typeof newSavePath !== 'string') {
         console.warn('[savePath-switch] updateDataDir called with invalid path, ignoring');
@@ -260,7 +264,19 @@ function updateDataDir(newSavePath) {
         emitSessionList();
         return;
     }
+    // Deduplicate: if already switching to this exact directory, skip
+    if (_updateDataDirInFlight === newDir) {
+        console.log('[savePath-switch] updateDataDir: already switching to this dir, dedup', { dir: newDir });
+        return;
+    }
+    _updateDataDirInFlight = newDir;
     console.log('[savePath-switch] updateDataDir:', { from: oldDir, to: newDir });
+
+    // Cancel any pending debounced save from the OLD directory to prevent stale writes
+    if (_saveTimer) {
+        clearTimeout(_saveTimer);
+        _saveTimer = null;
+    }
 
     // 1. Save current state to OLD directory
     saveState();
@@ -313,6 +329,9 @@ function updateDataDir(newSavePath) {
     // 6. Emit updated data to frontend
     emitSessionList();
     sendSnapshot();
+
+    // Clear inflight guard so future switches to a different dir can proceed
+    _updateDataDirInFlight = null;
 }
 
 // Restore on startup
