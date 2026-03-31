@@ -817,15 +817,34 @@ async function verifyJDExtraction(browserId, pageIndex, script, testParams) {
             return { ok: false, message: `JD verify: script returned no jobs (${elapsed}ms)`, jobCount: 0, fullTextLen: 0 };
         }
 
-        // Check if at least 1 job has non-empty fullText
-        const withJD = result.jobs.filter(j => j.fullText && j.fullText.length > 50);
+        // Check fullText extraction quality — require majority of jobs to have JD
+        const withJD = result.jobs.filter(j => j.fullText && j.fullText.length > 50
+            && !j.fullText.startsWith('[JD_EXTRACT_FAILED'));
+        const failedJD = result.jobs.filter(j => (j.fullText || '').startsWith('[JD_EXTRACT_FAILED'));
         const bestLen = Math.max(0, ...result.jobs.map(j => (j.fullText || '').length));
-        console.log(`[dashboard:build] verify-jd — ${result.jobs.length} jobs, ${withJD.length} with fullText (best: ${bestLen} chars, ${elapsed}ms)`);
+        const jdRate = result.jobs.length > 0 ? withJD.length / result.jobs.length : 0;
+        console.log(`[dashboard:build] verify-jd — ${result.jobs.length} jobs, ${withJD.length} with fullText, ${failedJD.length} failed (best: ${bestLen} chars, ${elapsed}ms)`);
+
+        // Log individual failure reasons for diagnosis
+        for (const j of failedJD) {
+            console.log(`[dashboard:build] verify-jd — FAIL: "${(j.title || '?').slice(0, 50)}": ${j.fullText}`);
+        }
 
         if (withJD.length === 0) {
             return {
                 ok: false,
-                message: `JD verify: ${result.jobs.length} jobs found but none have fullText (best: ${bestLen} chars, ${elapsed}ms)`,
+                message: `JD verify: ${result.jobs.length} jobs found but none have fullText (${failedJD.length} extraction failures, best: ${bestLen} chars, ${elapsed}ms)`,
+                jobCount: result.jobs.length,
+                fullTextLen: bestLen
+            };
+        }
+
+        // Require at least 50% JD extraction success rate
+        const MIN_JD_RATE = 0.5;
+        if (jdRate < MIN_JD_RATE) {
+            return {
+                ok: false,
+                message: `JD verify: only ${withJD.length}/${result.jobs.length} (${Math.round(jdRate * 100)}%) jobs have fullText — below ${Math.round(MIN_JD_RATE * 100)}% threshold (${failedJD.length} failures, ${elapsed}ms)`,
                 jobCount: result.jobs.length,
                 fullTextLen: bestLen
             };
