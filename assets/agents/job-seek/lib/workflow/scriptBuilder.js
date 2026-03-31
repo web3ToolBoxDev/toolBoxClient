@@ -649,7 +649,9 @@ Return ONLY a JavaScript code block (no imports, no browser creation). The code 
       Discover the correct selectors from the DOM structure provided below — do NOT hardcode
       selectors from other platforms. Look for the largest text block in the detail area.
    e. Store the extracted text as job.fullText (string).
-   f. Wrap each iteration in try/catch — if detail extraction fails, set fullText to '' and continue.
+   f. Wrap each iteration in try/catch — if detail extraction fails, set fullText to '[JD_EXTRACT_FAILED]'
+      (NOT empty string — empty string means "no description available", while this marker tells the
+      pipeline that extraction was attempted but failed, so it can flag the search tool for rebuild).
       Also check if the page navigated away (e.g. to a 404 or job detail page) — if so, use
       page.goBack() and wait 2s before continuing to the next job.
    g. The final output for each job: { title, company, url, location, salary, jobType, description (snippet), fullText (complete JD) }.

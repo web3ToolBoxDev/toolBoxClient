@@ -1373,17 +1373,55 @@ async function _runPipeline(sessionId) {
                         { envId: q.envId || config.envId, maxResults: Math.min(remaining, config.maxResults) }
                     );
                     if (scriptResult.success && scriptResult.jobs) {
-                        listings = scriptResult.jobs.map(j => ({
-                            title: j.title || '',
-                            company: j.company || '',
-                            location: j.location || q.location || '',
-                            url: normalizeJobUrl(j.url || j.link || ''),
-                            salary: j.salary || '',
-                            jobType: j.jobType || '',
-                            source: q.source,
-                            fullText: j.fullText || ''
-                        }));
-                        _log(`[${q.source}] Platform tool returned ${listings.length} results`);
+                        let _jdExtractFailCount = 0;
+                        listings = scriptResult.jobs.map(j => {
+                            let ft = j.fullText || '';
+                            if (ft === '[JD_EXTRACT_FAILED]') { _jdExtractFailCount++; ft = ''; }
+                            return {
+                                title: j.title || '',
+                                company: j.company || '',
+                                location: j.location || q.location || '',
+                                url: normalizeJobUrl(j.url || j.link || ''),
+                                salary: j.salary || '',
+                                jobType: j.jobType || '',
+                                source: q.source,
+                                fullText: ft
+                            };
+                        });
+                        if (_jdExtractFailCount > 0) {
+                            _log(`[${q.source}] Platform tool returned ${listings.length} results (⚠ ${_jdExtractFailCount} JD extractions explicitly failed)`);
+                        } else {
+                            _log(`[${q.source}] Platform tool returned ${listings.length} results`);
+                        }
+
+                        // ── JD extraction health check ──
+                        // If most jobs have empty fullText, Phase 2 is broken → flag for rebuild
+                        if (listings.length >= 3) {
+                            const emptyJdCount = listings.filter(l => !l.fullText || l.fullText.trim().length < 50).length;
+                            const emptyJdRate = emptyJdCount / listings.length;
+                            if (emptyJdRate >= 0.5) {
+                                _log(`⚠ [${q.source}] JD extraction degraded: ${emptyJdCount}/${listings.length} (${Math.round(emptyJdRate * 100)}%) jobs have no fullText`);
+                                dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                                    cell: 'search', status: 'error',
+                                    message: `JD extraction failing (${emptyJdCount}/${listings.length} empty) — please Rebuild search tool`
+                                });
+                                // Capture screenshot for rebuild context
+                                try {
+                                    const _jdToolClient = require('./core/toolServiceClient');
+                                    const _jdPlatform = getPlatformStore().getPlatform(sessionId, platformTool.id);
+                                    if (_jdPlatform?._browserId) {
+                                        const _jdSs = await _jdToolClient.executeTool('page_screenshot', {
+                                            browserId: _jdPlatform._browserId, pageIndex: _jdPlatform._pageIndex || 0
+                                        });
+                                        if (_jdSs?.result?.screenshot || _jdSs?.screenshot) {
+                                            getPlatformStore().updateToolStatus(sessionId, platformTool.id, 'search', 'error', {
+                                                lastFailScreenshot: _jdSs.result?.screenshot || _jdSs.screenshot
+                                            });
+                                        }
+                                    }
+                                } catch (_) { /* screenshot best-effort */ }
+                            }
+                        }
 
                         // ── Capture screenshot immediately after search execution ──
                         let searchScreenshot = null;
