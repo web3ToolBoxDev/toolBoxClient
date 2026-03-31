@@ -345,6 +345,7 @@ function updateDataDir(newSavePath) {
                         if (!state.selectedAnswers[s.id]) state.selectedAnswers[s.id] = {};
                     }
                     console.log('[savePath-switch] Pulled', state.sessions.length, 'sessions from stateService (source of truth)');
+                    try { dashboardServer.resetJobCardsCache(); } catch (_) {}
                 } else {
                     // StateService has no data for new path — push local sessions.json data
                     await stateApi.pushFullState(state, sessionStore.PERSIST_KEYS).catch(() => {});
@@ -3045,6 +3046,8 @@ function initWebSocket() {
                             if (!state.selectedAnswers[s.id]) state.selectedAnswers[s.id] = {};
                         }
                         console.log('[agent:stateApi] Pulled', state.sessions.length, 'sessions from stateService (source of truth)');
+                        // Reset dashboardServer caches so they re-hydrate from updated state
+                        try { dashboardServer.resetJobCardsCache(); } catch (_) {}
                         emitSessionList();
                         sendSnapshot();
                         pulled = true;

@@ -5530,10 +5530,21 @@ function getDashboardURL(sessionId) {
     return `http://127.0.0.1:${_port}/dashboard/${encodeURIComponent(sessionId)}`;
 }
 
+/**
+ * Reset the job cards hydration cache so next _getJobCards() re-reads from state.
+ * Call this after agent state is updated (e.g., after pulling from StateService).
+ */
+function resetJobCardsCache() {
+    _jobCardsLoaded.clear();
+    _jobCards.clear();
+    console.log('[dashboardServer] Job cards cache cleared — will re-hydrate on next access');
+}
+
 module.exports = {
     start, stop, getDashboardURL, DASHBOARD_PORT,
     // Job workflow
     upsertJobCard, updateJobStatus, deleteJobCard, getJobCards, getJobStats, getInterruptedJobs,
+    resetJobCardsCache,
     // Platform workflow status
     updatePlatformCell, getWorkflowStatus, computeCellVisual,
     clearPlatformStatuses, removePlatformStatus,
