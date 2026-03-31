@@ -386,6 +386,40 @@ async function buildTool(sessionId, platformId, toolType, options = {}) {
             emitProgress(buildLog, onProgress);
 
             if (verifyResult.ok) {
+                // Step 4 passed — now verify JD extraction (Phase 2) inline
+                if (toolType === 'search') {
+                    console.log(`[dashboard:build] Step 4b — Verifying JD extraction...`);
+                    buildLog.push(logEntry(4, 'Verifying JD extraction (Phase 2)', 'running'));
+                    emitProgress(buildLog, onProgress);
+
+                    const jdResult = await verifyJDExtraction(browserId, pageIndex, generatedScript, testParams);
+                    console.log(`[dashboard:build] Step 4b — JD verify result: ok=${jdResult.ok} | ${jdResult.message}`);
+
+                    if (jdResult.ok) {
+                        buildLog.push(logEntry(4, jdResult.message, 'success'));
+                        emitProgress(buildLog, onProgress);
+                        verified = true;
+                        break; // Both Phase 1 and Phase 2 verified!
+                    } else {
+                        // JD verify failed — feed error back to AI for next attempt
+                        buildLog.push(logEntry(4, `JD extraction failed: ${jdResult.message}`, 'failed'));
+                        emitProgress(buildLog, onProgress);
+                        lastError = `Phase 1 (search) works, but Phase 2 (JD detail extraction) failed: ${jdResult.message}. ` +
+                            'The script must use page.humanClick(selector) to click job cards (NOT page.evaluate(() => el.click())), ' +
+                            'and check URL after each click to detect navigation away from search results.';
+                        console.log(`[dashboard:build] Step 4b — FAILED, feeding back to AI: ${lastError.slice(0, 150)}`);
+
+                        // Navigate back to search page before retry
+                        try {
+                            const platformUrl = platform.url || '';
+                            if (platformUrl) {
+                                await toolCall('page_navigate', { browserId, pageIndex, url: platformUrl });
+                                await new Promise(r => setTimeout(r, 3000));
+                            }
+                        } catch (_) {}
+                        continue; // Back to Step 3 with JD error as context
+                    }
+                }
                 verified = true;
                 break;
             }
@@ -421,52 +455,9 @@ async function buildTool(sessionId, platformId, toolType, options = {}) {
             return { success: false, error: lastError || 'Verification failed after max retries', buildLog };
         }
 
-        // ---------------------------------------------------------------
-        // Step 4b — JD Extraction Verification (search scripts only)
-        // Runs the script WITHOUT _verifyMode to confirm fullText extraction works.
-        // Retries up to JD_VERIFY_MAX_RETRIES times. If all fail, saves script
-        // with jdVerified=false so pipeline can fall back to HTTP JD fetch.
-        // ---------------------------------------------------------------
-        let jdVerified = false;
-        if (toolType === 'search') {
-            console.log(`[dashboard:build] Step 4b — Verifying JD extraction (up to ${JD_VERIFY_MAX_RETRIES} attempts)...`);
-            buildLog.push(logEntry(4, 'Verifying JD extraction (Phase 2)', 'running'));
-            emitProgress(buildLog, onProgress);
-
-            for (let jdAttempt = 1; jdAttempt <= JD_VERIFY_MAX_RETRIES; jdAttempt++) {
-                console.log(`[dashboard:build] Step 4b — JD verify attempt ${jdAttempt}/${JD_VERIFY_MAX_RETRIES}`);
-                const jdResult = await verifyJDExtraction(browserId, pageIndex, generatedScript, testParams);
-                console.log(`[dashboard:build] Step 4b — JD verify result: ok=${jdResult.ok} | ${jdResult.message}`);
-
-                if (jdResult.ok) {
-                    jdVerified = true;
-                    buildLog.push(logEntry(4, jdResult.message, 'success'));
-                    emitProgress(buildLog, onProgress);
-                    break;
-                }
-
-                buildLog.push(logEntry(4, `JD verify attempt ${jdAttempt} failed: ${jdResult.message}`, 'failed'));
-                emitProgress(buildLog, onProgress);
-
-                // Navigate back to search page before retry (JD click may have navigated away)
-                if (jdAttempt < JD_VERIFY_MAX_RETRIES) {
-                    try {
-                        const platformUrl = platform.url || '';
-                        if (platformUrl) {
-                            console.log(`[dashboard:build] Step 4b — Navigating back to ${platformUrl} before retry...`);
-                            await toolCall('page_navigate', { browserId, pageIndex, url: platformUrl });
-                            await new Promise(r => setTimeout(r, 3000));
-                        }
-                    } catch (_) { /* ignore navigation error */ }
-                }
-            }
-
-            if (!jdVerified) {
-                console.log(`[dashboard:build] Step 4b — JD extraction failed after ${JD_VERIFY_MAX_RETRIES} attempts. Saving script with jdVerified=false (fallback to HTTP fetch).`);
-                buildLog.push(logEntry(4, `JD extraction verify failed after ${JD_VERIFY_MAX_RETRIES} attempts — script saved with HTTP fallback`, 'warning'));
-                emitProgress(buildLog, onProgress);
-            }
-        }
+        // JD verification is now integrated into the Step 3-4 retry loop above.
+        // If the loop exits with verified=true, both Phase 1 and Phase 2 passed.
+        const jdVerified = verified && toolType === 'search';
 
         // ---------------------------------------------------------------
         // Step 5 — Store
