@@ -470,6 +470,11 @@ function normalizeJobUrl(rawUrl) {
         if (u.hostname.includes('indeed.com') && u.searchParams.has('jk')) {
             return `${u.origin}${u.pathname}?jk=${u.searchParams.get('jk')}`;
         }
+        // Indeed pagead/clk: opaque ad tracking URL with no stable ID.
+        // Cannot normalize — return as-is; dedup relies on title+company fallback.
+        if (u.hostname.includes('indeed.com') && (u.pathname.includes('/pagead/') || u.pathname.includes('/clk'))) {
+            return rawUrl;
+        }
         // LinkedIn: strip tracking, keep job ID in path
         if (u.hostname.includes('linkedin.com')) {
             return `${u.origin}${u.pathname}`;
@@ -480,6 +485,16 @@ function normalizeJobUrl(rawUrl) {
     } catch {
         return rawUrl; // not a valid URL, use as-is
     }
+}
+
+/**
+ * Build a dedup key from title + company (fallback when URL cannot be normalized).
+ * Used for Indeed pagead/clk URLs where every request produces a unique tracking URL.
+ */
+function _jobDedupKey(listing) {
+    const title = (listing.title || '').trim().toLowerCase();
+    const company = (listing.company || '').trim().toLowerCase();
+    return `${title}|||${company}`;
 }
 
 // Seen jobs: sessionId → Set<normalizedUrl> — persists across pipeline runs within a session
@@ -1684,9 +1699,12 @@ async function _runPipeline(sessionId) {
                     continue;
                 }
 
-                // ── Overlap rate detection ──
+                // ── Overlap rate detection (URL + title+company dedup) ──
                 const totalResults = listings.filter(l => l.url).length;
-                const seenCount = listings.filter(l => l.url && seenUrls.has(l.url)).length;
+                const _dedupKeys = pipeline._seenDedupKeys || new Set();
+                const seenCount = listings.filter(l => l.url && (
+                    seenUrls.has(l.url) || _dedupKeys.has(_jobDedupKey(l))
+                )).length;
                 const overlapRate = totalResults > 0 ? seenCount / totalResults : 0;
                 const newCount = totalResults - seenCount;
 
@@ -1709,9 +1727,16 @@ async function _runPipeline(sessionId) {
                         break;
                     }
 
-                    if (listing.url && !seenUrls.has(listing.url)) {
+                    // Dedup: check URL first, then title+company fallback
+                    // (Indeed pagead/clk URLs are unique per request, so URL dedup alone is insufficient)
+                    const dedupKey = _jobDedupKey(listing);
+                    const isDuplicate = (listing.url && seenUrls.has(listing.url))
+                        || (dedupKey && pipeline._seenDedupKeys && pipeline._seenDedupKeys.has(dedupKey));
+                    if (listing.url && !isDuplicate) {
                         seenUrls.add(listing.url);
                         _addSeenJob(sessionId, listing.url);
+                        if (!pipeline._seenDedupKeys) pipeline._seenDedupKeys = new Set();
+                        if (dedupKey) pipeline._seenDedupKeys.add(dedupKey);
                         _sourceResultCount[q.source] = (_sourceResultCount[q.source] || 0) + 1;
                         _totalFetched++;
                         _log(`+ "${listing.title}" @ ${listing.company || '?'} (${listing.location || '?'})`);
