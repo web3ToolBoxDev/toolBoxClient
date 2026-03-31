@@ -470,6 +470,7 @@ function updateToolStatus(sessionId, platformId, toolType, status, extra = {}) {
     if (extra.script !== undefined) tool.script = extra.script;
     if (extra.buildLog) tool.buildLog = extra.buildLog;
     if (extra.jdVerified !== undefined) tool.jdVerified = extra.jdVerified;
+    if (extra.lastFailScreenshot) tool.lastFailScreenshot = extra.lastFailScreenshot;
     if (status === 'ready' && extra.script) {
         tool.version++;
         // Persist script to disk so it survives session restarts

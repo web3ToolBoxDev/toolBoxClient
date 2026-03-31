@@ -1415,13 +1415,21 @@ async function _runPipeline(sessionId) {
                                         const _jdSs = await _jdToolClient.executeTool('page_screenshot', {
                                             browserId: _jdPlatform._browserId, pageIndex: _jdPlatform._pageIndex || 0
                                         });
-                                        if (_jdSs?.result?.screenshot || _jdSs?.screenshot) {
+                                        const ssData = _jdSs?.result?.screenshot || _jdSs?.screenshot || null;
+                                        if (ssData) {
                                             getPlatformStore().updateToolStatus(sessionId, platformTool.id, 'search', 'error', {
-                                                lastFailScreenshot: _jdSs.result?.screenshot || _jdSs.screenshot
+                                                lastFailScreenshot: ssData
                                             });
+                                            _log(`  📸 JD failure screenshot captured (${(ssData.length / 1024).toFixed(1)}KB)`);
+                                        } else {
+                                            _log(`  ⚠ JD failure screenshot: empty result`);
                                         }
+                                    } else {
+                                        _log(`  ⚠ JD failure screenshot: no browser available`);
                                     }
-                                } catch (_) { /* screenshot best-effort */ }
+                                } catch (ssErr) {
+                                    _log(`  ⚠ JD failure screenshot failed: ${ssErr.message}`);
+                                }
                             }
                         }
 
