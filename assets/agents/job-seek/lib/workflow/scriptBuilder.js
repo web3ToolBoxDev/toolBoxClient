@@ -638,31 +638,22 @@ Return ONLY a JavaScript code block (no imports, no browser creation). The code 
    a. IMPORTANT: Check params._verifyMode at the top of Phase 2. If truthy, SKIP the entire Phase 2 loop
       (just set each job.fullText = '' and continue). This makes verification fast.
       Example: if (params._verifyMode) { jobs.forEach(j => j.fullText = ''); } else { /* Phase 2 loop */ }
-   b. BEFORE clicking: save the current URL with `const searchUrl = await page.url();`
-   c. humanClick the job card title/link to open its details in the split-pane or detail panel.
-      CRITICAL: The click MUST open a split-pane/side-panel on the SAME search results page.
-      Do NOT use page.goto() to navigate to the job detail URL — that leaves the search results page.
-   d. randomDelay(1500, 3000) to wait for the detail panel to load.
-   e. AFTER the delay: CHECK if the page navigated away by comparing `await page.url()` with searchUrl.
-      If the URL changed (especially to /viewjob, /rc/clk, a 404 page, or any URL that is NOT the
-      original search results page):
-        - Immediately call page.goBack() and wait 2s for the search page to reload.
-        - Set fullText to '[JD_EXTRACT_FAILED:navigated to <new_url_pathname>]'
-        - Continue to the next job (do NOT attempt extraction on the wrong page).
-      Also check the page title — if it contains "not found", "404", or "error", treat as navigation failure.
-   f. Use page.evaluate() to extract the FULL job description text from the detail panel.
-      Discover the correct selectors from the DOM structure provided below — do NOT hardcode
-      selectors from other platforms. Look for the largest text block in the detail area.
-   g. Store the extracted text as job.fullText (string). If the extracted text is empty or very short
-      (< 30 chars), set fullText to '[JD_EXTRACT_FAILED:empty text after extraction]'.
-   h. Wrap each iteration in try/catch — if detail extraction fails:
-      - Set fullText to '[JD_EXTRACT_FAILED:<reason>]' where <reason> is a SHORT error description
-        (e.g. '[JD_EXTRACT_FAILED:selector not found]', '[JD_EXTRACT_FAILED:panel did not open]',
-        '[JD_EXTRACT_FAILED:navigated to /viewjob]', '[JD_EXTRACT_FAILED:empty text]').
-        This marker tells the pipeline that extraction was attempted but failed, with the reason
-        for diagnosis. Do NOT set fullText to empty string '' — that means "no description exists".
-      - After the catch, ALWAYS check if URL changed and goBack() if needed before next iteration.
-   g. The final output for each job: { title, company, url, location, salary, jobType, description (snippet), fullText (complete JD) }.
+   b. Save the search page URL before the loop: const searchPageUrl = await page.url();
+   c. For each job, inside a try/catch:
+      1. humanClick the job card title/link to open its details in the split-pane or detail panel.
+         Do NOT use page.goto() — the click should open a side panel, not navigate away.
+      2. randomDelay(1500, 3000) to wait for the detail panel to load.
+      3. Check if browser navigated away: const currentUrl = await page.url();
+         If currentUrl !== searchPageUrl, the click caused a full page navigation.
+         Call page.goBack(), wait 2s, set job.fullText = '[JD_EXTRACT_FAILED:navigated away]', continue.
+      4. Use page.evaluate() to extract the FULL job description text from the detail panel.
+         Look for the largest text block in the detail area using DOM selectors from the structure below.
+      5. If extracted text is empty or shorter than 30 characters:
+         set job.fullText = '[JD_EXTRACT_FAILED:empty text]'
+      6. Otherwise store the extracted text as job.fullText.
+   d. In the catch block: set job.fullText = '[JD_EXTRACT_FAILED:' + err.message.slice(0, 60) + ']'
+      Then check URL — if it changed from searchPageUrl, call page.goBack() and wait 2s.
+   e. The final output for each job: { title, company, url, location, salary, jobType, description (snippet), fullText (complete JD) }.
       IMPORTANT field definitions — do NOT confuse these two fields:
       - salary: compensation/pay range ONLY (e.g. "$80K-$120K", "CA$90,000/yr"). Leave empty string "" if no salary/pay is shown.
       - jobType: employment type (e.g. "Full-time", "Part-time", "Contract", "Internship"). Leave empty string "" if not shown.
