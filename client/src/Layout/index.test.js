@@ -44,7 +44,8 @@ jest.mock('../utils/api', () => ({
     default: {
         getInstance: () => ({
             getFingerPrintCount: jest.fn().mockResolvedValue({ success: true, message: 0 }),
-            setStateLanguage: jest.fn().mockResolvedValue({ success: true })
+            setStateLanguage: jest.fn().mockResolvedValue({ success: true }),
+            checkWebSocket: jest.fn().mockResolvedValue({ success: true })
         })
     }
 }));
@@ -61,14 +62,14 @@ describe('Layout', () => {
 
     const DummyChild = () => <div data-testid="child">Child Content</div>;
 
-    it('renders child component and sidebar', () => {
-        render(<Layout Child={DummyChild} />);
+    it('renders child component and sidebar', async () => {
+        await act(async () => { render(<Layout Child={DummyChild} />); });
         expect(screen.getByTestId('child')).toBeInTheDocument();
         expect(screen.getByText('Web3ToolBox')).toBeInTheDocument();
     });
 
-    it('renders all menu items', () => {
-        render(<Layout Child={DummyChild} />);
+    it('renders all menu items', async () => {
+        await act(async () => { render(<Layout Child={DummyChild} />); });
         expect(screen.getByTitle('introduction')).toBeInTheDocument();
         expect(screen.getByTitle('chromeManage')).toBeInTheDocument();
         expect(screen.getByTitle('walletManage')).toBeInTheDocument();
@@ -76,15 +77,15 @@ describe('Layout', () => {
         expect(screen.getByTitle('taskManage')).toBeInTheDocument();
     });
 
-    it('toggles sidebar collapse', () => {
-        render(<Layout Child={DummyChild} />);
+    it('toggles sidebar collapse', async () => {
+        await act(async () => { render(<Layout Child={DummyChild} />); });
         const toggleBtn = screen.getByLabelText('Collapse Navigation');
         fireEvent.click(toggleBtn);
         expect(window.localStorage.getItem('layout.sidebarCollapsed')).toBe('1');
     });
 
-    it('opens task offcanvas on taskExecuted event', () => {
-        render(<Layout Child={DummyChild} />);
+    it('opens task offcanvas on taskExecuted event', async () => {
+        await act(async () => { render(<Layout Child={DummyChild} />); });
         expect(screen.queryByTestId('task-offcanvas')).not.toBeInTheDocument();
         act(() => {
             eventEmitter.emit('taskExecuted');
@@ -92,28 +93,28 @@ describe('Layout', () => {
         expect(screen.getByTestId('task-offcanvas')).toBeInTheDocument();
     });
 
-    it('opens task offcanvas on button click', () => {
-        render(<Layout Child={DummyChild} />);
+    it('opens task offcanvas on button click', async () => {
+        await act(async () => { render(<Layout Child={DummyChild} />); });
         fireEvent.click(screen.getByTestId('task-info-button'));
         expect(screen.getByTestId('task-offcanvas')).toBeInTheDocument();
     });
 
-    it('opens and uses language offcanvas', () => {
-        render(<Layout Child={DummyChild} />);
+    it('opens and uses language offcanvas', async () => {
+        await act(async () => { render(<Layout Child={DummyChild} />); });
         fireEvent.click(screen.getByTitle('changeLang'));
         expect(screen.getByText('selectLang')).toBeInTheDocument();
         fireEvent.click(screen.getByText('English'));
         expect(window.localStorage.getItem('appLanguage')).toBe('en');
     });
 
-    it('starts collapsed when localStorage has collapsed=1', () => {
+    it('starts collapsed when localStorage has collapsed=1', async () => {
         window.localStorage.setItem('layout.sidebarCollapsed', '1');
-        render(<Layout Child={DummyChild} />);
+        await act(async () => { render(<Layout Child={DummyChild} />); });
         expect(screen.getByLabelText('Expand Navigation')).toBeInTheDocument();
     });
 
-    it('calls fetchFingerPrints on mount', () => {
-        render(<Layout Child={DummyChild} />);
+    it('calls fetchFingerPrints on mount', async () => {
+        await act(async () => { render(<Layout Child={DummyChild} />); });
         expect(mockFetchFingerPrints).toHaveBeenCalled();
     });
 });

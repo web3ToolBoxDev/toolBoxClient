@@ -27,6 +27,8 @@ const langOptions = [
 
 
 const Layout = ({ Child }) => {
+  const [backendReady, setBackendReady] = useState(false);
+  const [backendError, setBackendError] = useState('');
   const [showTasksOffcanvas, setShowTasksOffcanvas] = useState(false);
   const [showLangOffcanvas, setShowLangOffcanvas] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
@@ -53,7 +55,32 @@ const Layout = ({ Child }) => {
 
   const fetchFingerPrints = useFingerPrintStore((state)=>state.fetchFingerPrints);
 
+  // Backend readiness check — block UI until backend services are up
   useEffect(() => {
+    let cancelled = false;
+    const api = APIManager.getInstance();
+    const MAX_RETRIES = 30; // 30 x 1s = 30s max wait
+    let attempt = 0;
+    const check = async () => {
+      while (!cancelled && attempt < MAX_RETRIES) {
+        attempt++;
+        try {
+          const res = await api.checkWebSocket();
+          if (res && res.success !== false) {
+            if (!cancelled) setBackendReady(true);
+            return;
+          }
+        } catch (_) { /* retry */ }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      if (!cancelled) setBackendError('Backend services failed to start. Please restart the application.');
+    };
+    check();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!backendReady) return;
     fetchFingerPrints();
 
     const handleTaskExecuted = () => {
@@ -68,7 +95,7 @@ const Layout = ({ Child }) => {
     return () => {
       eventEmitter.off('taskExecuted', handleTaskExecuted);
     };
-  }, [fetchFingerPrints]);
+  }, [fetchFingerPrints, backendReady]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -88,6 +115,20 @@ const Layout = ({ Child }) => {
 
   const isSidebarEffectivelyCollapsed = isCompactWindow || isSidebarCollapsed;
   const sidebarWidth = isCompactWindow ? 84 : (isSidebarCollapsed ? 84 : 300);
+
+  // Loading overlay while backend services start up
+  if (!backendReady) {
+    return (
+      <div className="backend-loading-overlay">
+        <div className="backend-loading-content">
+          <div className="backend-loading-spinner" />
+          <h4>{backendError || t('layout.backendLoading', 'Starting services...')}</h4>
+          {!backendError && <p className="text-muted">{t('layout.backendLoadingHint', 'Please wait while backend services initialize')}</p>}
+          {backendError && <button className="btn btn-primary mt-3" onClick={() => window.location.reload()}>{t('layout.retry', 'Retry')}</button>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Container fluid className="p-0" style={{ height: '100vh' }}>
