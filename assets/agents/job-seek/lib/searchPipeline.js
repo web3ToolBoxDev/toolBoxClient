@@ -1407,28 +1407,31 @@ async function _runPipeline(sessionId) {
                                     cell: 'search', status: 'error',
                                     message: `JD extraction failing (${emptyJdCount}/${listings.length} empty) — please Rebuild search tool`
                                 });
-                                // Capture screenshot for rebuild context
-                                try {
-                                    const _jdToolClient = require('./core/toolServiceClient');
-                                    const _jdPlatform = getPlatformStore().getPlatform(sessionId, platformTool.id);
-                                    if (_jdPlatform?._browserId) {
-                                        const _jdSs = await _jdToolClient.executeTool('page_screenshot', {
-                                            browserId: _jdPlatform._browserId, pageIndex: _jdPlatform._pageIndex || 0
-                                        });
-                                        const ssData = _jdSs?.result?.screenshot || _jdSs?.screenshot || null;
-                                        if (ssData) {
-                                            getPlatformStore().updateToolStatus(sessionId, platformTool.id, 'search', 'error', {
-                                                lastFailScreenshot: ssData
+                                // Use pre-captured search screenshot (taken before Phase 2 clicks
+                                // potentially navigated away to 404/error pages)
+                                if (searchScreenshot) {
+                                    getPlatformStore().updateToolStatus(sessionId, platformTool.id, 'search', 'error', {
+                                        lastFailScreenshot: searchScreenshot
+                                    });
+                                    _log(`  📸 Using pre-captured search screenshot for rebuild context (${(searchScreenshot.length / 1024).toFixed(1)}KB)`);
+                                } else {
+                                    // Fallback: try to capture current page (may be 404 after Phase 2)
+                                    try {
+                                        const _jdToolClient = require('./core/toolServiceClient');
+                                        const _jdPlatform = getPlatformStore().getPlatform(sessionId, platformTool.id);
+                                        if (_jdPlatform?._browserId) {
+                                            const _jdSs = await _jdToolClient.executeTool('page_screenshot', {
+                                                browserId: _jdPlatform._browserId, pageIndex: _jdPlatform._pageIndex || 0
                                             });
-                                            _log(`  📸 JD failure screenshot captured (${(ssData.length / 1024).toFixed(1)}KB)`);
-                                        } else {
-                                            _log(`  ⚠ JD failure screenshot: empty result`);
+                                            const ssData = _jdSs?.result?.screenshot || _jdSs?.screenshot || null;
+                                            if (ssData) {
+                                                getPlatformStore().updateToolStatus(sessionId, platformTool.id, 'search', 'error', {
+                                                    lastFailScreenshot: ssData
+                                                });
+                                                _log(`  📸 JD failure screenshot captured (${(ssData.length / 1024).toFixed(1)}KB)`);
+                                            }
                                         }
-                                    } else {
-                                        _log(`  ⚠ JD failure screenshot: no browser available`);
-                                    }
-                                } catch (ssErr) {
-                                    _log(`  ⚠ JD failure screenshot failed: ${ssErr.message}`);
+                                    } catch (_) { /* best-effort */ }
                                 }
                             }
                         }
