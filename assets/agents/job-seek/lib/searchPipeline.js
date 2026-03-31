@@ -962,20 +962,63 @@ async function _runPipeline(sessionId) {
 
             // 1. Parse JD
             let requirements = null;
+            let jdFetchFailed = false; // Track if JD was unavailable (not an AI problem)
             if (listing.fullText) {
                 requirements = extractRequirements({ text: listing.fullText, title: listing.title || '' });
                 pipeline.progress.parsed++;
                 dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
                 _log(`  Parsed JD (${listing.fullText.length} chars)`);
             } else {
+                _log(`  ⚠ No fullText from search script — attempting HTTP fallback for ${listing.url.slice(0, 80)}...`);
                 try {
                     const parsed = await parseListingHandler({ url: listing.url, useBrowser: false });
                     requirements = parsed;
                     pipeline.progress.parsed++;
                     dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
                 } catch (parseErr) {
-                    _log(`  ⚠ Parse JD failed for ${listing.url}: ${parseErr.message}`);
+                    jdFetchFailed = true;
+                    _log(`  ⚠ Parse JD failed for ${listing.url.slice(0, 80)}: ${parseErr.message}`);
                 }
+            }
+
+            // If JD fetch failed (no fullText + HTTP fallback failed), this is a tool/network
+            // problem, NOT an AI problem. Mark as discovered and skip — don't count as AI failure.
+            if (jdFetchFailed && !listing.fullText) {
+                _log(`  ⊘ Skipping "${listing.title}" — no JD available (search tool Phase 2 failed + HTTP ${listing.url.includes('/clk?') || listing.url.includes('/pagead/') ? '403 (redirect URL)' : 'fallback failed'})`);
+                pipeline.progress.matched++;
+                // Track per-source JD failures to detect systematic search tool issues
+                if (!pipeline._jdFailures) pipeline._jdFailures = {};
+                const src = listing.source || 'unknown';
+                pipeline._jdFailures[src] = (pipeline._jdFailures[src] || 0) + 1;
+                dashboardServer.upsertJobCard(sessionId, {
+                    url: listing.url,
+                    title: listing.title || '',
+                    company: listing.company || '',
+                    status: 'discovered',
+                    platform: listing.source || '',
+                    taskLog: {
+                        search: {
+                            status: 'warning',
+                            at: new Date().toISOString(),
+                            source: listing.source || '',
+                            error: 'JD not available — search tool could not extract job details'
+                        }
+                    }
+                });
+                // If 3+ JD failures for same source, mark search tool for rebuild
+                if (pipeline._jdFailures[src] >= 3) {
+                    const platformTool = Object.values(platformToolMap || {}).find(t =>
+                        t && (t.name || '').toLowerCase().includes(src.toLowerCase()));
+                    if (platformTool) {
+                        _log(`  🔧 [${src}] ${pipeline._jdFailures[src]} JD extraction failures — marking search tool for rebuild`);
+                        dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                            cell: 'search', status: 'error',
+                            message: `JD extraction failed ${pipeline._jdFailures[src]} times — please Rebuild search tool`
+                        });
+                    }
+                }
+                // Do NOT increment _consecutiveErrors — this is not an AI problem
+                return;
             }
 
             // 2. Match — combined AI (match+generate) or match-only
@@ -985,10 +1028,12 @@ async function _runPipeline(sessionId) {
             let aiGenerated = false;
 
             // Path A: Combined AI call (match + generate in one)
-            if (config.generateInline && config.aiInvoke && listing.fullText) {
+            if (config.generateInline && config.aiInvoke && (listing.fullText || (requirements && requirements.text))) {
                 try {
+                    // Use fullText or fallback-parsed text
+                    const effectiveListing = listing.fullText ? listing : { ...listing, fullText: requirements?.text || '' };
                     const combinedPrompt = _buildCombinedPrompt(
-                        listing, profile, config.skillTaxonomy,
+                        effectiveListing, profile, config.skillTaxonomy,
                         config.generateOpts || {},
                         config.userPreferences || ''
                     );
@@ -1007,9 +1052,10 @@ async function _runPipeline(sessionId) {
             }
 
             // Path B: Match-only AI (existing aiMatcher)
-            if (!matchResult && config.aiMatcher && listing.fullText) {
+            if (!matchResult && config.aiMatcher && (listing.fullText || (requirements && requirements.text))) {
                 try {
-                    matchResult = await _withTimeout(config.aiMatcher(profile, listing, config.skillTaxonomy, config.userPreferences || ''), AI_CALL_TIMEOUT, 'AI match');
+                    const effectiveListing = listing.fullText ? listing : { ...listing, fullText: requirements?.text || '' };
+                    matchResult = await _withTimeout(config.aiMatcher(profile, effectiveListing, config.skillTaxonomy, config.userPreferences || ''), AI_CALL_TIMEOUT, 'AI match');
                     if (matchResult) {
                         _log(`  AI match: ${matchResult.overallScore}%`);
                     } else {
@@ -1020,10 +1066,16 @@ async function _runPipeline(sessionId) {
                 }
             }
 
-            // No AI result → error state (algorithm fallback removed)
+            // No AI result → distinguish between JD-missing vs actual AI failure
             if (!matchResult) {
-                _consecutiveErrors++;
-                _log(`✗ AI match unavailable for "${listing.title}" — skipping (consecutive: ${_consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS})`);
+                if (!listing.fullText && !(requirements && requirements.text)) {
+                    // JD was empty — not an AI problem, don't count as consecutive error
+                    _log(`  ⊘ No match for "${listing.title}" — JD text unavailable, skipping`);
+                } else {
+                    // AI was called but failed — count as consecutive error
+                    _consecutiveErrors++;
+                    _log(`✗ AI match unavailable for "${listing.title}" — skipping (consecutive: ${_consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS})`);
+                }
                 pipeline.progress.matched++;
                 pipeline.progress.errors.push(`AI unavailable: ${listing.title}`);
                 dashboardServer.upsertJobCard(sessionId, {
@@ -1036,7 +1088,7 @@ async function _runPipeline(sessionId) {
                             status: 'error',
                             at: new Date().toISOString(),
                             source: listing.source || '',
-                            error: 'AI matching failed — no result from any AI provider'
+                            error: listing.fullText ? 'AI matching failed' : 'JD not available — could not match'
                         }
                     }
                 });
@@ -1048,10 +1100,10 @@ async function _runPipeline(sessionId) {
                     company: listing.company || '',
                     platform: listing.source || '',
                     failPhase: 'search',
-                    error: 'AI matching failed',
+                    error: listing.fullText ? 'AI matching failed' : 'JD not available',
                     at: new Date().toISOString()
                 });
-                // Abort pipeline if too many consecutive AI failures
+                // Abort pipeline if too many consecutive REAL AI failures
                 if (_consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                     _log(`ABORT: ${MAX_CONSECUTIVE_ERRORS} consecutive AI match failures — stopping pipeline`);
                     pipeline.progress.errors.push(`Pipeline aborted: ${MAX_CONSECUTIVE_ERRORS} consecutive AI match failures`);
