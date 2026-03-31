@@ -640,8 +640,12 @@ Return ONLY a JavaScript code block (no imports, no browser creation). The code 
       Example: if (params._verifyMode) { jobs.forEach(j => j.fullText = ''); } else { /* Phase 2 loop */ }
    b. Save the search page URL before the loop: const searchPageUrl = await page.url();
    c. For each job, inside a try/catch:
-      1. humanClick the job card title/link to open its details in the split-pane or detail panel.
-         Do NOT use page.goto() — the click should open a side panel, not navigate away.
+      1. Click the job card using page.humanClick(selector) — where selector targets the job card's
+         title link (e.g. the i-th card). Use CSS nth-child or :nth-of-type to target by index.
+         CRITICAL: Do NOT use page.evaluate(() => element.click()) — native DOM click triggers
+         the <a> tag's href navigation (to /viewjob), which leaves the search page and breaks
+         everything. page.humanClick simulates a mouse event that opens the split-pane instead.
+         Do NOT use page.goto() either.
       2. randomDelay(1500, 3000) to wait for the detail panel to load.
       3. Check if browser navigated away: const currentUrl = await page.url();
          If currentUrl !== searchPageUrl, the click caused a full page navigation.
