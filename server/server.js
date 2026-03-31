@@ -77,4 +77,21 @@ app.listen(port, '127.0.0.1', async () => {
   toolServiceManager.startToolService();
 });
 
+// Flush StateService pending writes on shutdown so no data is lost
+function _flushStateOnExit() {
+  try {
+    const { StateService } = require('./services/stateService');
+    const svc = StateService.instance;
+    if (svc) {
+      console.log('[shutdown] Flushing StateService pending writes...');
+      svc.flushAll();
+    }
+  } catch (e) {
+    console.error('[shutdown] flushAll failed:', e.message);
+  }
+}
+process.on('exit', _flushStateOnExit);
+process.on('SIGINT', () => { _flushStateOnExit(); process.exit(0); });
+process.on('SIGTERM', () => { _flushStateOnExit(); process.exit(0); });
+
 module.exports = app

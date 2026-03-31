@@ -321,17 +321,43 @@ function updateDataDir(newSavePath) {
         console.warn('[savePath-switch] userStore.init failed:', err.message);
     }
 
-    // 5. Immediately sync new state to StateService so it doesn't serve stale data
-    //    from the previous savePath (must happen BEFORE emitSessionList to win any
-    //    concurrent fetchSessions race).
-    _syncStateToClient();
-
-    // 6. Emit updated data to frontend
-    emitSessionList();
-    sendSnapshot();
-
-    // Clear inflight guard so future switches to a different dir can proceed
-    _updateDataDirInFlight = null;
+    // 5. Pull state from StateService (source of truth for the new savePath).
+    //    StateService already loaded data from the new path in onSavePathChanged(),
+    //    so we prefer its data over sessions.json (which may be stale).
+    (async () => {
+        try {
+            const available = await stateApi.isAvailable();
+            if (available) {
+                const snapshot = await stateApi.fetchSnapshot();
+                if (snapshot && Array.isArray(snapshot.sessions) && snapshot.sessions.length > 0) {
+                    for (const key of sessionStore.PERSIST_KEYS) {
+                        if (snapshot[key] !== undefined) state[key] = snapshot[key];
+                    }
+                    // Initialize missing conversation structures
+                    for (const s of state.sessions) {
+                        if (!state.conversations[s.id]) state.conversations[s.id] = [];
+                        if (!state.subtasks[s.id]) state.subtasks[s.id] = [];
+                        if (!state.runtimeLogs[s.id]) state.runtimeLogs[s.id] = [];
+                        if (!state.executionStates[s.id]) state.executionStates[s.id] = { paused: false, canceled: false };
+                        if (state.onboardingComplete[s.id] === undefined) state.onboardingComplete[s.id] = false;
+                        if (!state.profileSections[s.id]) state.profileSections[s.id] = {};
+                        if (!state.subtaskLogs[s.id]) state.subtaskLogs[s.id] = {};
+                        if (!state.selectedAnswers[s.id]) state.selectedAnswers[s.id] = {};
+                    }
+                    console.log('[savePath-switch] Pulled', state.sessions.length, 'sessions from stateService (source of truth)');
+                } else {
+                    // StateService has no data for new path — push local sessions.json data
+                    await stateApi.pushFullState(state, sessionStore.PERSIST_KEYS).catch(() => {});
+                    console.log('[savePath-switch] Migrated', state.sessions.length, 'sessions to stateService');
+                }
+            }
+        } catch (e) {
+            console.log('[savePath-switch] stateApi sync failed:', e.message);
+        }
+        emitSessionList();
+        sendSnapshot();
+        _updateDataDirInFlight = null;
+    })();
 }
 
 // Restore on startup
@@ -371,9 +397,9 @@ function scheduleSave() {
     if (_saveTimer) clearTimeout(_saveTimer);
     _saveTimer = setTimeout(() => {
         _saveTimer = null;
-        saveState();
-        // Sync key state paths to StateClient (additive — does not replace existing persistence)
-        _syncStateToClient();
+        // Push full state to StateService (single source of truth for persistence)
+        stateApi.pushFullState(state, sessionStore.PERSIST_KEYS).catch(e =>
+            console.warn('[agent:scheduleSave] pushFullState failed:', e.message));
     }, 2000);
 }
 
@@ -492,8 +518,9 @@ function createSession(name = '') {
     emitSessionList();
     sendSnapshot();
     scheduleSave();
-    // C2: write-through to stateService
-    stateApi.createSession(session.name).catch(e => console.warn('[agent:stateApi] write-through:', e.message));
+    // C2: write-through full session data to stateService (not just metadata)
+    stateApi.pushFullState(state, sessionStore.PERSIST_KEYS).catch(e =>
+        console.warn('[agent:stateApi] createSession write-through:', e.message));
 }
 
 /**
@@ -2987,31 +3014,50 @@ function initWebSocket() {
         // Request any server-side state that may have been persisted
         stateClient.syncFromServer();
 
-        // C1: Sync sessions with stateService HTTP (async, non-blocking)
-        //     On first connect: pull from stateService (it may have newer data).
-        //     On reconnect after savePath switch: push local state instead
-        //     (agent already loaded correct data from new directory).
+        // C1: StateService is the single source of truth for session data.
+        //     On connect: always pull from StateService first.
+        //     Only push local state if StateService has no data (migration from sessions.json).
         (async () => {
             try {
                 const available = await stateApi.isAvailable();
-                if (!available) { console.log('[agent:stateApi] stateService not available, using sessionStore'); return; }
-                if (state.sessions.length > 0) {
-                    // Agent already has sessions (from restoreState or savePath switch)
-                    // → push to stateService so it stays in sync
-                    await stateApi.pushFullState(state, [
-                        'sessions', 'activeSessionId', 'conversations',
-                        'subtasks', 'artifacts', 'selectedAnswers',
-                        'profileSections', 'masterProfile', 'runtimeContexts', 'envs'
-                    ]).catch(() => {});
-                    console.log('[agent:stateApi] Pushed', state.sessions.length, 'sessions to stateService');
-                    emitSessionList();
-                } else {
-                    // No local sessions — try to pull from stateService
-                    const data = await stateApi.fetchSessions();
-                    if (data && data.sessions && data.sessions.length > 0) {
-                        state.sessions = data.sessions;
-                        if (data.activeSessionId) state.activeSessionId = data.activeSessionId;
-                        console.log('[agent:stateApi] Loaded', data.sessions.length, 'sessions from stateService');
+                if (!available) { console.log('[agent:stateApi] stateService not available, using sessionStore fallback'); return; }
+
+                // Always try to pull snapshot from StateService (source of truth)
+                let pulled = false;
+                try {
+                    const snapshot = await stateApi.fetchSnapshot();
+                    if (snapshot && Array.isArray(snapshot.sessions) && snapshot.sessions.length > 0) {
+                        // StateService has data — use it, overriding local sessions.json state
+                        for (const key of sessionStore.PERSIST_KEYS) {
+                            if (snapshot[key] !== undefined) {
+                                state[key] = snapshot[key];
+                            }
+                        }
+                        // Ensure every session has initialized conversation/subtask structures
+                        for (const s of state.sessions) {
+                            if (!state.conversations[s.id]) state.conversations[s.id] = [];
+                            if (!state.subtasks[s.id]) state.subtasks[s.id] = [];
+                            if (!state.runtimeLogs[s.id]) state.runtimeLogs[s.id] = [];
+                            if (!state.executionStates[s.id]) state.executionStates[s.id] = { paused: false, canceled: false };
+                            if (state.onboardingComplete[s.id] === undefined) state.onboardingComplete[s.id] = false;
+                            if (!state.profileSections[s.id]) state.profileSections[s.id] = {};
+                            if (!state.subtaskLogs[s.id]) state.subtaskLogs[s.id] = {};
+                            if (!state.selectedAnswers[s.id]) state.selectedAnswers[s.id] = {};
+                        }
+                        console.log('[agent:stateApi] Pulled', state.sessions.length, 'sessions from stateService (source of truth)');
+                        emitSessionList();
+                        sendSnapshot();
+                        pulled = true;
+                    }
+                } catch (e) {
+                    console.log('[agent:stateApi] fetchSnapshot failed:', e.message);
+                }
+
+                if (!pulled) {
+                    if (state.sessions.length > 0) {
+                        // StateService empty but agent has sessions from sessions.json — migrate
+                        await stateApi.pushFullState(state, sessionStore.PERSIST_KEYS).catch(() => {});
+                        console.log('[agent:stateApi] Migrated', state.sessions.length, 'sessions to stateService');
                         emitSessionList();
                     } else {
                         console.log('[agent:stateApi] No sessions anywhere, fresh state');

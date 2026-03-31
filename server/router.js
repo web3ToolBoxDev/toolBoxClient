@@ -130,12 +130,15 @@ router.get('/getAgentSessions/:agentName', async (req, res) => {
         return res.send({ success: false, message: 'No savePath configured' });
     }
     const sessFile = require('path').join(savePath, 'agents', agentName, 'data', 'sessions.json');
+    console.log(`[router] getAgentSessions: reading ${sessFile}`);
     try {
         if (!require('fs').existsSync(sessFile)) {
+            console.log(`[router] getAgentSessions: file not found → returning empty`);
             return res.send({ success: true, sessions: [], activeSessionId: '' });
         }
         const raw = JSON.parse(require('fs').readFileSync(sessFile, 'utf8'));
         const sessions = Array.isArray(raw.sessions) ? raw.sessions : [];
+        console.log(`[router] getAgentSessions: found ${sessions.length} sessions: [${sessions.map(s => s.name || s.id).join(', ')}]`);
         return res.send({
             success: true,
             activeSessionId: raw.activeSessionId || '',
@@ -212,7 +215,10 @@ router.post('/setSavePath',async(req,res)=>{
   // Switch StateService persistence to new savePath so it reads/writes correct data
   try {
     const { StateService } = require('./services/stateService');
-    StateService.getInstance().onSavePathChanged(path);
+    const svc = StateService.getInstance();
+    svc.onSavePathChanged(path);
+    // Notify agent via SSE by setting app.savePath (triggers state.changed → SSE broadcast)
+    svc.set('app.savePath', path);
   } catch (e) {
     console.error('[router] stateService.onSavePathChanged failed:', e.message);
   }

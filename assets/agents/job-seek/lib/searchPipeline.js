@@ -973,7 +973,9 @@ async function _runPipeline(sessionId) {
                     requirements = parsed;
                     pipeline.progress.parsed++;
                     dashboardServer.updateJobStatus(sessionId, listing.url, 'parsed');
-                } catch { /* Parse failure is non-fatal */ }
+                } catch (parseErr) {
+                    _log(`  ⚠ Parse JD failed for ${listing.url}: ${parseErr.message}`);
+                }
             }
 
             // 2. Match — combined AI (match+generate) or match-only

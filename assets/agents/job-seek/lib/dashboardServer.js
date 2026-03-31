@@ -635,6 +635,7 @@ function start(getState, port, options) {
                         const st = _stateGetter ? _stateGetter() : {};
                         if (!st.searchHistory) st.searchHistory = {};
                         st.searchHistory[sessionId] = history;
+                        if (_scheduleSave) _scheduleSave();
                     };
 
                     // Build AI invoke for failure analysis (fix rule generation)
@@ -987,6 +988,7 @@ function start(getState, port, options) {
                         const st = _stateGetter ? _stateGetter() : {};
                         if (!st.searchHistory) st.searchHistory = {};
                         st.searchHistory[sid] = history;
+                        if (_scheduleSave) _scheduleSave();
                     };
                     const result = await getWorkflowEngine().start(sid, wfConfig, ctx);
                     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1142,6 +1144,7 @@ function start(getState, port, options) {
                         const st = _stateGetter ? _stateGetter() : {};
                         if (!st.searchHistory) st.searchHistory = {};
                         st.searchHistory[sid] = history;
+                        if (_scheduleSave) _scheduleSave();
                     };
                     const result = await getWorkflowEngine().resume(sid, wfConfig, ctx);
                     res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -323,11 +323,27 @@ app.whenReady().then(async () => {
       createBackendProcess();
     }
   });
-  // 在应用程序关闭之前终止后台服务子进程
-  app.on('before-quit', () => {
+  // 在应用程序关闭之前：flush StateService 然后终止后台服务子进程
+  app.on('before-quit', async (e) => {
     if (backendProcess) {
+      // Tell backend to flush pending state writes before we kill it
+      try {
+        e.preventDefault(); // hold quit until flush completes
+        const http = require('http');
+        await new Promise((resolve) => {
+          const req = http.request('http://127.0.0.1:30001/api/state/flush', { method: 'POST', timeout: 3000 }, (res) => {
+            res.resume();
+            res.on('end', resolve);
+          });
+          req.on('error', resolve); // don't block quit if backend already gone
+          req.on('timeout', () => { req.destroy(); resolve(); });
+          req.end();
+        });
+        console.log('[Electron] StateService flushed before quit');
+      } catch (_) { /* best effort */ }
       backendProcess.kill();
       backendProcess = null;
+      app.quit(); // resume quit after flush
     }
   });
   app.on('window-all-closed', () => {

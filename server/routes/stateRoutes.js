@@ -82,6 +82,20 @@ router.get('/subscribe', (req, res) => {
     });
 });
 
+// ── Flush: force-persist all pending state writes (called by Electron before-quit) ──
+
+router.post('/flush', (req, res) => {
+    try {
+        const svc = getStateService();
+        svc.flushAll();
+        console.log('[stateRoutes] Flush completed');
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[stateRoutes] Flush failed:', err.message);
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 // ── A4: Language preference (must be before :agentId wildcard) ──
 
 router.get('/app/language', (req, res) => {

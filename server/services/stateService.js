@@ -355,6 +355,8 @@ class Persistence {
     _atomicWrite(agentName, data) {
         const filePath = this.getFilePath(agentName);
         const tmpPath = filePath + '.tmp';
+        const sessions = (data && data.sessions) ? data.sessions.length : 0;
+        console.log(`[StateService] _atomicWrite: writing ${agentName} → ${filePath} (${sessions} sessions)`);
         try {
             const dir = path.dirname(filePath);
             if (!fs.existsSync(dir)) {
@@ -362,6 +364,20 @@ class Persistence {
             }
             fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
             fs.renameSync(tmpPath, filePath);
+            console.log(`[StateService] _atomicWrite: saved OK → ${filePath}`);
+
+            // Keep sessions.json in sync so agent reads correct list on next startup
+            // (agent bootstraps from sessions.json via sessionStore, which is a legacy path)
+            if (data && Array.isArray(data.sessions)) {
+                const sessionsFilePath = path.join(path.dirname(filePath), 'sessions.json');
+                const sessionsData = {
+                    sessions: data.sessions,
+                    activeSessionId: data.activeSessionId || null,
+                    _savedAt: Date.now()
+                };
+                fs.writeFileSync(sessionsFilePath, JSON.stringify(sessionsData, null, 2), 'utf-8');
+                console.log(`[StateService] _atomicWrite: synced sessions.json (${data.sessions.length} sessions)`);
+            }
         } catch (err) {
             console.error(`[Persistence] Atomic write failed for "${agentName}":`, err.message);
             // Clean up tmp file if rename failed
@@ -418,9 +434,15 @@ class StateService {
         this.store = new StateStore(this.eventBus);
 
         // Resolve base path for agents directory
+        // Prefer user's configured savePath so state.json lives alongside sessions.json
         const Config = require('../../config');
         const config = Config.getInstance();
-        this.persistence = new Persistence(config.defaultAgentPath);
+        const savePathConfig = config.getSavePath();
+        const basePath = (savePathConfig && savePathConfig.path)
+            ? path.join(savePathConfig.path, 'agents')
+            : config.defaultAgentPath;
+        console.log(`[StateService] Initialized persistence at: ${basePath}`);
+        this.persistence = new Persistence(basePath);
 
         // Auto-persist on state changes
         this.eventBus.on('state.changed', (changeEvent) => {
@@ -566,8 +588,13 @@ class StateService {
         this._ensureLoaded(agentId);
         const sessions = this.store.get(`${agentId}.sessions`) || [];
         const idx = sessions.findIndex(s => s.id === sessionId);
-        if (idx === -1) return false;
-
+        if (idx === -1) {
+            console.log(`[StateService] deleteSession: session ${sessionId} not found in ${agentId} (${sessions.length} sessions loaded)`);
+            return false;
+        }
+        const agentName = this._agentIdToName(agentId);
+        const filePath = this.persistence.getFilePath(agentName);
+        console.log(`[StateService] deleteSession: removing session "${sessions[idx].name || sessionId}" from ${agentName}, will save to ${filePath}`);
         sessions.splice(idx, 1);
         this.set(`${agentId}.sessions`, sessions);
         // Clean up conversations
@@ -579,6 +606,24 @@ class StateService {
             const newActiveId = sessions.length > 0 ? sessions[0].id : null;
             this.set(`${agentId}.activeSessionId`, newActiveId);
         }
+
+        // Also sync sessions.json immediately so agent reads correct list on next startup
+        // (agent bootstraps from sessions.json, which would otherwise override this deletion)
+        try {
+            const sessionsFilePath = path.join(this.persistence._basePath, agentName, 'data', 'sessions.json');
+            const activeSessionId = this.store.get(`${agentId}.activeSessionId`) || null;
+            const dir = path.dirname(sessionsFilePath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(sessionsFilePath, JSON.stringify({
+                sessions,
+                activeSessionId,
+                _savedAt: Date.now()
+            }, null, 2), 'utf-8');
+            console.log(`[StateService] deleteSession: synced sessions.json → ${sessionsFilePath} (${sessions.length} sessions remaining)`);
+        } catch (e) {
+            console.error(`[StateService] deleteSession: failed to sync sessions.json:`, e.message);
+        }
+
         return true;
     }
 
@@ -856,9 +901,26 @@ class StateService {
         }
         // 2. Switch persistence to new path
         this.persistence.switchBasePath(newBasePath);
-        // 3. Clear in-memory state (will reload from new path on next access)
+        // 3. Clear in-memory state and reload from new path
         this.store._state = {};
         console.log(`[StateService] Switched persistence to ${newBasePath}`);
+        // 4. Eagerly load agent data from new path so next access sees correct state
+        this._ensureLoaded('jobSeekAgent');
+        // 5. Broadcast snapshot to frontend so UI updates immediately
+        const snapshot = this.store.snapshot('jobSeekAgent');
+        const sessions = (snapshot && snapshot.sessions) ? snapshot.sessions.length : 0;
+        console.log(`[StateService] onSavePathChanged: loaded ${sessions} sessions from new path`);
+        try {
+            const WebSocketService = require('./webSocketService');
+            const wsService = WebSocketService.getInstance();
+            wsService.sendToFront({
+                type: 'agent_state_snapshot',
+                taskName: 'jobSeekAgent',
+                payload: snapshot || {}
+            });
+        } catch (e) {
+            console.error('[StateService] onSavePathChanged: broadcast failed:', e.message);
+        }
     }
 
     // ── Internal ──
@@ -879,10 +941,16 @@ class StateService {
     _ensureLoaded(agentId) {
         const agentName = this._agentIdToName(agentId);
         if (!this.persistence.isLoaded(agentName)) {
+            const filePath = this.persistence.getFilePath(agentName);
+            console.log(`[StateService] _ensureLoaded: loading ${agentName} from ${filePath}`);
             const data = this.persistence.load(agentName);
             if (data && Object.keys(data).length > 0) {
                 // Restore without emitting change events to avoid re-persist loop
                 this.store._state[agentId] = data;
+                const sessions = data.sessions || [];
+                console.log(`[StateService] _ensureLoaded: restored ${sessions.length} sessions for ${agentName}: [${sessions.map(s => s.name || s.id).join(', ')}]`);
+            } else {
+                console.log(`[StateService] _ensureLoaded: no state found for ${agentName} at ${filePath}`);
             }
         }
     }
@@ -890,6 +958,9 @@ class StateService {
     _schedulePersist(agentId) {
         const agentName = this._agentIdToName(agentId);
         const data = this.store.snapshot(agentId);
+        const filePath = this.persistence.getFilePath(agentName);
+        const sessions = (data && data.sessions) ? data.sessions.length : 0;
+        console.log(`[StateService] _schedulePersist: scheduling save for ${agentName} → ${filePath} (${sessions} sessions)`);
         this.persistence.scheduleSave(agentName, data);
     }
 

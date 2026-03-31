@@ -567,6 +567,9 @@ Return ONLY a JavaScript code block (no imports, no browser creation). The code 
    - NEVER override a valid href with a URL reconstructed from element id or data attributes — id formats vary
      across sites and produce invalid URLs (404 errors).
    - For relative URLs, resolve them against the platform base URL.
+   - For Indeed specifically: job card links use /rc/clk?jk=xxx redirect URLs or data-jk attributes.
+     ALWAYS extract the href from the <a> tag directly. NEVER construct viewjob?jk=xxx from data-jk
+     or element IDs — they produce 404 errors. Use the raw href as-is, even if it contains tracking params.
 9. LAZY-LOADED LISTS — SCROLL BEFORE EXTRACTION:
    Many job sites lazy-load results (only 7-10 visible initially). Before Phase 1 extraction:
    - Scroll the job list container (or window) multiple times (up to 5 scrolls) to trigger loading more cards.
@@ -636,12 +639,19 @@ Return ONLY a JavaScript code block (no imports, no browser creation). The code 
       (just set each job.fullText = '' and continue). This makes verification fast.
       Example: if (params._verifyMode) { jobs.forEach(j => j.fullText = ''); } else { /* Phase 2 loop */ }
    b. humanClick the job card title/link to open its details in the split-pane or detail panel.
+      CRITICAL: The click MUST open a split-pane/side-panel on the SAME search results page.
+      Do NOT use page.goto() to navigate to the job detail URL — that leaves the search results page
+      and corrupts the browser state for subsequent searches. If clicking a job card causes a full
+      page navigation (window.location changes), immediately use page.goBack() to return to search results,
+      set fullText to '' for that job, and continue to the next job.
    c. randomDelay(1500, 3000) to wait for the detail panel to load.
    d. Use page.evaluate() to extract the FULL job description text from the detail panel.
       Discover the correct selectors from the DOM structure provided below — do NOT hardcode
       selectors from other platforms. Look for the largest text block in the detail area.
    e. Store the extracted text as job.fullText (string).
    f. Wrap each iteration in try/catch — if detail extraction fails, set fullText to '' and continue.
+      Also check if the page navigated away (e.g. to a 404 or job detail page) — if so, use
+      page.goBack() and wait 2s before continuing to the next job.
    g. The final output for each job: { title, company, url, location, salary, jobType, description (snippet), fullText (complete JD) }.
       IMPORTANT field definitions — do NOT confuse these two fields:
       - salary: compensation/pay range ONLY (e.g. "$80K-$120K", "CA$90,000/yr"). Leave empty string "" if no salary/pay is shown.
