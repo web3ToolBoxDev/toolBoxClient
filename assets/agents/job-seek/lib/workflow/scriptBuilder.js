@@ -256,13 +256,17 @@ async function buildTool(sessionId, platformId, toolType, options = {}) {
             }
         }
         if (!browserId) {
-            // Strategy C: last resort — fresh browser (no cookies, may get blocked)
-            console.log(`[dashboard:build] Step 1 — Last resort: launching fresh browser (no session cookies)...`);
-            const launchRes = await toolCall('browser_launch', { envId: platform.envId || undefined });
-            browserId = launchRes.browserId;
-            const gotoRes = await toolCall('page_goto', { browserId, url: platform.url });
-            pageIndex = gotoRes.pageIndex !== undefined ? gotoRes.pageIndex : 0;
-            console.log(`[dashboard:build] Step 1 — Fresh browser ${browserId}, pageIndex=${pageIndex}`);
+            // No logged-in browser available — abort build instead of using a fresh browser
+            // (fresh browser has no cookies/session → different page structure → generates broken scripts)
+            const msg = `No logged-in browser available for ${platform.name}. Please Login first, then Rebuild.`;
+            console.log(`[dashboard:build] Step 1 — ABORTED: ${msg}`);
+            buildLog.push(logEntry(1, msg, 'failed'));
+            emitProgress(buildLog, onProgress);
+            store.updateToolStatus(sessionId, platformId, toolType, 'error', { buildLog });
+            if (!reusedBrowser && browserId) {
+                try { await toolCall('browser_close', { browserId }); } catch (_) {}
+            }
+            return { success: false, error: msg, buildLog };
         }
 
         // Wait for dynamic content to fully render (SPA pages like LinkedIn need extra time)
