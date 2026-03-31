@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 
 jest.mock('react-i18next', () => ({
     useTranslation: () => ({
@@ -45,7 +45,8 @@ jest.mock('../utils/api', () => ({
         getInstance: () => ({
             getFingerPrintCount: jest.fn().mockResolvedValue({ success: true, message: 0 }),
             setStateLanguage: jest.fn().mockResolvedValue({ success: true }),
-            checkWebSocket: jest.fn().mockResolvedValue({ success: true })
+            checkWebSocket: jest.fn().mockResolvedValue({ success: true }),
+            checkReadiness: jest.fn().mockResolvedValue({ success: true, checks: { server: true, webSocket: true, dbservice: true, toolService: true } })
         })
     }
 }));
@@ -64,12 +65,13 @@ describe('Layout', () => {
 
     it('renders child component and sidebar', async () => {
         await act(async () => { render(<Layout Child={DummyChild} />); });
-        expect(screen.getByTestId('child')).toBeInTheDocument();
+        await waitFor(() => expect(screen.getByTestId('child')).toBeInTheDocument(), { timeout: 3000 });
         expect(screen.getByText('Web3ToolBox')).toBeInTheDocument();
     });
 
     it('renders all menu items', async () => {
         await act(async () => { render(<Layout Child={DummyChild} />); });
+        await waitFor(() => expect(screen.queryByText('layout.backendLoading')).not.toBeInTheDocument(), { timeout: 3000 });
         expect(screen.getByTitle('introduction')).toBeInTheDocument();
         expect(screen.getByTitle('chromeManage')).toBeInTheDocument();
         expect(screen.getByTitle('walletManage')).toBeInTheDocument();
@@ -79,6 +81,7 @@ describe('Layout', () => {
 
     it('toggles sidebar collapse', async () => {
         await act(async () => { render(<Layout Child={DummyChild} />); });
+        await waitFor(() => expect(screen.queryByText('layout.backendLoading')).not.toBeInTheDocument(), { timeout: 3000 });
         const toggleBtn = screen.getByLabelText('Collapse Navigation');
         fireEvent.click(toggleBtn);
         expect(window.localStorage.getItem('layout.sidebarCollapsed')).toBe('1');
@@ -86,6 +89,7 @@ describe('Layout', () => {
 
     it('opens task offcanvas on taskExecuted event', async () => {
         await act(async () => { render(<Layout Child={DummyChild} />); });
+        await waitFor(() => expect(screen.queryByText('layout.backendLoading')).not.toBeInTheDocument(), { timeout: 3000 });
         expect(screen.queryByTestId('task-offcanvas')).not.toBeInTheDocument();
         act(() => {
             eventEmitter.emit('taskExecuted');
@@ -95,12 +99,14 @@ describe('Layout', () => {
 
     it('opens task offcanvas on button click', async () => {
         await act(async () => { render(<Layout Child={DummyChild} />); });
+        await waitFor(() => expect(screen.queryByText('layout.backendLoading')).not.toBeInTheDocument(), { timeout: 3000 });
         fireEvent.click(screen.getByTestId('task-info-button'));
         expect(screen.getByTestId('task-offcanvas')).toBeInTheDocument();
     });
 
     it('opens and uses language offcanvas', async () => {
         await act(async () => { render(<Layout Child={DummyChild} />); });
+        await waitFor(() => expect(screen.queryByText('layout.backendLoading')).not.toBeInTheDocument(), { timeout: 3000 });
         fireEvent.click(screen.getByTitle('changeLang'));
         expect(screen.getByText('selectLang')).toBeInTheDocument();
         fireEvent.click(screen.getByText('English'));
@@ -110,11 +116,13 @@ describe('Layout', () => {
     it('starts collapsed when localStorage has collapsed=1', async () => {
         window.localStorage.setItem('layout.sidebarCollapsed', '1');
         await act(async () => { render(<Layout Child={DummyChild} />); });
+        await waitFor(() => expect(screen.queryByText('layout.backendLoading')).not.toBeInTheDocument(), { timeout: 3000 });
         expect(screen.getByLabelText('Expand Navigation')).toBeInTheDocument();
     });
 
     it('calls fetchFingerPrints on mount', async () => {
         await act(async () => { render(<Layout Child={DummyChild} />); });
+        await waitFor(() => expect(screen.queryByText('layout.backendLoading')).not.toBeInTheDocument(), { timeout: 3000 });
         expect(mockFetchFingerPrints).toHaveBeenCalled();
     });
 });

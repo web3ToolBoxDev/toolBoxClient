@@ -268,6 +268,10 @@ class APIManager {
         console.log('[api] checkWebSocket response:', res?.data);
         return res.data;
     }
+    async checkReadiness(){
+        const res = await axios.get(`${this.baseUrl}/readiness`, { timeout: 3000 });
+        return res.data;
+    }
     async getTaskStatus(taskNames = []) {
         const res = await axios.post(`${this.baseUrl}/getTaskStatus`, { taskNames });
         return res.data;

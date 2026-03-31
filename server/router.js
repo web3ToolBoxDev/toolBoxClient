@@ -238,6 +238,49 @@ router.get('/checkWebSocket',async(req,res)=>{
   const message = await taskService.checkWebSocket();
   res.send(message);
 });
+
+// Comprehensive readiness check — returns true only when ALL backend services are up
+router.get('/readiness', async (req, res) => {
+  const checks = { server: true, webSocket: false, dbservice: false, toolService: false };
+  try {
+    // WebSocket
+    const wsResult = await taskService.checkWebSocket();
+    checks.webSocket = !!(wsResult && wsResult.success !== false);
+  } catch (_) {}
+  try {
+    // dbservice (memory/knowledge)
+    const dbRes = await memoryService.handleHealth(
+      { method: 'GET' },
+      { status: () => ({ json: (d) => d }), json: (d) => d }
+    );
+    // handleHealth is an Express handler, use proxyToDbService directly
+    const http = require('http');
+    await new Promise((resolve) => {
+      const r = http.get('http://127.0.0.1:30002/health', { timeout: 2000 }, (resp) => {
+        checks.dbservice = resp.statusCode === 200;
+        resp.resume();
+        resolve();
+      });
+      r.on('error', () => resolve());
+      r.on('timeout', () => { r.destroy(); resolve(); });
+    });
+  } catch (_) {}
+  try {
+    // toolService
+    const http = require('http');
+    await new Promise((resolve) => {
+      const r = http.get('http://127.0.0.1:30004/health', { timeout: 2000 }, (resp) => {
+        checks.toolService = resp.statusCode === 200;
+        resp.resume();
+        resolve();
+      });
+      r.on('error', () => resolve());
+      r.on('timeout', () => { r.destroy(); resolve(); });
+    });
+  } catch (_) {}
+  const allReady = checks.server && checks.webSocket && checks.dbservice && checks.toolService;
+  res.send({ success: allReady, checks });
+});
 router.post('/getTaskStatus', async (req, res) => {
   const { taskNames } = req.body || {};
   const message = taskService.getTaskRunningStatus(taskNames);

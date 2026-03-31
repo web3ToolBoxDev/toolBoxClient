@@ -55,22 +55,21 @@ const Layout = ({ Child }) => {
 
   const fetchFingerPrints = useFingerPrintStore((state)=>state.fetchFingerPrints);
 
-  // Backend readiness check — block UI until backend services are up
+  // Backend readiness check — block UI until ALL backend services are up
   useEffect(() => {
     let cancelled = false;
-    const api = APIManager.getInstance();
-    const MAX_RETRIES = 30; // 30 x 1s = 30s max wait
+    const MAX_RETRIES = 60; // 60 x 1s = 60s max wait
     let attempt = 0;
     const check = async () => {
       while (!cancelled && attempt < MAX_RETRIES) {
         attempt++;
         try {
-          const res = await api.checkWebSocket();
-          if (res && res.success !== false) {
+          const res = await APIManager.getInstance().checkReadiness();
+          if (res && res.success) {
             if (!cancelled) setBackendReady(true);
             return;
           }
-        } catch (_) { /* retry */ }
+        } catch (_) { /* server not up yet */ }
         await new Promise(r => setTimeout(r, 1000));
       }
       if (!cancelled) setBackendError('Backend services failed to start. Please restart the application.');
