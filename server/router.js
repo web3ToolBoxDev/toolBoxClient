@@ -279,6 +279,10 @@ router.get('/readiness', async (req, res) => {
     });
   } catch (_) {}
   const allReady = checks.server && checks.webSocket && checks.dbservice && checks.toolService;
+  if (!allReady) {
+    const failed = Object.entries(checks).filter(([,v]) => !v).map(([k]) => k);
+    console.log(`[readiness] NOT ready: ${failed.join(', ')} still pending`);
+  }
   res.send({ success: allReady, checks });
 });
 router.post('/getTaskStatus', async (req, res) => {
