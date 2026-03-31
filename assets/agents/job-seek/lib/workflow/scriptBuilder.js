@@ -649,11 +649,14 @@ Return ONLY a JavaScript code block (no imports, no browser creation). The code 
       Discover the correct selectors from the DOM structure provided below — do NOT hardcode
       selectors from other platforms. Look for the largest text block in the detail area.
    e. Store the extracted text as job.fullText (string).
-   f. Wrap each iteration in try/catch — if detail extraction fails, set fullText to '[JD_EXTRACT_FAILED]'
-      (NOT empty string — empty string means "no description available", while this marker tells the
-      pipeline that extraction was attempted but failed, so it can flag the search tool for rebuild).
-      Also check if the page navigated away (e.g. to a 404 or job detail page) — if so, use
-      page.goBack() and wait 2s before continuing to the next job.
+   f. Wrap each iteration in try/catch — if detail extraction fails:
+      - Set fullText to '[JD_EXTRACT_FAILED:<reason>]' where <reason> is a SHORT error description
+        (e.g. '[JD_EXTRACT_FAILED:selector not found]', '[JD_EXTRACT_FAILED:panel did not open]',
+        '[JD_EXTRACT_FAILED:navigated away]', '[JD_EXTRACT_FAILED:empty text]').
+        This marker tells the pipeline that extraction was attempted but failed, with the reason
+        for diagnosis. Do NOT set fullText to empty string '' — that means "no description exists".
+      - Also check if the page navigated away (e.g. to a 404 or job detail page) — if so, use
+        page.goBack() and wait 2s before continuing to the next job.
    g. The final output for each job: { title, company, url, location, salary, jobType, description (snippet), fullText (complete JD) }.
       IMPORTANT field definitions — do NOT confuse these two fields:
       - salary: compensation/pay range ONLY (e.g. "$80K-$120K", "CA$90,000/yr"). Leave empty string "" if no salary/pay is shown.

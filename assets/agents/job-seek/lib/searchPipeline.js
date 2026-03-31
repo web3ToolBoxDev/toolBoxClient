@@ -1367,9 +1367,17 @@ async function _runPipeline(sessionId) {
                     );
                     if (scriptResult.success && scriptResult.jobs) {
                         let _jdExtractFailCount = 0;
+                        const _jdFailReasons = [];
                         listings = scriptResult.jobs.map(j => {
                             let ft = j.fullText || '';
-                            if (ft === '[JD_EXTRACT_FAILED]') { _jdExtractFailCount++; ft = ''; }
+                            if (ft.startsWith('[JD_EXTRACT_FAILED')) {
+                                _jdExtractFailCount++;
+                                // Extract reason: [JD_EXTRACT_FAILED:reason] or [JD_EXTRACT_FAILED]
+                                const reasonMatch = ft.match(/\[JD_EXTRACT_FAILED:?([^\]]*)\]/);
+                                const reason = reasonMatch?.[1]?.trim() || 'unknown';
+                                _jdFailReasons.push(`${(j.title || '?').slice(0, 40)}: ${reason}`);
+                                ft = '';
+                            }
                             return {
                                 title: j.title || '',
                                 company: j.company || '',
@@ -1382,7 +1390,8 @@ async function _runPipeline(sessionId) {
                             };
                         });
                         if (_jdExtractFailCount > 0) {
-                            _log(`[${q.source}] Platform tool returned ${listings.length} results (⚠ ${_jdExtractFailCount} JD extractions explicitly failed)`);
+                            _log(`[${q.source}] Platform tool returned ${listings.length} results (⚠ ${_jdExtractFailCount} JD extractions failed)`);
+                            for (const r of _jdFailReasons) _log(`  ⚠ JD fail: ${r}`);
                         } else {
                             _log(`[${q.source}] Platform tool returned ${listings.length} results`);
                         }
