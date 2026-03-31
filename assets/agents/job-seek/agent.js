@@ -242,6 +242,38 @@ function saveState() {
     // Persistence is handled by StateClient via _syncStateToClient().
 }
 
+// Large data keys written directly to disk (not via HTTP to avoid body size limits)
+const _DISK_ONLY_KEYS = new Set(['jobCards', 'searchHistory', 'intentFiles', 'resumeProfile', 'resumeHashes']);
+
+/** Write large state data directly to disk files in _dataDir. */
+function _saveLargeDataToDisk() {
+    try {
+        for (const key of _DISK_ONLY_KEYS) {
+            if (state[key] && Object.keys(state[key]).length > 0) {
+                const filePath = path.join(_dataDir, `${key}.json`);
+                fs.writeFileSync(filePath, JSON.stringify(state[key]), 'utf-8');
+            }
+        }
+    } catch (e) {
+        console.warn('[agent:scheduleSave] disk write failed:', e.message);
+    }
+}
+
+/** Load large state data from disk files in dataDir. */
+function _loadLargeDataFromDisk(dataDir) {
+    for (const key of _DISK_ONLY_KEYS) {
+        try {
+            const filePath = path.join(dataDir, `${key}.json`);
+            if (fs.existsSync(filePath)) {
+                state[key] = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+                console.log(`[agent] Loaded ${key} from disk (${Object.keys(state[key]).length} entries)`);
+            }
+        } catch (e) {
+            console.warn(`[agent] Failed to load ${key} from disk:`, e.message);
+        }
+    }
+}
+
 /**
  * Switch the persistent data directory at runtime (e.g., when user changes savePath).
  * Saves current state to old dir, computes new dir, loads state from new dir,
@@ -305,6 +337,7 @@ function updateDataDir(newSavePath) {
         createSession('');
         console.log('[savePath-switch] No saved state in new dir, created fresh session');
     } else {
+        _loadLargeDataFromDisk(_dataDir);
         console.log('[savePath-switch] Loaded state from new dir:', {
             sessionsFound: state.sessions.length,
             activeSessionId: state.activeSessionId
@@ -363,6 +396,7 @@ function updateDataDir(newSavePath) {
 
 // Restore on startup
 restoreState();
+_loadLargeDataFromDisk(_dataDir);
 
 // Initialize multi-user store and migrate existing data
 (function initUserStore() {
@@ -398,8 +432,11 @@ function scheduleSave() {
     if (_saveTimer) clearTimeout(_saveTimer);
     _saveTimer = setTimeout(() => {
         _saveTimer = null;
-        // Push full state to StateService (single source of truth for persistence)
-        stateApi.pushFullState(state, sessionStore.PERSIST_KEYS).catch(e =>
+        // 1. Write large data directly to disk (bypasses HTTP body limit)
+        _saveLargeDataToDisk();
+        // 2. Push small metadata to StateService via HTTP
+        const smallKeys = sessionStore.PERSIST_KEYS.filter(k => !_DISK_ONLY_KEYS.has(k));
+        stateApi.pushFullState(state, smallKeys).catch(e =>
             console.warn('[agent:scheduleSave] pushFullState failed:', e.message));
     }, 2000);
 }
@@ -3045,6 +3082,8 @@ function initWebSocket() {
                             if (!state.subtaskLogs[s.id]) state.subtaskLogs[s.id] = {};
                             if (!state.selectedAnswers[s.id]) state.selectedAnswers[s.id] = {};
                         }
+                        // Load large data from disk (jobCards, searchHistory — not in StateService)
+                        _loadLargeDataFromDisk(_dataDir);
                         console.log('[agent:stateApi] Pulled', state.sessions.length, 'sessions from stateService (source of truth)');
                         // Reset dashboardServer caches so they re-hydrate from updated state
                         try { dashboardServer.resetJobCardsCache(); } catch (_) {}
