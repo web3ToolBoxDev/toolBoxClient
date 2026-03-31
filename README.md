@@ -55,7 +55,7 @@ Before using the Job Seek AI Agent, you need **one** of the following AI provide
 
 After onboarding, click the **Dashboard** tab to access the job search control panel:
 
-1. **Login to job platforms** — Click the login button for **LinkedIn** and/or **Indeed**. A fingerprint browser window will open for each platform. Log in with your credentials manually, then close the browser window. The platform card will show a green "Logged In" status.
+1. **Login to job platforms** — Click the login button for **LinkedIn** and/or **Indeed**. A fingerprint browser window will open for each platform. Log in with your credentials manually. **Do not close the browser window** — keep it open in the background. The platform card will show a green "Logged In" status.
 2. **Build Search Tool** — Click **Build** on each platform card. The AI will generate a custom search script tailored to the platform's current page structure. Wait for the build to complete (status changes to "Ready").
 3. **Start Workflow** — Click the **Start Workflow** button. The AI agent will begin the automated pipeline: generating search queries, searching across platforms, scoring job matches, and producing tailored resumes and cover letters for high-scoring positions.
 
