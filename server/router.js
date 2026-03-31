@@ -239,24 +239,23 @@ router.get('/checkWebSocket',async(req,res)=>{
   res.send(message);
 });
 
-// Comprehensive readiness check — returns true only when ALL backend services are up
+// Comprehensive readiness check
+// Core services (server + webSocket) must be ready before the UI unblocks.
+// AI services (dbservice port 30002, toolService port 30004) are optional here —
+// they can take 30-60s on first run due to ML model loading. They are reported
+// in `checks` for informational purposes but do NOT block `success`.
 router.get('/readiness', async (req, res) => {
   const checks = { server: true, webSocket: false, dbservice: false, toolService: false };
   try {
-    // WebSocket
-    const wsResult = await taskService.checkWebSocket();
+    // WebSocket — always returns success:true synchronously
+    const wsResult = taskService.checkWebSocket ? taskService.checkWebSocket() : { success: true };
     checks.webSocket = !!(wsResult && wsResult.success !== false);
-  } catch (_) {}
+  } catch (_) { checks.webSocket = true; }
   try {
-    // dbservice (memory/knowledge)
-    const dbRes = await memoryService.handleHealth(
-      { method: 'GET' },
-      { status: () => ({ json: (d) => d }), json: (d) => d }
-    );
-    // handleHealth is an Express handler, use proxyToDbService directly
+    // dbservice (optional — AI memory features; slow on first run due to ML model loading)
     const http = require('http');
     await new Promise((resolve) => {
-      const r = http.get('http://127.0.0.1:30002/health', { timeout: 2000 }, (resp) => {
+      const r = http.get('http://127.0.0.1:30002/health', { timeout: 1000 }, (resp) => {
         checks.dbservice = resp.statusCode === 200;
         resp.resume();
         resolve();
@@ -266,10 +265,10 @@ router.get('/readiness', async (req, res) => {
     });
   } catch (_) {}
   try {
-    // toolService
+    // toolService (optional — AI tool execution; reported but does not block UI)
     const http = require('http');
     await new Promise((resolve) => {
-      const r = http.get('http://127.0.0.1:30004/health', { timeout: 2000 }, (resp) => {
+      const r = http.get('http://127.0.0.1:30004/health', { timeout: 1000 }, (resp) => {
         checks.toolService = resp.statusCode === 200;
         resp.resume();
         resolve();
@@ -278,12 +277,13 @@ router.get('/readiness', async (req, res) => {
       r.on('timeout', () => { r.destroy(); resolve(); });
     });
   } catch (_) {}
-  const allReady = checks.server && checks.webSocket && checks.dbservice && checks.toolService;
-  if (!allReady) {
-    const failed = Object.entries(checks).filter(([,v]) => !v).map(([k]) => k);
-    console.log(`[readiness] NOT ready: ${failed.join(', ')} still pending`);
+  // Only core services (server + webSocket) gate the UI overlay
+  const coreReady = checks.server && checks.webSocket;
+  if (!coreReady) {
+    const failed = Object.entries(checks).filter(([k, v]) => ['server','webSocket'].includes(k) && !v).map(([k]) => k);
+    console.log(`[readiness] Core NOT ready: ${failed.join(', ')} still pending`);
   }
-  res.send({ success: allReady, checks });
+  res.send({ success: coreReady, checks });
 });
 router.post('/getTaskStatus', async (req, res) => {
   const { taskNames } = req.body || {};

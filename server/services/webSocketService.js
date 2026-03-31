@@ -367,7 +367,6 @@ class WebSocketService {
         return null;
     }
     checkWebSocket() {
-        console.log('Checking WebSocket connection');
         if (!this.frontRouteRegistered) {
             this.createFrontWebSocket();
         }
