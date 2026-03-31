@@ -2,6 +2,55 @@
 
 > A desktop platform that provides browser execution, persistent memory, and shared tool capabilities for AI agents. Agents connect via a standard WebSocket protocol and operate real fingerprint browsers to automate complex web workflows.
 
+## Quick Start
+
+### 1. Download
+
+Go to the [Releases page](https://github.com/web3ToolBoxDev/toolBoxClient/releases) and download the latest installer (`web3toolbox Setup x.x.x.exe` for Windows).
+
+### 2. Install
+
+Run the downloaded installer and follow the on-screen prompts. The app installs to your system like any standard desktop application.
+
+### 3. First Launch
+
+When you open Web3ToolBox for the first time:
+
+1. **Wait for initialization** — The app will automatically install internal dependencies (first launch only; a progress bar is shown). Once ready, the main UI loads.
+2. **Introduction page** — You'll land on the Introduction page with links to the video guide, GitHub, and Twitter/X.
+
+### 4. Initial Setup (Chrome Manager)
+
+Navigate to **Chrome Manager** in the sidebar:
+
+1. **Install Browser** — Click the install button to download the customized Chromium browser with fingerprint capabilities. This is required for all browser-based automation.
+2. **Set Save Path** — Choose a directory where the app stores all your data (fingerprints, wallets, agent sessions, search history). This must be set before using any features.
+
+### 5. Prerequisites for Job Seek Agent
+
+Before using the Job Seek AI Agent, you need **one** of the following AI providers installed and authenticated on your machine:
+
+| Provider | Install | Login |
+|----------|---------|-------|
+| **Claude Code** (recommended) | `npm install -g @anthropic-ai/claude-code` | Run `claude` in terminal and complete authentication |
+| **Codex CLI** | `npm install -g @openai/codex` | Run `codex` in terminal and complete authentication |
+| **API Key** | No installation needed | Enter your OpenAI or Anthropic API key directly in the Agent Workspace settings |
+
+> **Tip:** The app auto-detects installed CLI tools. If both are present, Codex CLI is tried first, then Claude Code. You can also manually select a provider in the workspace.
+
+### 6. Launch Job Seek Agent
+
+1. Click **AI Agents** in the sidebar
+2. Click **Open Workspace** on the Job Seek AI Assistant card
+3. **Create a session** — Give your job search a name
+4. **Complete onboarding** — Answer the guided questions:
+   - Target job title
+   - Preferred location
+   - Work mode (Remote / Hybrid / Onsite / Any)
+   - Target salary (optional)
+   - Upload resume (optional — PDF, DOC, or image)
+5. Click **Start** — The AI agent begins searching, scoring matches, and generating tailored documents
+
 ## Video Demo
 
 [![Watch the demo](https://img.youtube.com/vi/1hM0i_aTNdM/maxresdefault.jpg)](https://youtu.be/1hM0i_aTNdM)
@@ -165,55 +214,6 @@ This system is defined as portable markdown workflows, reusable across projects.
 | **Testing** | Playwright (E2E + Electron), Jest (unit) |
 | **Languages** | JavaScript, C++, Python, TypeScript |
 
-## Quick Start
-
-### 1. Download
-
-Go to the [Releases page](https://github.com/web3ToolBoxDev/toolBoxClient/releases) and download the latest installer (`web3toolbox Setup x.x.x.exe` for Windows).
-
-### 2. Install
-
-Run the downloaded installer and follow the on-screen prompts. The app installs to your system like any standard desktop application.
-
-### 3. First Launch
-
-When you open Web3ToolBox for the first time:
-
-1. **Wait for initialization** — The app will automatically install internal dependencies (first launch only; a progress bar is shown). Once ready, the main UI loads.
-2. **Introduction page** — You'll land on the Introduction page with links to the video guide, GitHub, and Twitter/X.
-
-### 4. Initial Setup (Chrome Manager)
-
-Navigate to **Chrome Manager** in the sidebar:
-
-1. **Install Browser** — Click the install button to download the customized Chromium browser with fingerprint capabilities. This is required for all browser-based automation.
-2. **Set Save Path** — Choose a directory where the app stores all your data (fingerprints, wallets, agent sessions, search history). This must be set before using any features.
-
-### 5. Prerequisites for Job Seek Agent
-
-Before using the Job Seek AI Agent, you need **one** of the following AI providers installed and authenticated on your machine:
-
-| Provider | Install | Login |
-|----------|---------|-------|
-| **Claude Code** (recommended) | `npm install -g @anthropic-ai/claude-code` | Run `claude` in terminal and complete authentication |
-| **Codex CLI** | `npm install -g @openai/codex` | Run `codex` in terminal and complete authentication |
-| **API Key** | No installation needed | Enter your OpenAI or Anthropic API key directly in the Agent Workspace settings |
-
-> **Tip:** The app auto-detects installed CLI tools. If both are present, Codex CLI is tried first, then Claude Code. You can also manually select a provider in the workspace.
-
-### 6. Launch Job Seek Agent
-
-1. Click **AI Agents** in the sidebar
-2. Click **Open Workspace** on the Job Seek AI Assistant card
-3. **Create a session** — Give your job search a name
-4. **Complete onboarding** — Answer the guided questions:
-   - Target job title
-   - Preferred location
-   - Work mode (Remote / Hybrid / Onsite / Any)
-   - Target salary (optional)
-   - Upload resume (optional — PDF, DOC, or image)
-5. Click **Start** — The AI agent begins searching, scoring matches, and generating tailored documents
-
 ## Build from Source
 
 ```bash
@@ -240,4 +240,4 @@ Development mode: `yarn dev` starts Electron + backend. `yarn start` for React h
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
