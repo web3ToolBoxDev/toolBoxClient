@@ -15,6 +15,9 @@ assets/agents/*/workspace/
 test-results/
 assets/agents/*/data/
 tmp/
+gh-*.txt
+gh-*.exitcode
+gh-*.err.txt
 docs/*
 !docs/verification-tree.yaml
 !docs/e2e-verification-tree.md
