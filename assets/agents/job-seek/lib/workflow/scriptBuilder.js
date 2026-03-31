@@ -638,25 +638,30 @@ Return ONLY a JavaScript code block (no imports, no browser creation). The code 
    a. IMPORTANT: Check params._verifyMode at the top of Phase 2. If truthy, SKIP the entire Phase 2 loop
       (just set each job.fullText = '' and continue). This makes verification fast.
       Example: if (params._verifyMode) { jobs.forEach(j => j.fullText = ''); } else { /* Phase 2 loop */ }
-   b. humanClick the job card title/link to open its details in the split-pane or detail panel.
+   b. BEFORE clicking: save the current URL with `const searchUrl = await page.url();`
+   c. humanClick the job card title/link to open its details in the split-pane or detail panel.
       CRITICAL: The click MUST open a split-pane/side-panel on the SAME search results page.
-      Do NOT use page.goto() to navigate to the job detail URL — that leaves the search results page
-      and corrupts the browser state for subsequent searches. If clicking a job card causes a full
-      page navigation (window.location changes), immediately use page.goBack() to return to search results,
-      set fullText to '' for that job, and continue to the next job.
-   c. randomDelay(1500, 3000) to wait for the detail panel to load.
-   d. Use page.evaluate() to extract the FULL job description text from the detail panel.
+      Do NOT use page.goto() to navigate to the job detail URL — that leaves the search results page.
+   d. randomDelay(1500, 3000) to wait for the detail panel to load.
+   e. AFTER the delay: CHECK if the page navigated away by comparing `await page.url()` with searchUrl.
+      If the URL changed (especially to /viewjob, /rc/clk, a 404 page, or any URL that is NOT the
+      original search results page):
+        - Immediately call page.goBack() and wait 2s for the search page to reload.
+        - Set fullText to '[JD_EXTRACT_FAILED:navigated to <new_url_pathname>]'
+        - Continue to the next job (do NOT attempt extraction on the wrong page).
+      Also check the page title — if it contains "not found", "404", or "error", treat as navigation failure.
+   f. Use page.evaluate() to extract the FULL job description text from the detail panel.
       Discover the correct selectors from the DOM structure provided below — do NOT hardcode
       selectors from other platforms. Look for the largest text block in the detail area.
-   e. Store the extracted text as job.fullText (string).
-   f. Wrap each iteration in try/catch — if detail extraction fails:
+   g. Store the extracted text as job.fullText (string). If the extracted text is empty or very short
+      (< 30 chars), set fullText to '[JD_EXTRACT_FAILED:empty text after extraction]'.
+   h. Wrap each iteration in try/catch — if detail extraction fails:
       - Set fullText to '[JD_EXTRACT_FAILED:<reason>]' where <reason> is a SHORT error description
         (e.g. '[JD_EXTRACT_FAILED:selector not found]', '[JD_EXTRACT_FAILED:panel did not open]',
-        '[JD_EXTRACT_FAILED:navigated away]', '[JD_EXTRACT_FAILED:empty text]').
+        '[JD_EXTRACT_FAILED:navigated to /viewjob]', '[JD_EXTRACT_FAILED:empty text]').
         This marker tells the pipeline that extraction was attempted but failed, with the reason
         for diagnosis. Do NOT set fullText to empty string '' — that means "no description exists".
-      - Also check if the page navigated away (e.g. to a 404 or job detail page) — if so, use
-        page.goBack() and wait 2s before continuing to the next job.
+      - After the catch, ALWAYS check if URL changed and goBack() if needed before next iteration.
    g. The final output for each job: { title, company, url, location, salary, jobType, description (snippet), fullText (complete JD) }.
       IMPORTANT field definitions — do NOT confuse these two fields:
       - salary: compensation/pay range ONLY (e.g. "$80K-$120K", "CA$90,000/yr"). Leave empty string "" if no salary/pay is shown.
