@@ -49,7 +49,17 @@ Before using the Job Seek AI Agent, you need **one** of the following AI provide
    - Work mode (Remote / Hybrid / Onsite / Any)
    - Target salary (optional)
    - Upload resume (optional — PDF, DOC, or image)
-5. Click **Start** — The AI agent begins searching, scoring matches, and generating tailored documents
+5. Click **Start** — The agent initializes your session
+
+### 7. Dashboard Setup
+
+After onboarding, click the **Dashboard** tab to access the job search control panel:
+
+1. **Login to job platforms** — Click the login button for **LinkedIn** and/or **Indeed**. A fingerprint browser window will open for each platform. Log in with your credentials manually, then close the browser window. The platform card will show a green "Logged In" status.
+2. **Build Search Tool** — Click **Build** on each platform card. The AI will generate a custom search script tailored to the platform's current page structure. Wait for the build to complete (status changes to "Ready").
+3. **Start Workflow** — Click the **Start Workflow** button. The AI agent will begin the automated pipeline: generating search queries, searching across platforms, scoring job matches, and producing tailored resumes and cover letters for high-scoring positions.
+
+> **Note:** You must be logged in and have a built search tool for at least one platform before starting the workflow. The dashboard shows real-time progress, job listings, match scores, and generated documents as the workflow runs.
 
 ## Video Demo
 
