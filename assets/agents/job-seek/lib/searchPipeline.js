@@ -1545,6 +1545,11 @@ async function _runPipeline(sessionId) {
                                         if (healedListings && healedListings.length > listings.length) {
                                             _log(`✓ [${q.source}] Self-heal improved results: ${listings.length} → ${healedListings.length}`);
                                             listings = healedListings;
+                                            // Restore search tool status to green after successful heal
+                                            dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                                                cell: 'search', status: 'ok',
+                                                message: `search tool healed — ${healedListings.length} results`
+                                            });
                                         }
                                     } else if (!cfDetected) {
                                         _log(`⚠ [${q.source}] Self-heal attempts exhausted (2/2) — skipping`);
@@ -1689,6 +1694,11 @@ async function _runPipeline(sessionId) {
                                         healed = true;
                                         listings = healedListings;
                                         _log(`✓ [${q.source}] Self-heal succeeded: ${healedListings.length} results after repair`);
+                                        // Restore search tool status to green after successful heal
+                                        dashboardServer.updatePlatformCell(sessionId, platformTool.id, {
+                                            cell: 'search', status: 'ok',
+                                            message: `search tool healed — ${healedListings.length} results`
+                                        });
                                     } else {
                                         _log(`✗ [${q.source}] Self-heal failed — marking source as failed`);
                                     }
