@@ -499,6 +499,25 @@ router.get('/getProviderModels', async (req, res) => {
 });
 
 const toolServiceManager = require('./services/toolServiceManager');
+const tlsFingerprint = require('./services/tlsFingerprint');
+
+// TLS 指纹配置
+router.get('/tls/config', async (req, res) => {
+  const { browser, version, platform } = req.query;
+  const brand = (browser || 'chrome').toLowerCase();
+  const ver = version || '120';
+  const plat = (platform || 'windows').toLowerCase();
+  const tlsOpts = tlsFingerprint.getTLSOptions(brand, ver);
+  const headers = tlsFingerprint.getHTTPHeaders(brand, ver, plat);
+  res.json({ success: true, browser: brand, version: ver, platform: plat, tls: tlsOpts, headers });
+});
+
+router.get('/tls/ja3', async (req, res) => {
+  const { browser, version } = req.query;
+  const key = `${(browser || 'chrome').toLowerCase()}_${version || '120'}`;
+  const sig = tlsFingerprint.JA3_SIGNATURES[key] || tlsFingerprint.JA3_SIGNATURES.chrome_120;
+  res.json({ success: true, browser: browser || 'chrome', version: version || '120', ja3: sig });
+});
 
 router.get('/tools/health', toolServiceManager.handleHealth);
 router.get('/tools/list', toolServiceManager.handleListTools);

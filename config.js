@@ -38,8 +38,11 @@ class Config {
                 this.defaultExecPath = process.execPath;
             }
             this.ip2LocationDbPath = path.join(this.assetsPath, '/ip2location/IP2LOCATION-LITE-DB11.BIN');
-			this.initWalletScriptPath = '';
-			this.openWalletScriptPath = '';
+            this.fingerprintChromiumPath = this.isBuild
+                ? path.join(this.assetsPath, '../fingerprint-chromium/ungoogled-chromium-144.0.7559.132-1-x86_64_linux/chrome')
+                : path.join(this.assetsPath, 'fingerprint-chromium/ungoogled-chromium-144.0.7559.132-1-x86_64_linux/chrome');
+            this.initWalletScriptPath = '';
+            this.openWalletScriptPath = '';
         
 
             // 初始化时加载所有路径到内存
@@ -381,6 +384,23 @@ class Config {
         }
         this._loadAllPathsFromJson();
         return { success: !!this._paths.chromePath, path: this._paths.chromePath };
+    }
+
+    getFingerprintChromiumPath() {
+        if (this._paths.fingerprintChromiumPath) {
+            return { success: true, path: this._paths.fingerprintChromiumPath };
+        }
+        if (this.fingerprintChromiumPath && fs.existsSync(this.fingerprintChromiumPath)) {
+            return { success: true, path: this.fingerprintChromiumPath };
+        }
+        return { success: false, path: null };
+    }
+
+    setFingerprintChromiumPath(fpChromePath) {
+        console.log("设置 Fingerprint Chromium 路径:", fpChromePath);
+        this._paths.fingerprintChromiumPath = fpChromePath;
+        this._saveAllPathsToJson();
+        return { success: true };
     }
 
     // ── mini_installer 管理 ──

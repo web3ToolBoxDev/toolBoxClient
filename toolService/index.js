@@ -6,6 +6,10 @@ const toolRegistry = require('./lib/toolRegistry');
 const PORT = parseInt(process.env.TOOL_SERVICE_PORT || '30004', 10);
 const CHROME_PATH = process.env.TOOL_SERVICE_CHROME_PATH || '';
 const SAVE_PATH = process.env.TOOL_SERVICE_SAVE_PATH || '';
+const FP_CHROMIUM_PATH = process.env.FP_CHROMIUM_PATH || '';
+if (FP_CHROMIUM_PATH) {
+    console.log(`[toolService] Fingerprint Chromium path: ${FP_CHROMIUM_PATH}`);
+}
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -101,7 +105,7 @@ const walletTools = require('./lib/walletTools');
 // Accepts either full `env` object or `envId` string (auto-loads from main backend)
 app.post('/browser/launch', async (req, res) => {
     try {
-        let { env, envId, headless, keepAlive, walletExtensionPath } = req.body;
+        let { env, envId, headless, keepAlive, walletExtensionPath, useFingerprintChromium, fingerprintSeed } = req.body;
 
         // If envId provided but no full env, fetch from main backend
         if (!env && envId) {
@@ -109,13 +113,17 @@ app.post('/browser/launch', async (req, res) => {
             if (!env) console.warn('[browser/launch] Failed to fetch env by ID:', envId);
         }
 
+        if (env && fingerprintSeed) env._fingerprintSeed = fingerprintSeed;
+
+        const actualChromePath = (useFingerprintChromium && FP_CHROMIUM_PATH) ? FP_CHROMIUM_PATH : CHROME_PATH;
         const { browserId, mode } = await browserPool.launch({
-            chromePath: CHROME_PATH,
+            chromePath: actualChromePath,
             savePath: SAVE_PATH,
             env: env || undefined,
             headless: headless !== false,
             walletExtensionPath: walletExtensionPath || undefined,
-            keepAlive: !!keepAlive
+            keepAlive: !!keepAlive,
+            useFingerprintChromium: !!useFingerprintChromium
         });
 
         // Auto-remove from pool on browser disconnect

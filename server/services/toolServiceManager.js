@@ -67,11 +67,14 @@ function startToolService() {
         } catch (_) {}
     }
 
+    const config = require('../../config').getInstance();
+    const fpChromRes = config.getFingerprintChromiumPath();
     const env = {
         ...process.env,
         TOOL_SERVICE_PORT: String(TOOL_SERVICE_PORT),
         TOOL_SERVICE_CHROME_PATH: chromePath,
-        TOOL_SERVICE_SAVE_PATH: savePath
+        TOOL_SERVICE_SAVE_PATH: savePath,
+        FP_CHROMIUM_PATH: fpChromRes.success ? fpChromRes.path : ''
     };
 
     console.log(`[toolServiceManager] Spawning toolService: ${execPath} ${toolServicePath}`);
