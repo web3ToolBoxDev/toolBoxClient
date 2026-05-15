@@ -23,7 +23,7 @@ function startToolService() {
     const execPath = config.getDefaultExecPath();
     // In packaged app: toolService is in extraResources (resources/toolService/)
     // In dev: toolService is at repo root (../../toolService/)
-    const isBuild = config.isBuild;
+    const isBuild = config.getIsBuild();
     const toolServicePath = isBuild
         ? path.resolve(__dirname, '../../../toolService/index.js')
         : path.resolve(__dirname, '../../toolService/index.js');

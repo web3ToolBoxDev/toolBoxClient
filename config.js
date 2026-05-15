@@ -33,8 +33,9 @@ class Config {
                 this.defaultExecPath = this.isBuild
                     ? path.join(this.assetsPath, '/node_for_mac/node-v21.6.2-mac/bin/node')
                     : process.execPath;
-            } else {
-                console.log("当前平台不是 Windows 也不是 macOS");
+} else {
+                this.platform = process.platform;
+                this.defaultExecPath = process.execPath;
             }
             this.ip2LocationDbPath = path.join(this.assetsPath, '/ip2location/IP2LOCATION-LITE-DB11.BIN');
 			this.initWalletScriptPath = '';
@@ -73,7 +74,8 @@ class Config {
     // Set default savePath when none configured
     _applyDefaultSavePath() {
         const home = process.env.USERPROFILE || process.env.HOME || require('os').homedir();
-        const defaultPath = path.join(home, 'Documents', 'Web3ToolBox');
+        const docsDir = process.env.XDG_DOCUMENTS_DIR || path.join(home, 'Documents');
+        const defaultPath = path.join(docsDir, 'Web3ToolBox');
         try {
             fs.mkdirSync(defaultPath, { recursive: true });
             fs.mkdirSync(path.join(defaultPath, 'db'), { recursive: true });

@@ -17,8 +17,8 @@ const isBuild = config.getIsBuild();
 console.log('isBuild:', isBuild);
 
 
-async function handleFileOpen() {
-  const { canceled, filePaths } = await dialog.showOpenDialog()
+async function handleFileOpen(options) {
+  const { canceled, filePaths } = await dialog.showOpenDialog(options || {})
   if (!canceled) {
     return filePaths[0]
   }
@@ -89,11 +89,11 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     },
   });
-  console.log(`file://${path.join(__dirname, './client/build/index.html')}`);
-  const startURL = isBuild
-    ? `file://${path.join(__dirname, './client/build/index.html')}`
+  const buildPath = path.join(__dirname, './client/build/index.html');
+  const startURL = fs.existsSync(buildPath)
+    ? `file://${buildPath}`
     : 'http://localhost:3000';
-
+  console.log('[Electron] Loading URL:', startURL);
   mainWindow.loadURL(startURL);
   // Inject backend port into renderer once DOM is ready
   mainWindow.webContents.on('did-finish-load', () => {
@@ -323,19 +323,20 @@ app.whenReady().then(async () => {
       createBackendProcess();
     }
   });
-  // 在应用程序关闭之前：flush StateService 然后终止后台服务子进程
+  let isQuitting = false;
   app.on('before-quit', async (e) => {
+    if (isQuitting) return;
     if (backendProcess) {
-      // Tell backend to flush pending state writes before we kill it
+      isQuitting = true;
+      e.preventDefault();
       try {
-        e.preventDefault(); // hold quit until flush completes
         const http = require('http');
         await new Promise((resolve) => {
-          const req = http.request('http://127.0.0.1:30001/api/state/flush', { method: 'POST', timeout: 3000 }, (res) => {
+          const req = http.request(`http://127.0.0.1:${backendPort}/api/state/flush`, { method: 'POST', timeout: 3000 }, (res) => {
             res.resume();
             res.on('end', resolve);
           });
-          req.on('error', resolve); // don't block quit if backend already gone
+          req.on('error', resolve);
           req.on('timeout', () => { req.destroy(); resolve(); });
           req.end();
         });
@@ -343,7 +344,7 @@ app.whenReady().then(async () => {
       } catch (_) { /* best effort */ }
       backendProcess.kill();
       backendProcess = null;
-      app.quit(); // resume quit after flush
+      app.quit();
     }
   });
   app.on('window-all-closed', () => {

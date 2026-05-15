@@ -8,12 +8,15 @@ const { checkProxy } = require('./proxyService');
 
 const fpDataPath = path.join(config.getAssetsPath(), 'fpData.json');
 let fpData = {};
-//检查是否存在fpData.json文件，如果存在则加载
 if (fs.existsSync(fpDataPath)) {
     fpData = JSON.parse(fs.readFileSync(fpDataPath));
 } else {
-    const fpDataJson = JSON.stringify(fpData);
-    fs.writeFileSync(fpDataPath, fpDataJson);
+    try {
+        fs.mkdirSync(path.dirname(fpDataPath), { recursive: true });
+        fs.writeFileSync(fpDataPath, JSON.stringify(fpData));
+    } catch (e) {
+        console.error('[fingerPrintService] Failed to create fpData.json:', e.message);
+    }
 }
 
 // envData 以 {id: value} 形式存在内存

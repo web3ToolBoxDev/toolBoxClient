@@ -50,6 +50,10 @@ function startDbService() {
         console.log(`[memoryService] dbservice exited (code=${code}, signal=${signal})`);
         dbProcess = null;
         isStarting = false;
+        if (code !== 0 && signal !== 'SIGTERM' && signal !== 'SIGKILL') {
+            console.log('[memoryService] Auto-restarting dbservice in 2s...');
+            setTimeout(() => startDbService(), 2000);
+        }
     });
     dbProcess.on('error', (err) => {
         console.error('[memoryService] Failed to spawn dbservice:', err.message);
