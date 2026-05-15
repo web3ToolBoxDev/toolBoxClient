@@ -410,6 +410,75 @@ router.post('/bindWalletEnv', async (req, res) => {
   res.send(result);
 });
 
+// 打开浏览器环境
+router.post('/openEnv', async (req, res) => {
+  const { id, headless, useFingerprintChromium } = req.body;
+  if (!id) return res.send({ success: false, message: 'id required' });
+  const envRes = await fingerPrintService.getEnvById(id);
+  if (!envRes.success) return res.send({ success: false, message: envRes.message });
+  const toolServiceManager = require('./services/toolServiceManager');
+  const launchRes = await new Promise((resolve) => {
+    const http = require('http');
+    const postData = JSON.stringify({ env: envRes.data, headless: headless !== false, useFingerprintChromium: !!useFingerprintChromium });
+    const req2 = http.request({
+      hostname: '127.0.0.1', port: 30004, path: '/browser/launch', method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
+    }, (res2) => { let d = ''; res2.on('data', c => d += c); res2.on('end', () => resolve(JSON.parse(d))); });
+    req2.on('error', () => resolve({ success: false, error: 'toolService not available' }));
+    req2.write(postData);
+    req2.end();
+  });
+  res.send(launchRes);
+});
+
+// 初始化 Twitter
+router.post('/initTwitters', async (req, res) => {
+  const { addresses } = req.body;
+  if (!addresses) return res.send({ success: false, message: 'addresses required' });
+  const taskService = require('./services/taskService').getInstance();
+  const result = await taskService.execTask('initTwitter', { addresses });
+  res.send(result);
+});
+
+// 状态服务路由
+router.get('/state/sessions/:agentId', async (req, res) => {
+  try {
+    const { StateService } = require('./services/stateService');
+    const svc = StateService.getInstance();
+    const sessions = svc.getSessions(req.params.agentId);
+    res.send({ success: true, sessions });
+  } catch (e) { res.send({ success: false, message: e.message }); }
+});
+
+router.post('/state/app/set', async (req, res) => {
+  try {
+    const { StateService } = require('./services/stateService');
+    const svc = StateService.getInstance();
+    const { path, value } = req.body;
+    svc.set('app.' + path, value);
+    res.send({ success: true });
+  } catch (e) { res.send({ success: false, message: e.message }); }
+});
+
+router.get('/state/app/language', async (req, res) => {
+  try {
+    const { StateService } = require('./services/stateService');
+    const svc = StateService.getInstance();
+    const lang = svc.get('app.language') || 'en';
+    res.send({ success: true, language: lang });
+  } catch (e) { res.send({ success: false, message: e.message }); }
+});
+
+router.post('/state/app/language', async (req, res) => {
+  try {
+    const { StateService } = require('./services/stateService');
+    const svc = StateService.getInstance();
+    const { language } = req.body;
+    svc.set('app.language', language || 'en');
+    res.send({ success: true });
+  } catch (e) { res.send({ success: false, message: e.message }); }
+});
+
 // 指纹一致性校验
 router.post('/validateFingerprint', async (req, res) => {
   const { id } = req.body;

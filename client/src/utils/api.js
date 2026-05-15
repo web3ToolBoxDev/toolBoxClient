@@ -375,6 +375,74 @@ class APIManager {
         return res.data;
     }
 
+    async openEnv(id, headless = true, useFingerprintChromium = false) {
+        const res = await axios.post(`${this.baseUrl}/openEnv`, { id, headless, useFingerprintChromium });
+        return res.data;
+    }
+    async initTwitters(addresses) {
+        const res = await axios.post(`${this.baseUrl}/initTwitters`, { addresses });
+        return res.data;
+    }
+    async getStateSessions(agentId = 'jobSeekAgent') {
+        const res = await axios.get(`${this.baseUrl}/state/sessions/${agentId}`);
+        return res.data;
+    }
+    async setStateApp(path, value) {
+        const res = await axios.post(`${this.baseUrl}/state/app/set`, { path, value });
+        return res.data;
+    }
+    async getStateLanguage() {
+        const res = await axios.get(`${this.baseUrl}/state/app/language`);
+        return res.data;
+    }
+    async setStateLanguage(language) {
+        const res = await axios.post(`${this.baseUrl}/state/app/language`, { language });
+        return res.data;
+    }
+    async validateFingerprint(id) {
+        const res = await axios.post(`${this.baseUrl}/validateFingerprint`, { id });
+        return res.data;
+    }
+    async getFingerprintAudit(id) {
+        const res = await axios.get(`${this.baseUrl}/fingerprintAudit/${id}`);
+        return res.data;
+    }
+    async getTLSConfig(browser = 'chrome', version = '120', platform = 'windows') {
+        const res = await axios.get(`${this.baseUrl}/tls/config?browser=${browser}&version=${version}&platform=${platform}`);
+        return res.data;
+    }
+    async getJA3Signature(browser = 'chrome', version = '120') {
+        const res = await axios.get(`${this.baseUrl}/tls/ja3?browser=${browser}&version=${version}`);
+        return res.data;
+    }
+    async checkMemoryHealth() {
+        const res = await axios.get(`${this.baseUrl}/memory/health`);
+        return res.data;
+    }
+    async storeMemory(data) {
+        const res = await axios.post(`${this.baseUrl}/memory/store`, data);
+        return res.data;
+    }
+    async searchMemory(query) {
+        const res = await axios.post(`${this.baseUrl}/memory/search`, query);
+        return res.data;
+    }
+    async clearMemory() {
+        const res = await axios.delete(`${this.baseUrl}/memory/clear`);
+        return res.data;
+    }
+    async checkToolsHealth() {
+        const res = await axios.get(`${this.baseUrl}/tools/health`);
+        return res.data;
+    }
+    async listTools() {
+        const res = await axios.get(`${this.baseUrl}/tools/list`);
+        return res.data;
+    }
+    async executeTool(name, params) {
+        const res = await axios.post(`${this.baseUrl}/tools/execute`, { name, params });
+        return res.data;
+    }
     async getProviderModels(provider, subProvider, apiKey) {
         const params = new URLSearchParams();
         if (provider) params.append('provider', provider);
