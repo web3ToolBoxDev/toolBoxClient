@@ -3,6 +3,21 @@ const { t } = require('i18next');
 const path = require('path');
 const fs = require('fs');
 const shell = require('electron').shell;
+
+// Force software rendering for virtual machines without dedicated GPU
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('--disable-gpu');
+app.commandLine.appendSwitch('--disable-gpu-compositing');
+app.commandLine.appendSwitch('--disable-gpu-rasterization');
+app.commandLine.appendSwitch('--disable-software-rasterizer');
+app.commandLine.appendSwitch('--enable-unsafe-swiftshader');
+app.commandLine.appendSwitch('--use-gl=swiftshader');
+app.commandLine.appendSwitch('--in-process-gpu');
+app.commandLine.appendSwitch('--disable-gpu-sandbox');
+app.commandLine.appendSwitch('--disable-features=VizDisplayCompositor,VizHitTestSurfaceLayer');
+app.commandLine.appendSwitch('--disable-accelerated-2d-canvas');
+app.commandLine.appendSwitch('--disable-accelerated-video-decode');
+app.commandLine.appendSwitch('--disable-accelerated-video-encode');
 if (!process.env.APP_USER_DATA) {
   try {
     process.env.APP_USER_DATA = app.getPath('userData');
@@ -336,8 +351,16 @@ app.whenReady().then(async () => {
       createBackendProcess();
     }
   });
+  // Prevent accidental quit from signals in VM environment
+  process.on('SIGTERM', () => console.log('[Electron] SIGTERM received, ignoring'));
+  process.on('SIGINT', () => console.log('[Electron] SIGINT received, ignoring'));
+  process.on('SIGHUP', () => console.log('[Electron] SIGHUP received, ignoring'));
+
+  let forceQuit = false;
   app.on('before-quit', async (e) => {
+    if (forceQuit) return;
     if (backendProcess) {
+      forceQuit = true;
       try {
         const http = require('http');
         await new Promise((resolve) => {
@@ -356,15 +379,10 @@ app.whenReady().then(async () => {
     }
   });
   app.on('window-all-closed', () => {
-    console.log('所有窗口已关闭');
-    if (process.platform !== 'darwin') {
-      // Delay quit to allow any pending operations to complete
-      setTimeout(() => {
-        if (!app.isQuitting) {
-          app.quit();
-        }
-      }, 2000);
-    }
+    console.log('所有窗口已关闭, platform:', process.platform);
+    // In VM environments with Virtio GPU, window may close due to GPU process crashes
+    // Don't quit - let the user manually close the app when done
+    // The backend services will keep running until explicitly killed
   });
 })
 
