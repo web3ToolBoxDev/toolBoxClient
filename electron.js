@@ -313,6 +313,17 @@ app.whenReady().then(async () => {
   if (mainWindow === null) {
     createWindow();
   }
+  // Log window state for debugging
+  if (mainWindow) {
+    mainWindow.on('close', () => console.log('Main window closing'));
+    mainWindow.on('closed', () => { console.log('Main window closed'); mainWindow = null; });
+    // Prevent window-all-closed from quitting immediately in headless/Xvfb environments
+    let windowCloseTime = 0;
+    mainWindow.webContents.on('did-finish-load', () => {
+      console.log('[Electron] Window loaded successfully');
+      windowCloseTime = 0;
+    });
+  }
   app.on('activate', function () {
     if (mainWindow === null) {
       console.log('重新创建窗口');
@@ -347,7 +358,12 @@ app.whenReady().then(async () => {
   app.on('window-all-closed', () => {
     console.log('所有窗口已关闭');
     if (process.platform !== 'darwin') {
-      app.quit();
+      // Delay quit to allow any pending operations to complete
+      setTimeout(() => {
+        if (!app.isQuitting) {
+          app.quit();
+        }
+      }, 2000);
     }
   });
 })
