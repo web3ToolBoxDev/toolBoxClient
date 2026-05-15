@@ -673,4 +673,11 @@ module.exports = {
     HARDWARE_PROFILES,
     SCREEN_PROFILES,
     FONT_SETS,
+    pickHardware,
+    pickScreen,
+    pickFonts,
+    generateAudioNoise,
+    inferOS,
+    inferHardwareProfile,
+    SecureRandom,
 };
