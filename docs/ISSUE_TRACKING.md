@@ -144,6 +144,14 @@
 ---
 
 ## 已知限制
-1. **虚拟机 GPU**: Virtio GPU + llvmpipe 软件渲染，Electron 窗口可能不稳定
-2. **窗口管理**: 在 PVE 虚拟桌面环境下，窗口可能需要手动激活才能显示
+1. **虚拟机 GPU**: Virtio GPU + llvmpipe 软件渲染，GPU 进程会崩溃但不影响功能
+2. **窗口管理**: 窗口稳定运行 110+ 秒，GPU 进程崩溃后自动清理
 3. **fingerprint-chromium**: 需要手动下载预编译二进制，不支持自动更新
+4. **自动退出已禁用**: Linux 环境下窗口关闭后不自动退出，需手动 kill
+
+## 最终修复方案
+1. `app.disableHardwareAcceleration()` + 多个 `--disable-gpu-*` 开关
+2. 信号处理器忽略 SIGTERM/SIGINT/SIGHUP
+3. `window-all-closed` 不触发 `app.quit()`
+4. `before-quit` 简化，移除 `e.preventDefault()` 循环
+5. 所有模块级 config 引用改为函数内延迟加载
