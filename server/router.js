@@ -5,8 +5,13 @@ const taskService = require('./services/taskService').getInstance();
 const proxyService = require('./services/proxyService');
 const fingerPrintService = require('./services/fingerPrintService');
 const router = express.Router();
-const config = require('../config').getInstance();
 const memoryService = require('./services/memoryService');
+
+let _config = null;
+function getConfig() {
+    if (!_config) _config = require('../config').getInstance();
+    return _config;
+}
 
 // 定义路由
 // router.get('/openScript', async(req, res) => {
@@ -125,7 +130,7 @@ router.post('/setConfigInfo', async(req, res) => {
 // bypassing taskService (which depends on task.db that may not exist in new savePath)
 router.get('/getAgentSessions/:agentName', async (req, res) => {
     const agentName = req.params.agentName;
-    const savePath = config.getSavePath().path;
+    const savePath = getConfig().getSavePath().path;
     if (!savePath) {
         return res.send({ success: false, message: 'No savePath configured' });
     }
@@ -207,7 +212,7 @@ router.delete('/deleteTask', async(req, res) => {
 });
 router.post('/setSavePath',async(req,res)=>{
   const path = req.body.path;
-  const message = await config.setSavePath(path);
+  const message = await getConfig().setSavePath(path);
   // Clear cached AI sessions so next access reads from new savePath
   try { taskService.resetAiSessions(); } catch (e) {
     console.error('[router] resetAiSessions after savePath change failed:', e.message);
@@ -230,7 +235,7 @@ router.post('/setSavePath',async(req,res)=>{
 });
 // 重新加载保存路径下的 DB 数据（用于二次安装后的同步）
 router.get('/getSavePath',async(req,res)=>{
-  const message = config.getSavePath();
+  const message = getConfig().getSavePath();
   res.send(message);
 });
 
@@ -361,29 +366,29 @@ router.post('/deleteFingerPrintProxy', async (req, res) => {
 });
 router.post('/setChromePath', async (req, res) => {
   const chromePath = req.body.path;
-  const message = config.setChromePath(chromePath);
+  const message = getConfig().setChromePath(chromePath);
   res.send(message);
 });
 
 router.get('/getChromePath', async (req, res) => {
-  const message = config.getChromePath();
+  const message = getConfig().getChromePath();
   res.send(message);
 });
 
 // ── mini_installer 管理 ──
 router.post('/setInstallerPath', async (req, res) => {
   const installerPath = req.body.path;
-  const message = config.setInstallerPath(installerPath);
+  const message = getConfig().setInstallerPath(installerPath);
   res.send(message);
 });
 
 router.get('/getInstallerPath', async (req, res) => {
-  const message = config.getInstallerPath();
+  const message = getConfig().getInstallerPath();
   res.send(message);
 });
 
 router.post('/runInstaller', async (req, res) => {
-  const message = await config.runInstaller();
+  const message = await getConfig().runInstaller();
   res.send(message);
 });
 // 修改指纹环境名称
@@ -442,9 +447,9 @@ router.get('/fingerprintAudit/:id', async (req, res) => {
 
 router.post('/setWalletScriptDirectory', async (req, res) => {
   const directory = req.body.directory;
-  const current = config.getWalletScriptDirectory();
+  const current = getConfig().getWalletScriptDirectory();
   const currentDir = current && current.directory ? current.directory : 'default';
-  const message = await config.setWalletScriptDirectory(directory);
+  const message = await getConfig().setWalletScriptDirectory(directory);
   const nextDir = directory || 'default';
   if (message && message.success && currentDir !== nextDir) {
     await walletService.resetAllWalletsInitialized();
@@ -452,7 +457,7 @@ router.post('/setWalletScriptDirectory', async (req, res) => {
   res.send(message);
 });
 router.get('/getWalletScriptDirectory', async (req, res) => {
-  const message = config.getWalletScriptDirectory();
+  const message = getConfig().getWalletScriptDirectory();
   res.send(message);
 });
 

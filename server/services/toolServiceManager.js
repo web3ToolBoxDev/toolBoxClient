@@ -4,7 +4,6 @@ const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const config = require('../../config').getInstance();
 
 const TOOL_SERVICE_PORT = 30004;
 const TOOL_SERVICE_URL = `http://127.0.0.1:${TOOL_SERVICE_PORT}`;
@@ -19,6 +18,7 @@ let isStarting = false;
 function startToolService() {
     if (toolProcess || isStarting) return;
     isStarting = true;
+    const config = require('../../config').getInstance();
 
     const execPath = config.getDefaultExecPath();
     // In packaged app: toolService is in extraResources (resources/toolService/)
@@ -67,7 +67,6 @@ function startToolService() {
         } catch (_) {}
     }
 
-    const config = require('../../config').getInstance();
     const fpChromRes = config.getFingerprintChromiumPath();
     const env = {
         ...process.env,
