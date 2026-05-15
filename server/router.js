@@ -299,7 +299,7 @@ router.post('/checkProxy',async(req,res)=>{
 //获取指纹信息数量
 router.get('/getFingerPrintCount',async(req,res)=>{
   const count = await fingerPrintService.getFingerPrintCount();
-  res.send({...count,testError:'testError' });
+  res.send(count);
 })
 //导入指纹信息
 router.post('/loadFingerPrints',async(req,res)=>{
@@ -403,6 +403,41 @@ router.post('/bindWalletEnv', async (req, res) => {
   const { walletId, envId } = req.body;
   const result = await walletService.bindWalletEnv(walletId, envId);
   res.send(result);
+});
+
+// 指纹一致性校验
+router.post('/validateFingerprint', async (req, res) => {
+  const { id } = req.body;
+  if (!id) return res.send({ success: false, message: 'id required' });
+  const envRes = await fingerPrintService.getEnvById(id);
+  if (!envRes.success) return res.send({ success: false, message: envRes.message });
+  const validation = fingerPrintService.validateFingerprintConsistency(envRes.data);
+  res.send({ success: true, ...validation });
+});
+
+// 获取指纹审计报告
+router.get('/fingerprintAudit/:id', async (req, res) => {
+  const envRes = await fingerPrintService.getEnvById(req.params.id);
+  if (!envRes.success) return res.send({ success: false, message: envRes.message });
+  const fp = envRes.data;
+  const validation = fingerPrintService.validateFingerprintConsistency(fp);
+  res.send({
+    success: true,
+    fingerprint: {
+      id: fp.id,
+      name: fp.name,
+      user_agent: fp.user_agent,
+      platform: fp.clientHint?.platform,
+      webgl_vendor: fp.webgl?.vendor,
+      webgl_renderer: fp.webgl?.renderer,
+      hardware: fp.hardware,
+      screen: fp.screen,
+      language_js: fp.language_js,
+      proxy: fp.proxy ? { country: fp.proxy.country, timeZone: fp.proxy.timeZone } : null,
+      bindWalletId: fp.bindWalletId || null,
+    },
+    consistency: validation
+  });
 });
 
 router.post('/setWalletScriptDirectory', async (req, res) => {

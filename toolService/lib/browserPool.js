@@ -33,11 +33,19 @@ function buildChromeArgs(env, options = {}) {
     if (options.walletExtensionPath) {
         args.push(`--disable-extensions-except=${options.walletExtensionPath}`);
     }
-    // 将新格式 audio: {seed: N} 转为 Chromium 补丁期望的浮点数噪声值
-    let audioNoise = env.audio;
-    if (audioNoise && typeof audioNoise === 'object' && audioNoise.seed !== undefined) {
-        const s = audioNoise.seed;
-        audioNoise = ((((s * 1103515245 + 12345) & 0x7fffffff) % 10000) + 1) / 1000000;
+    // 将音频对象转为 Chromium 补丁期望的浮点数噪声值
+    let audioNoise = 0.0001;
+    if (env.audio) {
+        if (typeof env.audio === 'number') {
+            audioNoise = env.audio;
+        } else if (typeof env.audio === 'object') {
+            if (env.audio.dynamicsCompressor !== undefined) {
+                audioNoise = env.audio.dynamicsCompressor;
+            } else if (env.audio.seed !== undefined) {
+                const s = env.audio.seed;
+                audioNoise = ((((s * 1103515245 + 12345) & 0x7fffffff) % 10000) + 1) / 1000000;
+            }
+        }
     }
     const fingerprints = {
         audio: audioNoise,
@@ -47,8 +55,9 @@ function buildChromeArgs(env, options = {}) {
         hardware: env.hardware,
         screen: env.screen,
         clientHint: env.clientHint,
-        // languages_js: (env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
-        languages_http: env.language_http
+        languages_http: env.language_http,
+        fonts_remove: env.fonts_remove || '',
+        fonts_os: env.fonts_os || ''
     };
     if (env.useProxy) {
         fingerprints.position = env.position;
