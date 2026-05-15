@@ -95,6 +95,8 @@ function createWindow() {
     : 'http://localhost:3000';
   console.log('[Electron] Loading URL:', startURL);
   mainWindow.loadURL(startURL);
+  mainWindow.show();
+  mainWindow.focus();
   // Inject backend port into renderer once DOM is ready
   mainWindow.webContents.on('did-finish-load', () => {
     mainWindow.webContents.executeJavaScript(`window.__API_PORT__ = ${backendPort};`);
@@ -323,12 +325,8 @@ app.whenReady().then(async () => {
       createBackendProcess();
     }
   });
-  let isQuitting = false;
   app.on('before-quit', async (e) => {
-    if (isQuitting) return;
     if (backendProcess) {
-      isQuitting = true;
-      e.preventDefault();
       try {
         const http = require('http');
         await new Promise((resolve) => {
@@ -344,7 +342,6 @@ app.whenReady().then(async () => {
       } catch (_) { /* best effort */ }
       backendProcess.kill();
       backendProcess = null;
-      app.quit();
     }
   });
   app.on('window-all-closed', () => {
