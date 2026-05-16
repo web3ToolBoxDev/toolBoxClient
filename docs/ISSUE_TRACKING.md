@@ -156,6 +156,16 @@
 3. `window-all-closed` 不触发 `app.quit()`
 4. `before-quit` 简化，移除 `e.preventDefault()` 循环
 5. 所有模块级 config 引用改为函数内延迟加载
-6. NeDB `util.isDate` polyfill（Node.js 24 兼容性）
+6. NeDB `util.isDate` polyfill（Node.js 24 兼容性）— 重写 var 声明块
 7. `contextIsolation: true` + `contextBridge` 替代 `nodeIntegration: true`
 8. IPC proxy 模式替代渲染进程直接 HTTP 请求
+9. `better-sqlite3` 重新编译（npm rebuild）
+10. server.js SIGTERM 处理器不调用 process.exit()
+
+## 测试验证
+- ✅ 后端 3 个端口全部正常（30001/30002/30004）
+- ✅ dbservice 正常（better-sqlite3 重编译 + NeDB polyfill）
+- ✅ toolService 正常（21 tools）
+- ✅ Electron 前端 UI 正常渲染（无白屏）
+- ✅ 窗口稳定运行 30+ 秒
+- ✅ API readiness 全部通过
