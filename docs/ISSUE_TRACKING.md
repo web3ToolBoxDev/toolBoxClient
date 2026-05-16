@@ -169,3 +169,24 @@
 - ✅ Electron 前端 UI 正常渲染（无白屏）
 - ✅ 窗口稳定运行 30+ 秒
 - ✅ API readiness 全部通过
+- ✅ 指纹生成成功（generateFingerPrints）
+- ✅ 指纹列表获取成功（getFingerPrints）
+- ✅ 硬件参数多样化（memory/concurrency）
+- ✅ 屏幕分辨率多样化
+
+## 最终修复清单
+1. electron.js: GPU 禁用 + 信号处理器 + before-quit 修复
+2. electron.js: contextIsolation:true + contextBridge
+3. electron.js: IPC proxy 替代渲染进程直接 HTTP
+4. preload.js: 安全 IPC 包装
+5. api.js: 使用 window.electronAPI 替代直接 axios
+6. server.js: SIGTERM 处理器不调用 process.exit()
+7. server/router.js: 添加调试日志
+8. fingerPrintService.js: 硬件/屏幕/字体/音频/一致性校验
+9. tlsFingerprint.js: TLS 指纹伪装模块
+10. behaviorSimulator.js: 行为模拟引擎
+11. fingerprintAuditor.js: 指纹检测模块
+12. config.js: fingerprintChromiumPath + getFingerprintChromiumPath()
+13. fpData.json: 基础指纹数据
+14. better-sqlite3: npm rebuild
+15. NeDB: util.isDate/isRegExp polyfill
