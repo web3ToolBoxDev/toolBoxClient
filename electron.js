@@ -417,6 +417,7 @@ app.whenReady().then(async () => {
     console.log('[Electron] before-quit triggered');
     if (backendProcess) {
       try {
+        // Gracefully shutdown backend via HTTP
         const http = require('http');
         await new Promise((resolve) => {
           const req = http.request(`http://127.0.0.1:${backendPort}/api/state/flush`, { method: 'POST', timeout: 2000 }, (res) => {
@@ -429,18 +430,8 @@ app.whenReady().then(async () => {
         });
         console.log('[Electron] StateService flushed');
       } catch (_) { /* best effort */ }
-      // Don't kill backend - let it keep running for the frontend
-      // backendProcess.kill();
-      // backendProcess = null;
-    }
-  });
-          req.on('error', resolve);
-          req.on('timeout', () => { req.destroy(); resolve(); });
-          req.end();
-        });
-        console.log('[Electron] StateService flushed before quit');
-      } catch (_) { /* best effort */ }
-      backendProcess.kill();
+      // Send SIGTERM to backend for graceful shutdown
+      try { backendProcess.kill('SIGTERM'); } catch(_) {}
       backendProcess = null;
     }
   });

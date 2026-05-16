@@ -94,6 +94,15 @@ function _flushStateOnExit() {
 }
 process.on('exit', _flushStateOnExit);
 process.on('SIGINT', () => { _flushStateOnExit(); memoryService.stopDbService(); toolServiceMgr.stopToolService(); process.exit(0); });
-process.on('SIGTERM', () => { _flushStateOnExit(); memoryService.stopDbService(); toolServiceMgr.stopToolService(); process.exit(0); });
+// Ignore SIGTERM in utilityProcess - let parent manage lifecycle
+// SIGTERM is sent by Electron when utilityProcess is being cleaned up
+process.on('SIGTERM', () => {
+  console.log('[server] SIGTERM received, flushing state...');
+  _flushStateOnExit();
+  // Don't call process.exit - let parent process manage shutdown
+  // Just stop child services gracefully
+  try { memoryService.stopDbService(); } catch(e) {}
+  try { toolServiceMgr.stopToolService(); } catch(e) {}
+});
 
 module.exports = app
