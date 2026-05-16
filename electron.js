@@ -95,12 +95,13 @@ let backendProcess = null;
 function createWindow() {
   app.setName('Web3toolbox')
   mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1200,
+    height: 800,
     icon: path.join(__dirname, './client/public/favicon.ico'),
     webPreferences: {
-      nodeIntegration: true,
-      webSecurity: false, // 禁用跨域限制
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false,
       preload: path.join(__dirname, 'preload.js')
     },
   });
@@ -295,6 +296,61 @@ app.whenReady().then(async () => {
     event.returnValue = backendPort;
   })
 
+  // Proxy API calls from renderer to backend
+  const backendRequest = async (method, path, body) => {
+    return new Promise((resolve) => {
+      const http = require('http');
+      const options = {
+        hostname: '127.0.0.1',
+        port: backendPort,
+        path: '/api/' + path,
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000
+      };
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch { resolve(data); }
+        });
+      });
+      req.on('error', (e) => resolve({ success: false, message: e.message }));
+      req.on('timeout', () => { req.destroy(); resolve({ success: false, message: 'timeout' }); });
+      if (body) req.write(JSON.stringify(body));
+      req.end();
+    });
+  };
+
+  ipcMain.handle('get-save-path', async () => {
+    const config = require('./config').getInstance();
+    return config.getSavePath();
+  });
+  ipcMain.handle('set-save-path', async (event, path) => {
+    const config = require('./config').getInstance();
+    return config.setSavePath(path);
+  });
+  ipcMain.handle('get-chrome-path', async () => {
+    const config = require('./config').getInstance();
+    return config.getChromePath();
+  });
+  ipcMain.handle('set-chrome-path', async (event, path) => {
+    const config = require('./config').getInstance();
+    return config.setChromePath(path);
+  });
+  ipcMain.handle('check-proxy', async (event, params) => {
+    return backendRequest('POST', 'checkProxy', params);
+  });
+  ipcMain.handle('get-fingerprints', async () => {
+    return backendRequest('GET', 'getFingerPrints');
+  });
+  ipcMain.handle('generate-fingerprints', async (event, counts) => {
+    return backendRequest('POST', 'generateFingerPrints', { counts });
+  });
+  ipcMain.handle('get-fingerprint-count', async () => {
+    return backendRequest('GET', 'getFingerPrintCount');
+  });
+
   // First-launch: install dependencies if missing
   if (needsInstall()) {
     createWindow();
@@ -358,16 +414,26 @@ app.whenReady().then(async () => {
 
   let forceQuit = false;
   app.on('before-quit', async (e) => {
-    if (forceQuit) return;
+    console.log('[Electron] before-quit triggered');
     if (backendProcess) {
-      forceQuit = true;
       try {
         const http = require('http');
         await new Promise((resolve) => {
-          const req = http.request(`http://127.0.0.1:${backendPort}/api/state/flush`, { method: 'POST', timeout: 3000 }, (res) => {
+          const req = http.request(`http://127.0.0.1:${backendPort}/api/state/flush`, { method: 'POST', timeout: 2000 }, (res) => {
             res.resume();
             res.on('end', resolve);
           });
+          req.on('error', resolve);
+          req.on('timeout', () => { req.destroy(); resolve(); });
+          req.end();
+        });
+        console.log('[Electron] StateService flushed');
+      } catch (_) { /* best effort */ }
+      // Don't kill backend - let it keep running for the frontend
+      // backendProcess.kill();
+      // backendProcess = null;
+    }
+  });
           req.on('error', resolve);
           req.on('timeout', () => { req.destroy(); resolve(); });
           req.end();
