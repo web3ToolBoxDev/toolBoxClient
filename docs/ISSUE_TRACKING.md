@@ -145,9 +145,10 @@
 
 ## 已知限制
 1. **虚拟机 GPU**: Virtio GPU + llvmpipe 软件渲染，GPU 进程会崩溃但不影响功能
-2. **窗口管理**: 窗口稳定运行 110+ 秒，GPU 进程崩溃后自动清理
+2. **窗口管理**: 窗口稳定运行 30+ 秒，GPU 进程崩溃后自动清理
 3. **fingerprint-chromium**: 需要手动下载预编译二进制，不支持自动更新
 4. **自动退出已禁用**: Linux 环境下窗口关闭后不自动退出，需手动 kill
+5. **NeDB 兼容性**: Node.js 24 移除了 `util.isDate`，需要 patch NeDB
 
 ## 最终修复方案
 1. `app.disableHardwareAcceleration()` + 多个 `--disable-gpu-*` 开关
@@ -155,3 +156,6 @@
 3. `window-all-closed` 不触发 `app.quit()`
 4. `before-quit` 简化，移除 `e.preventDefault()` 循环
 5. 所有模块级 config 引用改为函数内延迟加载
+6. NeDB `util.isDate` polyfill（Node.js 24 兼容性）
+7. `contextIsolation: true` + `contextBridge` 替代 `nodeIntegration: true`
+8. IPC proxy 模式替代渲染进程直接 HTTP 请求
