@@ -316,7 +316,9 @@ router.post('/loadFingerPrints',async(req,res)=>{
 //生成指纹
 router.post('/generateFingerPrints',async(req,res)=>{
   const counts = req.body.counts;
+  console.log('[router] generateFingerPrints called, counts:', counts);
   const message = await fingerPrintService.generateRandomFingerPrint(counts);
+  console.log('[router] generateFingerPrints result:', JSON.stringify(message));
   res.send(message);
 })
 //获取指纹信息

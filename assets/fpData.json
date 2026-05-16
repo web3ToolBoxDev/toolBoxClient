@@ -1,1 +1,81 @@
-{}
+{
+  "userdata": {
+    "fontsFamily": [
+      "Arial",
+      "Arial Black",
+      "Arial Narrow",
+      "Calibri",
+      "Cambria",
+      "Candara",
+      "Comic Sans MS",
+      "Consolas",
+      "Constantia",
+      "Corbel",
+      "Courier New",
+      "Franklin Gothic",
+      "Gabriola",
+      "Georgia",
+      "Impact",
+      "Lucida Console",
+      "Lucida Sans Unicode",
+      "Microsoft Sans Serif",
+      "Palatino Linotype",
+      "Segoe UI",
+      "Tahoma",
+      "Times New Roman",
+      "Trebuchet MS",
+      "Verdana",
+      "Wingdings"
+    ],
+    "hardware": {
+      "memory": 8,
+      "concurrency": 8
+    }
+  },
+  "matchedFingerprintList": [
+    {
+      "userAgentFingerprint": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "clientHintFingerprint": {
+        "brands": [
+          {
+            "brand": "Chromium",
+            "version": "120"
+          }
+        ],
+        "mobile": false,
+        "platform": "Windows"
+      },
+      "webglFingerprint": {
+        "vendor": "Google Inc. (NVIDIA)",
+        "renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 Direct3D11 vs_5_0 ps_5_0)"
+      }
+    },
+    {
+      "userAgentFingerprint": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "clientHintFingerprint": {
+        "brands": [
+          {
+            "brand": "Chromium",
+            "version": "120"
+          }
+        ],
+        "mobile": false,
+        "platform": "macOS"
+      },
+      "webglFingerprint": {
+        "vendor": "Google Inc. (Apple)",
+        "renderer": "ANGLE (Apple, Apple M1 Pro, OpenGL 4.1)"
+      }
+    }
+  ],
+  "languageFingerprintList": [
+    {
+      "jsLanguage": "en-US",
+      "httpLanguage": "en-US,en;q=0.9"
+    },
+    {
+      "jsLanguage": "zh-CN",
+      "httpLanguage": "zh-CN,zh;q=0.9,en;q=0.8"
+    }
+  ]
+}
