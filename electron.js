@@ -3,6 +3,21 @@ const { t } = require('i18next');
 const path = require('path');
 const fs = require('fs');
 const shell = require('electron').shell;
+
+// Force software rendering for virtual machines without dedicated GPU
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('--disable-gpu');
+app.commandLine.appendSwitch('--disable-gpu-compositing');
+app.commandLine.appendSwitch('--disable-gpu-rasterization');
+app.commandLine.appendSwitch('--disable-software-rasterizer');
+app.commandLine.appendSwitch('--enable-unsafe-swiftshader');
+app.commandLine.appendSwitch('--use-gl=swiftshader');
+app.commandLine.appendSwitch('--in-process-gpu');
+app.commandLine.appendSwitch('--disable-gpu-sandbox');
+app.commandLine.appendSwitch('--disable-features=VizDisplayCompositor,VizHitTestSurfaceLayer');
+app.commandLine.appendSwitch('--disable-accelerated-2d-canvas');
+app.commandLine.appendSwitch('--disable-accelerated-video-decode');
+app.commandLine.appendSwitch('--disable-accelerated-video-encode');
 if (!process.env.APP_USER_DATA) {
   try {
     process.env.APP_USER_DATA = app.getPath('userData');
@@ -17,8 +32,8 @@ const isBuild = config.getIsBuild();
 console.log('isBuild:', isBuild);
 
 
-async function handleFileOpen() {
-  const { canceled, filePaths } = await dialog.showOpenDialog()
+async function handleFileOpen(options) {
+  const { canceled, filePaths } = await dialog.showOpenDialog(options || {})
   if (!canceled) {
     return filePaths[0]
   }
@@ -80,21 +95,24 @@ let backendProcess = null;
 function createWindow() {
   app.setName('Web3toolbox')
   mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1200,
+    height: 800,
     icon: path.join(__dirname, './client/public/favicon.ico'),
     webPreferences: {
-      nodeIntegration: true,
-      webSecurity: false, // 禁用跨域限制
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false,
       preload: path.join(__dirname, 'preload.js')
     },
   });
-  console.log(`file://${path.join(__dirname, './client/build/index.html')}`);
-  const startURL = isBuild
-    ? `file://${path.join(__dirname, './client/build/index.html')}`
+  const buildPath = path.join(__dirname, './client/build/index.html');
+  const startURL = fs.existsSync(buildPath)
+    ? `file://${buildPath}`
     : 'http://localhost:3000';
-
+  console.log('[Electron] Loading URL:', startURL);
   mainWindow.loadURL(startURL);
+  mainWindow.show();
+  mainWindow.focus();
   // Inject backend port into renderer once DOM is ready
   mainWindow.webContents.on('did-finish-load', () => {
     mainWindow.webContents.executeJavaScript(`window.__API_PORT__ = ${backendPort};`);
@@ -278,6 +296,61 @@ app.whenReady().then(async () => {
     event.returnValue = backendPort;
   })
 
+  // Proxy API calls from renderer to backend
+  const backendRequest = async (method, path, body) => {
+    return new Promise((resolve) => {
+      const http = require('http');
+      const options = {
+        hostname: '127.0.0.1',
+        port: backendPort,
+        path: '/api/' + path,
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000
+      };
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch { resolve(data); }
+        });
+      });
+      req.on('error', (e) => resolve({ success: false, message: e.message }));
+      req.on('timeout', () => { req.destroy(); resolve({ success: false, message: 'timeout' }); });
+      if (body) req.write(JSON.stringify(body));
+      req.end();
+    });
+  };
+
+  ipcMain.handle('get-save-path', async () => {
+    const config = require('./config').getInstance();
+    return config.getSavePath();
+  });
+  ipcMain.handle('set-save-path', async (event, path) => {
+    const config = require('./config').getInstance();
+    return config.setSavePath(path);
+  });
+  ipcMain.handle('get-chrome-path', async () => {
+    const config = require('./config').getInstance();
+    return config.getChromePath();
+  });
+  ipcMain.handle('set-chrome-path', async (event, path) => {
+    const config = require('./config').getInstance();
+    return config.setChromePath(path);
+  });
+  ipcMain.handle('check-proxy', async (event, params) => {
+    return backendRequest('POST', 'checkProxy', params);
+  });
+  ipcMain.handle('get-fingerprints', async () => {
+    return backendRequest('GET', 'getFingerPrints');
+  });
+  ipcMain.handle('generate-fingerprints', async (event, counts) => {
+    return backendRequest('POST', 'generateFingerPrints', { counts });
+  });
+  ipcMain.handle('get-fingerprint-count', async () => {
+    return backendRequest('GET', 'getFingerPrintCount');
+  });
+
   // First-launch: install dependencies if missing
   if (needsInstall()) {
     createWindow();
@@ -311,6 +384,17 @@ app.whenReady().then(async () => {
   if (mainWindow === null) {
     createWindow();
   }
+  // Log window state for debugging
+  if (mainWindow) {
+    mainWindow.on('close', () => console.log('Main window closing'));
+    mainWindow.on('closed', () => { console.log('Main window closed'); mainWindow = null; });
+    // Prevent window-all-closed from quitting immediately in headless/Xvfb environments
+    let windowCloseTime = 0;
+    mainWindow.webContents.on('did-finish-load', () => {
+      console.log('[Electron] Window loaded successfully');
+      windowCloseTime = 0;
+    });
+  }
   app.on('activate', function () {
     if (mainWindow === null) {
       console.log('重新创建窗口');
@@ -323,34 +407,39 @@ app.whenReady().then(async () => {
       createBackendProcess();
     }
   });
-  // 在应用程序关闭之前：flush StateService 然后终止后台服务子进程
+  // Prevent accidental quit from signals in VM environment
+  process.on('SIGTERM', () => console.log('[Electron] SIGTERM received, ignoring'));
+  process.on('SIGINT', () => console.log('[Electron] SIGINT received, ignoring'));
+  process.on('SIGHUP', () => console.log('[Electron] SIGHUP received, ignoring'));
+
+  let forceQuit = false;
   app.on('before-quit', async (e) => {
+    console.log('[Electron] before-quit triggered');
     if (backendProcess) {
-      // Tell backend to flush pending state writes before we kill it
       try {
-        e.preventDefault(); // hold quit until flush completes
+        // Gracefully shutdown backend via HTTP
         const http = require('http');
         await new Promise((resolve) => {
-          const req = http.request('http://127.0.0.1:30001/api/state/flush', { method: 'POST', timeout: 3000 }, (res) => {
+          const req = http.request(`http://127.0.0.1:${backendPort}/api/state/flush`, { method: 'POST', timeout: 2000 }, (res) => {
             res.resume();
             res.on('end', resolve);
           });
-          req.on('error', resolve); // don't block quit if backend already gone
+          req.on('error', resolve);
           req.on('timeout', () => { req.destroy(); resolve(); });
           req.end();
         });
-        console.log('[Electron] StateService flushed before quit');
+        console.log('[Electron] StateService flushed');
       } catch (_) { /* best effort */ }
-      backendProcess.kill();
+      // Send SIGTERM to backend for graceful shutdown
+      try { backendProcess.kill('SIGTERM'); } catch(_) {}
       backendProcess = null;
-      app.quit(); // resume quit after flush
     }
   });
   app.on('window-all-closed', () => {
-    console.log('所有窗口已关闭');
-    if (process.platform !== 'darwin') {
-      app.quit();
-    }
+    console.log('所有窗口已关闭, platform:', process.platform);
+    // In VM environments with Virtio GPU, window may close due to GPU process crashes
+    // Don't quit - let the user manually close the app when done
+    // The backend services will keep running until explicitly killed
   });
 })
 

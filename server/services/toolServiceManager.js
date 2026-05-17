@@ -4,7 +4,6 @@ const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const config = require('../../config').getInstance();
 
 const TOOL_SERVICE_PORT = 30004;
 const TOOL_SERVICE_URL = `http://127.0.0.1:${TOOL_SERVICE_PORT}`;
@@ -19,11 +18,12 @@ let isStarting = false;
 function startToolService() {
     if (toolProcess || isStarting) return;
     isStarting = true;
+    const config = require('../../config').getInstance();
 
     const execPath = config.getDefaultExecPath();
     // In packaged app: toolService is in extraResources (resources/toolService/)
     // In dev: toolService is at repo root (../../toolService/)
-    const isBuild = config.isBuild;
+    const isBuild = config.getIsBuild();
     const toolServicePath = isBuild
         ? path.resolve(__dirname, '../../../toolService/index.js')
         : path.resolve(__dirname, '../../toolService/index.js');
@@ -67,11 +67,13 @@ function startToolService() {
         } catch (_) {}
     }
 
+    const fpChromRes = config.getFingerprintChromiumPath();
     const env = {
         ...process.env,
         TOOL_SERVICE_PORT: String(TOOL_SERVICE_PORT),
         TOOL_SERVICE_CHROME_PATH: chromePath,
-        TOOL_SERVICE_SAVE_PATH: savePath
+        TOOL_SERVICE_SAVE_PATH: savePath,
+        FP_CHROMIUM_PATH: fpChromRes.success ? fpChromRes.path : ''
     };
 
     console.log(`[toolServiceManager] Spawning toolService: ${execPath} ${toolServicePath}`);

@@ -9,8 +9,9 @@ const http = require('http');
  * @returns {Promise<object|null>}
  */
 async function fetchEnvById(envId) {
+    const backendPort = process.env.BACKEND_PORT || '30001';
     return new Promise((resolve) => {
-        http.get(`http://localhost:30001/api/getEnvById/${envId}`, (resp) => {
+        http.get(`http://127.0.0.1:${backendPort}/api/getEnvById/${envId}`, (resp) => {
             let data = '';
             resp.on('data', chunk => data += chunk);
             resp.on('end', () => {

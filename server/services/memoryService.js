@@ -3,7 +3,6 @@
 const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
-const config = require('../../config').getInstance();
 
 const DBSERVICE_PORT = 30002;
 const DBSERVICE_URL = `http://127.0.0.1:${DBSERVICE_PORT}`;
@@ -18,6 +17,7 @@ let isStarting = false;
 function startDbService() {
     if (dbProcess || isStarting) return;
     isStarting = true;
+    const config = require('../../config').getInstance();
 
     const execPath = config.getDefaultExecPath();
     const isBuild = config.getIsBuild();
@@ -50,6 +50,10 @@ function startDbService() {
         console.log(`[memoryService] dbservice exited (code=${code}, signal=${signal})`);
         dbProcess = null;
         isStarting = false;
+        if (code !== 0 && signal !== 'SIGTERM' && signal !== 'SIGKILL') {
+            console.log('[memoryService] Auto-restarting dbservice in 2s...');
+            setTimeout(() => startDbService(), 2000);
+        }
     });
     dbProcess.on('error', (err) => {
         console.error('[memoryService] Failed to spawn dbservice:', err.message);

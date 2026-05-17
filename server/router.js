@@ -5,8 +5,13 @@ const taskService = require('./services/taskService').getInstance();
 const proxyService = require('./services/proxyService');
 const fingerPrintService = require('./services/fingerPrintService');
 const router = express.Router();
-const config = require('../config').getInstance();
 const memoryService = require('./services/memoryService');
+
+let _config = null;
+function getConfig() {
+    if (!_config) _config = require('../config').getInstance();
+    return _config;
+}
 
 // 定义路由
 // router.get('/openScript', async(req, res) => {
@@ -125,7 +130,7 @@ router.post('/setConfigInfo', async(req, res) => {
 // bypassing taskService (which depends on task.db that may not exist in new savePath)
 router.get('/getAgentSessions/:agentName', async (req, res) => {
     const agentName = req.params.agentName;
-    const savePath = config.getSavePath().path;
+    const savePath = getConfig().getSavePath().path;
     if (!savePath) {
         return res.send({ success: false, message: 'No savePath configured' });
     }
@@ -207,7 +212,7 @@ router.delete('/deleteTask', async(req, res) => {
 });
 router.post('/setSavePath',async(req,res)=>{
   const path = req.body.path;
-  const message = await config.setSavePath(path);
+  const message = await getConfig().setSavePath(path);
   // Clear cached AI sessions so next access reads from new savePath
   try { taskService.resetAiSessions(); } catch (e) {
     console.error('[router] resetAiSessions after savePath change failed:', e.message);
@@ -230,7 +235,7 @@ router.post('/setSavePath',async(req,res)=>{
 });
 // 重新加载保存路径下的 DB 数据（用于二次安装后的同步）
 router.get('/getSavePath',async(req,res)=>{
-  const message = config.getSavePath();
+  const message = getConfig().getSavePath();
   res.send(message);
 });
 
@@ -299,7 +304,7 @@ router.post('/checkProxy',async(req,res)=>{
 //获取指纹信息数量
 router.get('/getFingerPrintCount',async(req,res)=>{
   const count = await fingerPrintService.getFingerPrintCount();
-  res.send({...count,testError:'testError' });
+  res.send(count);
 })
 //导入指纹信息
 router.post('/loadFingerPrints',async(req,res)=>{
@@ -311,7 +316,9 @@ router.post('/loadFingerPrints',async(req,res)=>{
 //生成指纹
 router.post('/generateFingerPrints',async(req,res)=>{
   const counts = req.body.counts;
+  console.log('[router] generateFingerPrints called, counts:', counts);
   const message = await fingerPrintService.generateRandomFingerPrint(counts);
+  console.log('[router] generateFingerPrints result:', JSON.stringify(message));
   res.send(message);
 })
 //获取指纹信息
@@ -361,29 +368,29 @@ router.post('/deleteFingerPrintProxy', async (req, res) => {
 });
 router.post('/setChromePath', async (req, res) => {
   const chromePath = req.body.path;
-  const message = config.setChromePath(chromePath);
+  const message = getConfig().setChromePath(chromePath);
   res.send(message);
 });
 
 router.get('/getChromePath', async (req, res) => {
-  const message = config.getChromePath();
+  const message = getConfig().getChromePath();
   res.send(message);
 });
 
 // ── mini_installer 管理 ──
 router.post('/setInstallerPath', async (req, res) => {
   const installerPath = req.body.path;
-  const message = config.setInstallerPath(installerPath);
+  const message = getConfig().setInstallerPath(installerPath);
   res.send(message);
 });
 
 router.get('/getInstallerPath', async (req, res) => {
-  const message = config.getInstallerPath();
+  const message = getConfig().getInstallerPath();
   res.send(message);
 });
 
 router.post('/runInstaller', async (req, res) => {
-  const message = await config.runInstaller();
+  const message = await getConfig().runInstaller();
   res.send(message);
 });
 // 修改指纹环境名称
@@ -405,11 +412,115 @@ router.post('/bindWalletEnv', async (req, res) => {
   res.send(result);
 });
 
+// 打开浏览器环境
+router.post('/openEnv', async (req, res) => {
+  const { id, headless, useFingerprintChromium } = req.body;
+  if (!id) return res.send({ success: false, message: 'id required' });
+  const envRes = await fingerPrintService.getEnvById(id);
+  if (!envRes.success) return res.send({ success: false, message: envRes.message });
+  const toolServiceManager = require('./services/toolServiceManager');
+  const launchRes = await new Promise((resolve) => {
+    const http = require('http');
+    const postData = JSON.stringify({ env: envRes.data, headless: headless !== false, useFingerprintChromium: !!useFingerprintChromium });
+    const req2 = http.request({
+      hostname: '127.0.0.1', port: 30004, path: '/browser/launch', method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
+    }, (res2) => { let d = ''; res2.on('data', c => d += c); res2.on('end', () => resolve(JSON.parse(d))); });
+    req2.on('error', () => resolve({ success: false, error: 'toolService not available' }));
+    req2.write(postData);
+    req2.end();
+  });
+  res.send(launchRes);
+});
+
+// 初始化 Twitter
+router.post('/initTwitters', async (req, res) => {
+  const { addresses } = req.body;
+  if (!addresses) return res.send({ success: false, message: 'addresses required' });
+  const taskService = require('./services/taskService').getInstance();
+  const result = await taskService.execTask('initTwitter', { addresses });
+  res.send(result);
+});
+
+// 状态服务路由
+router.get('/state/sessions/:agentId', async (req, res) => {
+  try {
+    const { StateService } = require('./services/stateService');
+    const svc = StateService.getInstance();
+    const sessions = svc.getSessions(req.params.agentId);
+    res.send({ success: true, sessions });
+  } catch (e) { res.send({ success: false, message: e.message }); }
+});
+
+router.post('/state/app/set', async (req, res) => {
+  try {
+    const { StateService } = require('./services/stateService');
+    const svc = StateService.getInstance();
+    const { path, value } = req.body;
+    svc.set('app.' + path, value);
+    res.send({ success: true });
+  } catch (e) { res.send({ success: false, message: e.message }); }
+});
+
+router.get('/state/app/language', async (req, res) => {
+  try {
+    const { StateService } = require('./services/stateService');
+    const svc = StateService.getInstance();
+    const lang = svc.get('app.language') || 'en';
+    res.send({ success: true, language: lang });
+  } catch (e) { res.send({ success: false, message: e.message }); }
+});
+
+router.post('/state/app/language', async (req, res) => {
+  try {
+    const { StateService } = require('./services/stateService');
+    const svc = StateService.getInstance();
+    const { language } = req.body;
+    svc.set('app.language', language || 'en');
+    res.send({ success: true });
+  } catch (e) { res.send({ success: false, message: e.message }); }
+});
+
+// 指纹一致性校验
+router.post('/validateFingerprint', async (req, res) => {
+  const { id } = req.body;
+  if (!id) return res.send({ success: false, message: 'id required' });
+  const envRes = await fingerPrintService.getEnvById(id);
+  if (!envRes.success) return res.send({ success: false, message: envRes.message });
+  const validation = fingerPrintService.validateFingerprintConsistency(envRes.data);
+  res.send({ success: true, ...validation });
+});
+
+// 获取指纹审计报告
+router.get('/fingerprintAudit/:id', async (req, res) => {
+  const envRes = await fingerPrintService.getEnvById(req.params.id);
+  if (!envRes.success) return res.send({ success: false, message: envRes.message });
+  const fp = envRes.data;
+  const validation = fingerPrintService.validateFingerprintConsistency(fp);
+  res.send({
+    success: true,
+    fingerprint: {
+      id: fp.id,
+      name: fp.name,
+      user_agent: fp.user_agent,
+      platform: fp.clientHint?.platform,
+      webgl_vendor: fp.webgl?.vendor,
+      webgl_renderer: fp.webgl?.renderer,
+      hardware: fp.hardware,
+      screen: fp.screen,
+      language_js: fp.language_js,
+      proxy: fp.proxy ? { country: fp.proxy.country, timeZone: fp.proxy.timeZone } : null,
+      bindWalletId: fp.bindWalletId || null,
+    },
+    consistency: validation
+  });
+});
+
 router.post('/setWalletScriptDirectory', async (req, res) => {
   const directory = req.body.directory;
-  const current = config.getWalletScriptDirectory();
+  const current = getConfig().getWalletScriptDirectory();
   const currentDir = current && current.directory ? current.directory : 'default';
-  const message = await config.setWalletScriptDirectory(directory);
+  const message = await getConfig().setWalletScriptDirectory(directory);
   const nextDir = directory || 'default';
   if (message && message.success && currentDir !== nextDir) {
     await walletService.resetAllWalletsInitialized();
@@ -417,7 +528,7 @@ router.post('/setWalletScriptDirectory', async (req, res) => {
   res.send(message);
 });
 router.get('/getWalletScriptDirectory', async (req, res) => {
-  const message = config.getWalletScriptDirectory();
+  const message = getConfig().getWalletScriptDirectory();
   res.send(message);
 });
 
@@ -464,6 +575,25 @@ router.get('/getProviderModels', async (req, res) => {
 });
 
 const toolServiceManager = require('./services/toolServiceManager');
+const tlsFingerprint = require('./services/tlsFingerprint');
+
+// TLS 指纹配置
+router.get('/tls/config', async (req, res) => {
+  const { browser, version, platform } = req.query;
+  const brand = (browser || 'chrome').toLowerCase();
+  const ver = version || '120';
+  const plat = (platform || 'windows').toLowerCase();
+  const tlsOpts = tlsFingerprint.getTLSOptions(brand, ver);
+  const headers = tlsFingerprint.getHTTPHeaders(brand, ver, plat);
+  res.json({ success: true, browser: brand, version: ver, platform: plat, tls: tlsOpts, headers });
+});
+
+router.get('/tls/ja3', async (req, res) => {
+  const { browser, version } = req.query;
+  const key = `${(browser || 'chrome').toLowerCase()}_${version || '120'}`;
+  const sig = tlsFingerprint.JA3_SIGNATURES[key] || tlsFingerprint.JA3_SIGNATURES.chrome_120;
+  res.json({ success: true, browser: browser || 'chrome', version: version || '120', ja3: sig });
+});
 
 router.get('/tools/health', toolServiceManager.handleHealth);
 router.get('/tools/list', toolServiceManager.handleListTools);

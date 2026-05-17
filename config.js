@@ -33,12 +33,16 @@ class Config {
                 this.defaultExecPath = this.isBuild
                     ? path.join(this.assetsPath, '/node_for_mac/node-v21.6.2-mac/bin/node')
                     : process.execPath;
-            } else {
-                console.log("当前平台不是 Windows 也不是 macOS");
+} else {
+                this.platform = process.platform;
+                this.defaultExecPath = process.execPath;
             }
             this.ip2LocationDbPath = path.join(this.assetsPath, '/ip2location/IP2LOCATION-LITE-DB11.BIN');
-			this.initWalletScriptPath = '';
-			this.openWalletScriptPath = '';
+            this.fingerprintChromiumPath = this.isBuild
+                ? path.join(this.assetsPath, '../fingerprint-chromium/ungoogled-chromium-144.0.7559.132-1-x86_64_linux/chrome')
+                : path.join(this.assetsPath, 'fingerprint-chromium/ungoogled-chromium-144.0.7559.132-1-x86_64_linux/chrome');
+            this.initWalletScriptPath = '';
+            this.openWalletScriptPath = '';
         
 
             // 初始化时加载所有路径到内存
@@ -73,7 +77,8 @@ class Config {
     // Set default savePath when none configured
     _applyDefaultSavePath() {
         const home = process.env.USERPROFILE || process.env.HOME || require('os').homedir();
-        const defaultPath = path.join(home, 'Documents', 'Web3ToolBox');
+        const docsDir = process.env.XDG_DOCUMENTS_DIR || path.join(home, 'Documents');
+        const defaultPath = path.join(docsDir, 'Web3ToolBox');
         try {
             fs.mkdirSync(defaultPath, { recursive: true });
             fs.mkdirSync(path.join(defaultPath, 'db'), { recursive: true });
@@ -379,6 +384,23 @@ class Config {
         }
         this._loadAllPathsFromJson();
         return { success: !!this._paths.chromePath, path: this._paths.chromePath };
+    }
+
+    getFingerprintChromiumPath() {
+        if (this._paths.fingerprintChromiumPath) {
+            return { success: true, path: this._paths.fingerprintChromiumPath };
+        }
+        if (this.fingerprintChromiumPath && fs.existsSync(this.fingerprintChromiumPath)) {
+            return { success: true, path: this.fingerprintChromiumPath };
+        }
+        return { success: false, path: null };
+    }
+
+    setFingerprintChromiumPath(fpChromePath) {
+        console.log("设置 Fingerprint Chromium 路径:", fpChromePath);
+        this._paths.fingerprintChromiumPath = fpChromePath;
+        this._saveAllPathsToJson();
+        return { success: true };
     }
 
     // ── mini_installer 管理 ──

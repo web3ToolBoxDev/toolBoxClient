@@ -21,3 +21,5 @@ gh-*.err.txt
 docs/*
 !docs/verification-tree.yaml
 !docs/e2e-verification-tree.md
+assets/fingerprint-chromium/
+assets/fingerprint-chromium/

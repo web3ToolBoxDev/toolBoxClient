@@ -23,41 +23,83 @@ const genId = () => `browser_${Date.now()}_${Math.random().toString(16).slice(2,
 // ─── Chrome arg builder (from browserLauncher.js) ───
 
 function buildChromeArgs(env, options = {}) {
-    const args = [
-        // NOTE: --no-sandbox removed — Cloudflare detects it and blocks access (e.g. Indeed)
-        '--no-first-run',
-        '--no-default-browser-check',
-        `--user-agent=${env.user_agent}`,
-        `--lang=${env.language_js}`
-    ];
-    if (options.walletExtensionPath) {
-        args.push(`--disable-extensions-except=${options.walletExtensionPath}`);
+    const useFpChromium = options.useFingerprintChromium && env._fingerprintSeed;
+    const args = ['--no-first-run', '--no-default-browser-check'];
+    if (useFpChromium) {
+        args.push(`--fingerprint=${env._fingerprintSeed}`);
+        const platform = inferPlatformFromUA(env.user_agent);
+        args.push(`--fingerprint-platform=${platform}`);
+        const brand = inferBrandFromUA(env.user_agent);
+        args.push(`--fingerprint-brand=${brand}`);
+        if (env.hardware) {
+            if (env.hardware.concurrency) args.push(`--fingerprint-hardware-concurrency=${env.hardware.concurrency}`);
+        }
+        if (env.webgl) {
+            if (env.webgl.vendor) args.push(`--fingerprint-gpu-vendor=${env.webgl.vendor}`);
+            if (env.webgl.renderer) args.push(`--fingerprint-gpu-renderer=${env.webgl.renderer}`);
+        }
+        if (env.language_js) args.push(`--lang=${env.language_js}`);
+        if (env.language_http) args.push(`--accept-lang=${env.language_http}`);
+        if (env.timeZone) args.push(`--timezone=${env.timeZone}`);
+        if (env.useProxy && env.proxyUrl) {
+            args.push(`--proxy-server=${env.proxyUrl}`);
+            args.push('--disable-non-proxied-udp');
+        }
+    } else {
+        args.push(`--user-agent=${env.user_agent}`, `--lang=${env.language_js}`);
+        if (options.walletExtensionPath) {
+            args.push(`--disable-extensions-except=${options.walletExtensionPath}`);
+        }
+        let audioNoise = 0.0001;
+        if (env.audio) {
+            if (typeof env.audio === 'number') {
+                audioNoise = env.audio;
+            } else if (typeof env.audio === 'object') {
+                if (env.audio.dynamicsCompressor !== undefined) {
+                    audioNoise = env.audio.dynamicsCompressor;
+                } else if (env.audio.seed !== undefined) {
+                    const s = env.audio.seed;
+                    audioNoise = ((((s * 1103515245 + 12345) & 0x7fffffff) % 10000) + 1) / 1000000;
+                }
+            }
+        }
+        const fingerprints = {
+            audio: audioNoise,
+            clientRect: env.clientRect,
+            webgl: env.webgl,
+            canvas: env.canvas,
+            hardware: env.hardware,
+            screen: env.screen,
+            clientHint: env.clientHint,
+            languages_http: env.language_http,
+            fonts_remove: env.fonts_remove || '',
+            fonts_os: env.fonts_os || ''
+        };
+        if (env.useProxy) {
+            fingerprints.position = env.position;
+            fingerprints.timeZone = env.timeZone;
+            fingerprints.webrtc_public = env.webrtc_public;
+            args.push(`--proxy-server=${env.proxyUrl}`);
+        }
+        args.push(`--toolbox=${JSON.stringify(fingerprints)}`);
     }
-    // 将新格式 audio: {seed: N} 转为 Chromium 补丁期望的浮点数噪声值
-    let audioNoise = env.audio;
-    if (audioNoise && typeof audioNoise === 'object' && audioNoise.seed !== undefined) {
-        const s = audioNoise.seed;
-        audioNoise = ((((s * 1103515245 + 12345) & 0x7fffffff) % 10000) + 1) / 1000000;
-    }
-    const fingerprints = {
-        audio: audioNoise,
-        clientRect: env.clientRect,
-        webgl: env.webgl,
-        canvas: env.canvas,
-        hardware: env.hardware,
-        screen: env.screen,
-        clientHint: env.clientHint,
-        // languages_js: (env.language_http || '').split(',').map(s => s.split(';')[0].trim()).join(','),
-        languages_http: env.language_http
-    };
-    if (env.useProxy) {
-        fingerprints.position = env.position;
-        fingerprints.timeZone = env.timeZone;
-        fingerprints.webrtc_public = env.webrtc_public;
-        args.push(`--proxy-server=${env.proxyUrl}`);
-    }
-    args.push(`--toolbox=${JSON.stringify(fingerprints)}`);
     return args;
+}
+
+function inferPlatformFromUA(ua) {
+    const u = (ua || '').toLowerCase();
+    if (u.includes('windows')) return 'windows';
+    if (u.includes('mac') || u.includes('darwin')) return 'macos';
+    if (u.includes('linux')) return 'linux';
+    return 'windows';
+}
+
+function inferBrandFromUA(ua) {
+    const u = (ua || '').toLowerCase();
+    if (u.includes('edg/')) return 'Edge';
+    if (u.includes('opr/') || u.includes('opera')) return 'Opera';
+    if (u.includes('vivaldi')) return 'Vivaldi';
+    return 'Chrome';
 }
 
 function ensureUserDataDir(savePath, envId) {
@@ -79,14 +121,15 @@ function ensureUserDataDir(savePath, envId) {
  * @param {boolean} [params.headless=false]
  * @returns {Promise<string>} browserId
  */
-async function launchWithFingerprint({ chromePath, savePath, env, headless = false, walletExtensionPath, keepAlive = false }) {
+async function launchWithFingerprint({ chromePath, savePath, env, headless = false, walletExtensionPath, keepAlive = false, useFingerprintChromium = false }) {
     if (!chromePath) throw new Error('chromePath is required for fingerprint mode');
     if (!savePath) throw new Error('savePath is required for fingerprint mode');
     if (!env || !env.id) throw new Error('env with id is required');
 
     const puppeteer = _getPuppeteer();
     const userDataDir = ensureUserDataDir(savePath, env.id);
-    const args = buildChromeArgs(env, { walletExtensionPath });
+    const fpEnv = useFingerprintChromium ? { ...env, _fingerprintSeed: env._fingerprintSeed || Date.now() } : env;
+    const args = buildChromeArgs(fpEnv, { walletExtensionPath, useFingerprintChromium });
 
     const browser = await puppeteer.launch({
         headless: headless ? 'new' : false,
@@ -98,7 +141,7 @@ async function launchWithFingerprint({ chromePath, savePath, env, headless = fal
     });
 
     const id = genId();
-    _browsers.set(id, { browser, mode: 'fingerprint', createdAt: Date.now(), lastUsed: Date.now(), keepAlive });
+    _browsers.set(id, { browser, mode: useFingerprintChromium ? 'fingerprint-chromium' : 'fingerprint', createdAt: Date.now(), lastUsed: Date.now(), keepAlive });
     _ensureCleanup();
     return id;
 }

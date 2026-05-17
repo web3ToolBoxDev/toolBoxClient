@@ -5,400 +5,141 @@ class APIManager {
     static instance = null;
     constructor() {
         if (!APIManager.instance) {
-            const port = APIManager._resolvePort();
-            this.baseUrl = `http://localhost:${port}/api`;
+            this.baseUrl = null;
             this._lastRunningAlertAt = 0;
             APIManager.instance = this;
         }
         return APIManager.instance;
     }
 
-    /**
-     * Resolve backend port: Electron IPC > window.__API_PORT__ > default 30001.
-     */
     static _resolvePort() {
         try {
             if (typeof window !== 'undefined') {
-                // Prefer synchronous IPC (available when running inside Electron)
                 if (window.electronAPI && typeof window.electronAPI.getBackendPort === 'function') {
                     const ipcPort = window.electronAPI.getBackendPort();
                     if (ipcPort && Number.isFinite(ipcPort)) return ipcPort;
                 }
-                // Fallback: Electron injects this via executeJavaScript
                 if (window.__API_PORT__ && Number.isFinite(window.__API_PORT__)) {
                     return window.__API_PORT__;
                 }
             }
-        } catch (e) {
-            // ignore — not in Electron context
-        }
+        } catch (e) { /* ignore */ }
         return 30001;
     }
-    static getInstance() {
-        if (!APIManager.instance) {
-            APIManager.instance = new APIManager();
-        }
-        return APIManager.instance;
-    }
 
-    /**
-     * Extract the port number from baseUrl (e.g. 'http://localhost:30001/api' -> 30001).
-     * Falls back to 30001 if parsing fails.
-     */
-    _getPort() {
-        try {
-            const url = new URL(this.baseUrl);
-            return parseInt(url.port, 10) || 30001;
-        } catch {
-            return 30001;
-        }
-    }
+    _getPort() { return APIManager._resolvePort(); }
 
     _resolveCurrentLanguage() {
-        if (typeof window === 'undefined') {
-            return 'en';
-        }
-        const stored = window.localStorage.getItem('appLanguage');
-        const i18nStored = window.localStorage.getItem('i18nextLng');
-        return stored || i18nStored || 'en';
+        if (typeof window === 'undefined') return 'en';
+        return window.localStorage.getItem('appLanguage') || window.localStorage.getItem('i18nextLng') || 'en';
     }
 
     _withLanguage(taskData) {
         const lang = this._resolveCurrentLanguage();
         if (taskData && typeof taskData === 'object') {
-            return {
-                ...taskData,
-                language: taskData.language || lang
-            };
+            return { ...taskData, language: taskData.language || lang };
         }
         return { language: lang };
     }
 
-    
-    async createWallets(params) {
-        console.log('params:', params);
-        const res = await axios.post(`${this.baseUrl}/createWallet`, params);
-        return res.data;
-    }
-    async updateWalletName(id, name) {
-        const res = await axios.post(`${this.baseUrl}/updateWalletName`, { id, name });
-        return res.data;
-    }
-    async getAllWallets() {
-        const res = await axios.get(`${this.baseUrl}/getAllWallets`);
-        return res.data;
-    }
-    async updateWallet(params) {
-        const res = await axios.put(`${this.baseUrl}/updateWallet`, params);
-        return res.data;
-    }
-    async openWallets(ids) {
-        const res = await axios.post(`${this.baseUrl}/openWallets`, { ids: ids });
-        eventEmitter.emit('taskExecuted');
-        eventEmitter.emit('taskStart', { taskName: 'openWallet', taskData: { envIds: ids } });
-        return res.data;
-    }
-    async deleteWallets(ids) {
-        const res = await axios.delete(`${this.baseUrl}/deleteWallets`, { data:{ids} });
-        return res.data;
-    }
-    async exportWallets(ids,directory) {
-        const res = await axios.post(`${this.baseUrl}/exportWallets`, { ids,directory });
-        return res.data;
-    }
-    async importWallets(filePath) {
-        const res = await axios.post(`${this.baseUrl}/importWallets`, { filePath: filePath });
-        // console.log('res:', res);
-        return res.data;
-    }
-    async initWallets(ids) {
-        const res = await axios.post(`${this.baseUrl}/initWallets`, { ids: ids });
-        eventEmitter.emit('taskExecuted');
-        eventEmitter.emit('taskStart', { taskName: 'initWallet', taskData: { envIds: ids } });
-        return res.data;
-    }
-    async importTask(taskObj) {
-        const res = await axios.post(`${this.baseUrl}/importTask`, taskObj);
-        return res.data;
-    }
-    async getAllTasks(defaultTask) {
-        const res = await axios.get(`${this.baseUrl}/getAllTasks?defaultTask=${defaultTask}`);
-        return res.data;
-    }
-    async getAgentTasks() {
-        const res = await axios.get(`${this.baseUrl}/getAgentTasks`);
-        return res.data;
-    }
-    async execTask(taskName,taskData = null) {
-        const suppressRunningAlert = Boolean(taskData && typeof taskData === 'object' && taskData._suppressRunningAlert);
-        const normalizedTaskData = (taskData && typeof taskData === 'object')
-            ? { ...taskData }
-            : taskData;
-        if (normalizedTaskData && typeof normalizedTaskData === 'object') {
-            delete normalizedTaskData._suppressRunningAlert;
+    // Use electronAPI proxy when available, fallback to direct HTTP
+    async _proxy(method, path, body) {
+        if (window.electronAPI && typeof window.electronAPI.checkProxy === 'function') {
+            try {
+                const fn = {
+                    'get-save-path': () => window.electronAPI.getSavePath(),
+                    'set-save-path': () => window.electronAPI.setSavePath(body),
+                    'get-chrome-path': () => window.electronAPI.getChromePath(),
+                    'set-chrome-path': () => window.electronAPI.setChromePath(body),
+                    'check-proxy': () => window.electronAPI.checkProxy(body),
+                    'get-fingerprints': () => window.electronAPI.getFingerPrints(),
+                    'generate-fingerprints': () => window.electronAPI.generateFingerPrints(body),
+                    'get-fingerprint-count': () => window.electronAPI.getFingerPrintCount(),
+                }[path];
+                if (fn) return await fn();
+            } catch (e) { /* fallback to HTTP */ }
         }
+        // Fallback: direct HTTP to backend
+        const port = this._getPort();
+        const url = `http://localhost:${port}/api/${path}`;
         try {
-            if (typeof window !== 'undefined' && taskName) {
-                const stored = window.localStorage.getItem('taskLogsByTask');
-                if (stored) {
-                    const parsed = JSON.parse(stored);
-                    const ids = Object.keys(parsed || {});
-                    const isRunning = ids.some((id) => {
-                        if (!parsed[id] || parsed[id].status !== 'running') return false;
-                        if (id === taskName || String(id).endsWith(`_${taskName}`)) return true;
-                        if (taskName === 'syncFunction' && String(id).endsWith('_syncFunction')) return true;
-                        return false;
-                    });
-                    const isIdScopedTask = ['openChrome', 'openWallet', 'initWallet'].includes(taskName);
-                    const requestedIds = Array.isArray(taskData?.envIds)
-                        ? taskData.envIds
-                        : (Array.isArray(taskData?.walletIds) ? taskData.walletIds : []);
-                    if (isIdScopedTask && requestedIds.length) {
-                        const runningIds = ids.reduce((acc, id) => {
-                            if (!parsed[id] || parsed[id].status !== 'running') return acc;
-                            const suffix = `_${taskName}`;
-                            if (String(id).endsWith(suffix)) {
-                                acc.add(String(id).slice(0, -suffix.length));
-                            }
-                            return acc;
-                        }, new Set());
-                        const overlap = requestedIds.filter((rid) => runningIds.has(String(rid)));
-                        if (overlap.length) {
-                            const now = Date.now();
-                            if (!suppressRunningAlert && (!this._lastRunningAlertAt || now - this._lastRunningAlertAt > 2000)) {
-                                alert('Task is already running');
-                                this._lastRunningAlertAt = now;
-                            }
-                            return { success: false, code: 1003, message: 'Task is already running', runningIds: overlap };
-                        }
-                        // allow if different ids are running
-                        const enrichedTaskData = this._withLanguage(taskData);
-                        return await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,taskData:enrichedTaskData }).then(res => {
-                            if (res?.data?.success !== false) {
-                                eventEmitter.emit('taskExecuted');
-                                eventEmitter.emit('taskStart', { taskName, taskData: enrichedTaskData });
-                            }
-                            return res.data;
-                        });
-                    }
-                    if (isRunning) {
-                        const now = Date.now();
-                        if (!suppressRunningAlert && (!this._lastRunningAlertAt || now - this._lastRunningAlertAt > 2000)) {
-                            alert('Task is already running');
-                            this._lastRunningAlertAt = now;
-                        }
-                        return { success: false, code: 1003, message: 'Task is already running' };
-                    }
-                }
-            }
-        } catch (error) {
-            console.warn('Failed to check running tasks:', error);
+            const config = { timeout: 10000, headers: { 'Content-Type': 'application/json' } };
+            const res = method === 'GET' ? await axios.get(url, config)
+                : method === 'DELETE' ? await axios.delete(url, config)
+                : await axios.post(url, body, config);
+            return res.data;
+        } catch (e) {
+            return { success: false, message: e.message };
         }
-        const enrichedTaskData = this._withLanguage(normalizedTaskData);
-        const res = await axios.post(`${this.baseUrl}/execTask`, { taskName: taskName,taskData:enrichedTaskData });
-        if (res?.data?.success !== false) {
-            eventEmitter.emit('taskExecuted');
-            eventEmitter.emit('taskStart', { taskName, taskData: enrichedTaskData });
-        }
-        return res.data;
-    }
-    async getConfigInfo(taskName) {
-        const res = await axios.post(`${this.baseUrl}/getConfigInfo`, { taskName: taskName });
-        return res.data;
-    }
-    async setConfigInfo(taskName,config) {
-        const res = await axios.post(`${this.baseUrl}/setConfigInfo`, { taskName: taskName,config:config });
-        return res.data;
-    }
-    async getAgentSessions(agentName = 'job-seek') {
-        const res = await axios.get(`${this.baseUrl}/getAgentSessions/${agentName}`);
-        return res.data;
-    }
-    async listAiSessions(taskName) {
-        const res = await axios.get(`${this.baseUrl}/listAiSessions`, { params: { taskName } });
-        return res.data;
-    }
-    async createAiSession(taskName, name = '') {
-        const res = await axios.post(`${this.baseUrl}/createAiSession`, { taskName, name });
-        return res.data;
-    }
-    async deleteAiSession(taskName, sessionId) {
-        const res = await axios.post(`${this.baseUrl}/deleteAiSession`, { taskName, sessionId });
-        return res.data;
-    }
-    async getAiSession(taskName, sessionId = '') {
-        const res = await axios.get(`${this.baseUrl}/getAiSession`, { params: { taskName, sessionId } });
-        return res.data;
-    }
-    async sendAiMessage(taskName, message, sessionId = '') {
-        const res = await axios.post(`${this.baseUrl}/sendAiMessage`, { taskName, message, sessionId });
-        return res.data;
-    }
-    async sendAiOption(taskName, optionId, optionLabel = '', sessionId = '') {
-        const res = await axios.post(`${this.baseUrl}/sendAiOption`, { taskName, optionId, optionLabel, sessionId });
-        return res.data;
-    }
-    async updateAiSubTask(taskName, subTaskKey, status, sessionId = '') {
-        const res = await axios.post(`${this.baseUrl}/updateAiSubTask`, { taskName, subTaskKey, status, sessionId });
-        return res.data;
-    }
-    async deleteTask(taskNames) {
-        const res = await axios.delete(`${this.baseUrl}/deleteTask`, { data: { taskNames: taskNames } });
-        return res.data;
-    }
-    async setSavePath(path) {
-        const res = await axios.post(`${this.baseUrl}/setSavePath`, { path: path });
-        return res.data;
-    }
-    async getSavePath() {
-        const res = await axios.get(`${this.baseUrl}/getSavePath`);
-        return res.data;
-    }
-    async getWalletScriptDirectory() {
-        const res = await axios.get(`${this.baseUrl}/getWalletScriptDirectory`);
-        return res.data;
-    }
-    async initTwitters(addresses) {
-        const res = await axios.post(`${this.baseUrl}/initTwitter`, { addresses: addresses });
-        return res.data;
-    }
-    async checkWebSocket(){
-        console.log('[api] checkWebSocket ->', this.baseUrl);
-        const res = await axios.get(`${this.baseUrl}/checkWebSocket`);
-        console.log('[api] checkWebSocket response:', res?.data);
-        return res.data;
-    }
-    async checkReadiness(){
-        const res = await axios.get(`${this.baseUrl}/readiness`, { timeout: 3000 });
-        return res.data;
-    }
-    async getTaskStatus(taskNames = []) {
-        const res = await axios.post(`${this.baseUrl}/getTaskStatus`, { taskNames });
-        return res.data;
-    }
-    async checkProxy(params){
-        
-        const res = await axios.post(`${this.baseUrl}/checkProxy`, params);
-        return res.data;
-        
-    }
-    //获取指纹信息数量
-    async getFingerPrintCount(){
-        const res = await axios.get(`${this.baseUrl}/getFingerPrintCount`);
-        return res.data
-    }
-    //导入指纹excel
-    async loadFingerPrints(filePath){
-        const res = await axios.post(`${this.baseUrl}/loadFingerPrints`, { filePath: filePath });
-        return res.data;
-    }
-    //生成指纹数据
-    async generateFingerPrints(counts){
-        const res = await axios.post(`${this.baseUrl}/generateFingerPrints`, { counts: counts });
-        return res.data;
-    }
-    //获取指纹信息
-    async getFingerPrints(){
-        const res = await axios.get(`${this.baseUrl}/getFingerPrints`);
-        return res.data;
-    }
-    //更新指纹环境名称
-    async updateFingerPrintName(id, name) {
-        const res = await axios.post(`${this.baseUrl}/updateFingerPrintName`, { id, name });
-        return res.data;
-    }
-    //清空指纹数据
-    async clearFingerPrints(){
-        const res = await axios.get(`${this.baseUrl}/clearFingerPrints`);
-        return res.data;
-    }
-    async updateFingerPrintProxy(id, proxy) {
-        const res = await axios.post(`${this.baseUrl}/updateFingerPrintProxy`, { id, proxy });
-        return res.data;
-    }
-    async deleteFingerPrintProxy(id) {
-        const res = await axios.post(`${this.baseUrl}/deleteFingerPrintProxy`, { id });
-        return res.data;
-    }
-    async setChromePath(path) {
-        const res = await axios.post(`${this.baseUrl}/setChromePath`, { path });
-        return res.data;
-    }
-    async getChromePath() {
-        const res = await axios.get(`${this.baseUrl}/getChromePath`);
-        return res.data;
-    }
-    async runInstaller() {
-        const res = await axios.post(`${this.baseUrl}/runInstaller`);
-        return res.data;
-    }
-    async getInstallerPath() {
-        const res = await axios.get(`${this.baseUrl}/getInstallerPath`);
-        return res.data;
-    }
-    //删除指纹环境
-    async deleteFingerPrints(ids) {
-        const res = await axios.post(`${this.baseUrl}/deleteFingerPrints`, { ids });
-        return res.data;
-    }
-    async openEnv(id) {
-        const res = await axios.post(`${this.baseUrl}/openEnv`, { id });
-        return res.data;
-    }
-    async bindWalletEnv(walletId, envId) {
-        const res = await axios.post(`${this.baseUrl}/bindWalletEnv`, { walletId, envId });
-        return res.data;
     }
 
-    async setWalletScriptDirectory(directory) {
-        const res = await axios.post(`${this.baseUrl}/setWalletScriptDirectory`, { directory });
-        return res.data;
-    }
-
-    async resetWalletScriptDirectory() {
-        const res = await axios.post(`${this.baseUrl}/resetWalletScriptDirectory`);
-        return res.data;
-    }
-
-    async setSyncScriptDirectory(directory) {
-        const res = await axios.post(`${this.baseUrl}/setSyncScriptDirectory`, { directory });
-        return res.data;
-    }
-
-    async getSyncScriptDirectory() {
-        const res = await axios.get(`${this.baseUrl}/getSyncScriptDirectory`);
-        return res.data;
-    }
-
-    async resetSyncScriptDirectory() {
-        const res = await axios.post(`${this.baseUrl}/resetSyncScriptDirectory`);
-        return res.data;
-    }
-
-    async getProviderModels(provider, subProvider, apiKey) {
-        const params = new URLSearchParams();
-        if (provider) params.append('provider', provider);
-        if (subProvider) params.append('subProvider', subProvider);
-        if (apiKey) params.append('apiKey', apiKey);
-        const res = await axios.get(`${this.baseUrl}/getProviderModels?${params.toString()}`);
-        return res.data;
-    }
-    // ── stateService HTTP API ──
-    async getStateSessions(agentId = 'jobSeekAgent') {
-        const res = await axios.get(`${this.baseUrl}/state/sessions/${agentId}`);
-        return res.data;
-    }
-    async setStateSavePath(savePath) {
-        const res = await axios.post(`${this.baseUrl}/state/app/set`, { path: 'savePath', value: savePath });
-        return res.data;
-    }
-    async getStateLanguage() {
-        const res = await axios.get(`${this.baseUrl}/state/app/language`);
-        return res.data;
-    }
-    async setStateLanguage(language) {
-        const res = await axios.post(`${this.baseUrl}/state/app/language`, { language });
-        return res.data;
-    }
+    async createWallets(params) { return this._proxy('post', 'createWallet', params); }
+    async updateWalletName(id, name) { return this._proxy('post', 'updateWalletName', { id, name }); }
+    async getAllWallets() { return this._proxy('get', 'getAllWallets'); }
+    async updateWallet(params) { return this._proxy('put', 'updateWallet', params); }
+    async openWallets(ids) { const r = await this._proxy('post', 'openWallets', { ids }); if (r?.success !== false) { eventEmitter.emit('taskExecuted'); eventEmitter.emit('taskStart', { taskName: 'openWallet', taskData: { envIds: ids } }); } return r; }
+    async deleteWallets(ids) { return this._proxy('delete', 'deleteWallets', { ids }); }
+    async exportWallets(ids, directory) { return this._proxy('post', 'exportWallets', { ids, directory }); }
+    async importWallets(filePath) { return this._proxy('post', 'importWallets', { filePath }); }
+    async initWallets(ids) { const r = await this._proxy('post', 'initWallets', { ids }); if (r?.success !== false) { eventEmitter.emit('taskExecuted'); eventEmitter.emit('taskStart', { taskName: 'initWallet', taskData: { envIds: ids } }); } return r; }
+    async importTask(taskObj) { return this._proxy('post', 'importTask', taskObj); }
+    async getAllTasks(defaultTask) { return this._proxy('get', 'getAllTasks?defaultTask=' + defaultTask); }
+    async getAgentTasks() { return this._proxy('get', 'getAgentTasks'); }
+    async execTask(taskName, taskData = null) { const enriched = this._withLanguage(taskData); return this._proxy('post', 'execTask', { taskName, taskData: enriched }); }
+    async getConfigInfo(taskName) { return this._proxy('post', 'getConfigInfo', { taskName }); }
+    async setConfigInfo(taskName, config) { return this._proxy('post', 'setConfigInfo', { taskName, config }); }
+    async getAgentSessions(agentName = 'job-seek') { return this._proxy('get', 'getAgentSessions/' + agentName); }
+    async listAiSessions(taskName) { return this._proxy('get', 'listAiSessions?taskName=' + taskName); }
+    async createAiSession(taskName, name = '') { return this._proxy('post', 'createAiSession', { taskName, name }); }
+    async deleteAiSession(taskName, sessionId) { return this._proxy('post', 'deleteAiSession', { taskName, sessionId }); }
+    async getAiSession(taskName, sessionId = '') { return this._proxy('get', 'getAiSession?taskName=' + taskName + '&sessionId=' + sessionId); }
+    async sendAiMessage(taskName, message, sessionId = '') { return this._proxy('post', 'sendAiMessage', { taskName, message, sessionId }); }
+    async sendAiOption(taskName, optionId, optionLabel = '', sessionId = '') { return this._proxy('post', 'sendAiOption', { taskName, optionId, optionLabel, sessionId }); }
+    async updateAiSubTask(taskName, subTaskKey, status, sessionId = '') { return this._proxy('post', 'updateAiSubTask', { taskName, subTaskKey, status, sessionId }); }
+    async deleteTask(taskNames) { return this._proxy('delete', 'deleteTask', { taskNames }); }
+    async setSavePath(path) { return this._proxy('post', 'setSavePath', { path }); }
+    async getSavePath() { return this._proxy('get', 'getSavePath'); }
+    async getWalletScriptDirectory() { return this._proxy('get', 'getWalletScriptDirectory'); }
+    async initTwitters(addresses) { return this._proxy('post', 'initTwitter', { addresses }); }
+    async checkWebSocket() { return this._proxy('get', 'checkWebSocket'); }
+    async checkReadiness() { return this._proxy('get', 'readiness'); }
+    async getTaskStatus(taskNames = []) { return this._proxy('post', 'getTaskStatus', { taskNames }); }
+    async checkProxy(params) { return this._proxy('post', 'checkProxy', params); }
+    async getFingerPrintCount() { return this._proxy('get', 'getFingerPrintCount'); }
+    async loadFingerPrints(filePath) { return this._proxy('post', 'loadFingerPrints', { filePath }); }
+    async generateFingerPrints(counts) { return this._proxy('post', 'generateFingerPrints', { counts }); }
+    async getFingerPrints() { return this._proxy('get', 'getFingerPrints'); }
+    async updateFingerPrintName(id, name) { return this._proxy('post', 'updateFingerPrintName', { id, name }); }
+    async clearFingerPrints() { return this._proxy('get', 'clearFingerPrints'); }
+    async updateFingerPrintProxy(id, proxy) { return this._proxy('post', 'updateFingerPrintProxy', { id, proxy }); }
+    async deleteFingerPrintProxy(id) { return this._proxy('post', 'deleteFingerPrintProxy', { id }); }
+    async setChromePath(path) { return this._proxy('post', 'setChromePath', { path }); }
+    async getChromePath() { return this._proxy('get', 'getChromePath'); }
+    async runInstaller() { return this._proxy('post', 'runInstaller'); }
+    async getInstallerPath() { return this._proxy('get', 'getInstallerPath'); }
+    async deleteFingerPrints(ids) { return this._proxy('post', 'deleteFingerPrints', { ids }); }
+    async openEnv(id, headless = true, useFingerprintChromium = false) { return this._proxy('post', 'openEnv', { id, headless, useFingerprintChromium }); }
+    async bindWalletEnv(walletId, envId) { return this._proxy('post', 'bindWalletEnv', { walletId, envId }); }
+    async setWalletScriptDirectory(directory) { return this._proxy('post', 'setWalletScriptDirectory', { directory }); }
+    async resetWalletScriptDirectory() { return this._proxy('post', 'resetWalletScriptDirectory'); }
+    async setSyncScriptDirectory(directory) { return this._proxy('post', 'setSyncScriptDirectory', { directory }); }
+    async getSyncScriptDirectory() { return this._proxy('get', 'getSyncScriptDirectory'); }
+    async resetSyncScriptDirectory() { return this._proxy('post', 'resetSyncScriptDirectory'); }
+    async getProviderModels(provider, subProvider, apiKey) { return this._proxy('get', 'getProviderModels?provider=' + provider + '&subProvider=' + subProvider + '&apiKey=' + apiKey); }
+    async getStateSessions(agentId = 'jobSeekAgent') { return this._proxy('get', 'state/sessions/' + agentId); }
+    async setStateSavePath(savePath) { return this._proxy('post', 'state/app/set', { path: 'savePath', value: savePath }); }
+    async getStateLanguage() { return this._proxy('get', 'state/app/language'); }
+    async setStateLanguage(language) { return this._proxy('post', 'state/app/language', { language }); }
+    async validateFingerprint(id) { return this._proxy('post', 'validateFingerprint', { id }); }
+    async getFingerprintAudit(id) { return this._proxy('get', 'fingerprintAudit/' + id); }
+    async getTLSConfig(browser = 'chrome', version = '120', platform = 'windows') { return this._proxy('get', 'tls/config?browser=' + browser + '&version=' + version + '&platform=' + platform); }
+    async getJA3Signature(browser = 'chrome', version = '120') { return this._proxy('get', 'tls/ja3?browser=' + browser + '&version=' + version); }
+    async checkMemoryHealth() { return this._proxy('get', 'memory/health'); }
+    async storeMemory(data) { return this._proxy('post', 'memory/store', data); }
+    async searchMemory(query) { return this._proxy('post', 'memory/search', query); }
+    async clearMemory() { return this._proxy('delete', 'memory/clear'); }
+    async checkToolsHealth() { return this._proxy('get', 'tools/health'); }
+    async listTools() { return this._proxy('get', 'tools/list'); }
+    async executeTool(name, params) { return this._proxy('post', 'tools/execute', { name, params }); }
 }
 export default APIManager;
